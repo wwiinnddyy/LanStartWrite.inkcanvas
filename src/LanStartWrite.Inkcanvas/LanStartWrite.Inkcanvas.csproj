@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- 机器上若设置了环境变量 Version（如 Ice/构建链的 V7.xx），会污染 NuGet 还原；此处显式锁定合法 SemVer。 -->
+    <Version>1.0.0</Version>
+    <Nullable>enable</Nullable>
+    <OutputType>WinExe</OutputType>
+    <LangVersion>preview</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RestoreEnablePackagePruning>false</RestoreEnablePackagePruning>
+
+    <DebugType Condition="'$(Configuration)' == 'Debug'">portable</DebugType>
+    <DebugSymbols Condition="'$(Configuration)' == 'Debug'">true</DebugSymbols>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+    <DebugSymbols Condition="'$(Configuration)' == 'Release'">false</DebugSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jalium.UI" Version="26.10.2" />
+  </ItemGroup>
+
+  <!-- 不嵌入本窗口的 .uic：避免 LoadFromCompiledResource 路线丢失 x:Name（MouseToolToggle 等为 null）。强制走 XamlReader + 嵌入的 .jalxaml。 -->
+  <Target Name="InkcanvasAnnotationToolbarSkipUicEmbed" AfterTargets="EmbedCompiledJalxaml">
+    <ItemGroup>
+      <EmbeddedResource Remove="@(EmbeddedResource)"
+                        Condition="$([System.String]::Copy('%(LogicalName)').EndsWith('AnnotationToolbarWindow.uic'))" />
+    </ItemGroup>
+  </Target>
+
+</Project>

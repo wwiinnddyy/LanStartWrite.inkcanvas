@@ -1,0 +1,44 @@
+<Window xmlns="http://schemas.jalium.ui/2024"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LanStartWrite.Inkcanvas.AnnotationToolbarWindow"
+        Title=""
+        Width="460"
+        Height="96"
+        WindowStartupLocation="Manual"
+        Left="120"
+        Top="120"
+        Topmost="True"
+        ShowInTaskbar="True"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        IsShowTitleBar="False"
+        IsShowMinimizeButton="False"
+        IsShowMaximizeButton="False"
+        IsShowCloseButton="False"
+        HasSystemMenu="False"
+        Background="#1E1E1E">
+    <Border Margin="12" Padding="12,10" CornerRadius="10" Background="#2D2D2D">
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <AppBarToggleButton x:Name="MouseToolToggle" IsCompact="True" Label="鼠标" Margin="2,0" />
+            <AppBarToggleButton x:Name="PenToolToggle" IsCompact="True" Label="笔" Margin="2,0" />
+            <AppBarToggleButton x:Name="EraseToolToggle" IsCompact="True" Label="橡皮" Margin="2,0" />
+
+            <Border Width="1" Height="30" Margin="10,0" Background="#484848"/>
+
+            <AppBarButton x:Name="SettingsToolbarButton"
+                          IsCompact="True"
+                          Label="设置"
+                          Margin="2,0"
+                          Click="SettingsToolbarButton_OnClick" />
+
+            <Border Width="1" Height="30" Margin="10,0" Background="#484848"/>
+
+            <!-- 拖动抓手：Preview* 在子 SymbolIcon 之前到达 Border，才能可靠触发 DragMove -->
+            <Border x:Name="DragHandleChrome"
+                    Background="#3A3A3C"
+                    CornerRadius="6"
+                    Padding="8,6"
+                    Margin="6,0,0,0"/>
+        </StackPanel>
+    </Border>
+</Window>

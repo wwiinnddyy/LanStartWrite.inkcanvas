@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Version>1.0.0</Version>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="FluentIcons.Common" Version="2.1.325" />
+    <PackageReference Include="FluentIcons.WinUI" Version="2.1.325" />
+    <PackageReference Include="FluentIcons.Wpf" Version="2.1.325" />
+  </ItemGroup>
+</Project>
