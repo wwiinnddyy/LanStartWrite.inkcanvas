@@ -22,11 +22,15 @@
     <PackageReference Include="Jalium.UI" Version="26.10.2" />
   </ItemGroup>
 
-  <!-- 不嵌入本窗口的 .uic：避免 LoadFromCompiledResource 路线丢失 x:Name（MouseToolToggle 等为 null）。强制走 XamlReader + 嵌入的 .jalxaml。 -->
+  <!-- 不嵌入 .uic：避免 LoadFromCompiledResource 路线丢失 x:Name。强制走 XamlReader + 嵌入的 .jalxaml。 -->
   <Target Name="InkcanvasAnnotationToolbarSkipUicEmbed" AfterTargets="EmbedCompiledJalxaml">
     <ItemGroup>
       <EmbeddedResource Remove="@(EmbeddedResource)"
                         Condition="$([System.String]::Copy('%(LogicalName)').EndsWith('AnnotationToolbarWindow.uic'))" />
+      <EmbeddedResource Remove="@(EmbeddedResource)"
+                        Condition="$([System.String]::Copy('%(LogicalName)').EndsWith('AnnotationOverlayWindow.uic'))" />
+      <EmbeddedResource Remove="@(EmbeddedResource)"
+                        Condition="$([System.String]::Copy('%(LogicalName)').EndsWith('SettingsWindow.uic'))" />
     </ItemGroup>
   </Target>
 

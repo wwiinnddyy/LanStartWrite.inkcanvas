@@ -2,8 +2,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="LanStartWrite.Inkcanvas.AnnotationToolbarWindow"
         Title=""
-        Width="460"
-        Height="96"
+        Width="300"
+        Height="88"
+        SizeToContent="Manual"
         WindowStartupLocation="Manual"
         Left="120"
         Top="120"
@@ -16,29 +17,95 @@
         IsShowMaximizeButton="False"
         IsShowCloseButton="False"
         HasSystemMenu="False"
-        Background="#1E1E1E">
-    <Border Margin="12" Padding="12,10" CornerRadius="10" Background="#2D2D2D">
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-            <AppBarToggleButton x:Name="MouseToolToggle" IsCompact="True" Label="鼠标" Margin="2,0" />
-            <AppBarToggleButton x:Name="PenToolToggle" IsCompact="True" Label="笔" Margin="2,0" />
-            <AppBarToggleButton x:Name="EraseToolToggle" IsCompact="True" Label="橡皮" Margin="2,0" />
+        AllowsTransparency="True"
+        SystemBackdrop="None"
+        Background="Transparent"
+        Foreground="#242424"
+        Opacity="1">
+    <!--
+      Jalium Themes\Controls\Windows.jalxaml 隐式样式把 Window.Foreground 设为 TextPrimary；
+      暗色主题下 TextPrimary 为白。无模板的 primitives:ToggleButton 子树会继承该前景，SymbolIcon glyph 变白。
+      此处显式 Foreground 覆盖；工具键用带完整 ControlTemplate 的 AppBar*（MenusToolbars.jalxaml）。
+    -->
+    <Grid HorizontalAlignment="Center"
+          VerticalAlignment="Top"
+          Background="Transparent">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="8" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
 
-            <Border Width="1" Height="30" Margin="10,0" Background="#484848"/>
+        <Border Grid.Column="0"
+                Height="56"
+                Margin="6"
+                CornerRadius="12"
+                Background="#FFFFFF"
+                BorderBrush="#E8E8E8"
+                BorderThickness="1"
+                Padding="8,4,8,4"
+                ClipToBounds="True">
+            <StackPanel Orientation="Horizontal"
+                        VerticalAlignment="Center"
+                        Background="Transparent">
+                    <AppBarToggleButton x:Name="MouseToolToggle"
+                                        IsCompact="True"
+                                        LabelPosition="Collapsed"
+                                        Label="鼠标"
+                                        CornerRadius="8"
+                                        Width="40"
+                                        Height="40"
+                                        Margin="0,0,2,0"
+                                        Background="Transparent"
+                                        Foreground="#242424" />
+                    <AppBarToggleButton x:Name="PenToolToggle"
+                                        IsCompact="True"
+                                        LabelPosition="Collapsed"
+                                        Label="笔"
+                                        CornerRadius="8"
+                                        Width="40"
+                                        Height="40"
+                                        Margin="2,0"
+                                        Background="Transparent"
+                                        Foreground="#242424" />
+                    <AppBarToggleButton x:Name="EraseToolToggle"
+                                        IsCompact="True"
+                                        LabelPosition="Collapsed"
+                                        Label="橡皮"
+                                        CornerRadius="8"
+                                        Width="40"
+                                        Height="40"
+                                        Margin="2,0"
+                                        Background="Transparent"
+                                        Foreground="#242424" />
 
-            <AppBarButton x:Name="SettingsToolbarButton"
-                          IsCompact="True"
-                          Label="设置"
-                          Margin="2,0"
-                          Click="SettingsToolbarButton_OnClick" />
+                    <Border Width="1" Height="26" Margin="8,0" Background="#E6E6E6" VerticalAlignment="Center" />
 
-            <Border Width="1" Height="30" Margin="10,0" Background="#484848"/>
+                    <AppBarButton x:Name="SettingsToolbarButton"
+                                  IsCompact="True"
+                                  LabelPosition="Collapsed"
+                                  Label="设置"
+                                  CornerRadius="8"
+                                  Width="40"
+                                  Height="40"
+                                  Margin="2,0"
+                                  Background="Transparent"
+                                  Foreground="#242424"
+                                  Click="SettingsToolbarButton_OnClick" />
+            </StackPanel>
+        </Border>
 
-            <!-- 拖动抓手：Preview* 在子 SymbolIcon 之前到达 Border，才能可靠触发 DragMove -->
-            <Border x:Name="DragHandleChrome"
-                    Background="#3A3A3C"
-                    CornerRadius="6"
-                    Padding="8,6"
-                    Margin="6,0,0,0"/>
-        </StackPanel>
-    </Border>
+        <Border x:Name="DragHandleChrome"
+                Grid.Column="2"
+                Height="56"
+                Width="40"
+                Margin="6,6,6,6"
+                CornerRadius="12"
+                Background="#FFFFFF"
+                BorderBrush="#E8E8E8"
+                BorderThickness="1"
+                Padding="0,6"
+                ClipToBounds="True"
+                VerticalAlignment="Top" />
+    </Grid>
 </Window>

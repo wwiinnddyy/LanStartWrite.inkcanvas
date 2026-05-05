@@ -1,0 +1,22 @@
+<Window xmlns="http://schemas.jalium.ui/2024"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LanStartWrite.Inkcanvas.AnnotationOverlayWindow"
+        Title=""
+        WindowState="Maximized"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        IsShowTitleBar="False"
+        IsShowMinimizeButton="False"
+        IsShowMaximizeButton="False"
+        IsShowCloseButton="False"
+        HasSystemMenu="False"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        Topmost="False"
+        AllowsTransparency="True"
+        SystemBackdrop="None"
+        ResizeMode="NoResize">
+    <InkCanvas x:Name="OverlayInk"
+               HorizontalAlignment="Stretch"
+               VerticalAlignment="Stretch"/>
+</Window>

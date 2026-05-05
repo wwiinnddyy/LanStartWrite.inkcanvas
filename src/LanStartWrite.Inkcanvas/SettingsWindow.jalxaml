@@ -1,0 +1,256 @@
+<Window xmlns="http://schemas.jalium.ui/2024"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LanStartWrite.Inkcanvas.SettingsWindow"
+        Title="设置"
+        Width="520"
+        Height="620"
+        MinWidth="420"
+        MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        ShowInTaskbar="False">
+    <DockPanel LastChildFill="True" Background="{ThemeResource WindowBackground}">
+        <!-- 顶栏：Gallery 式大标题 + 副标题 -->
+        <Border DockPanel.Dock="Top"
+                Padding="24,20,24,18"
+                BorderBrush="#15000000"
+                BorderThickness="0,0,0,1"
+                Background="{ThemeResource WindowBackground}">
+            <Grid ColumnSpacing="14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0"
+                        Width="44"
+                        Height="44"
+                        CornerRadius="10"
+                        Background="#180078D4"
+                        VerticalAlignment="Top">
+                    <SymbolIcon x:Name="HeroSettingsIcon"
+                                Symbol="Settings"
+                                Width="24"
+                                Height="24"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="设置"
+                               FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextPrimary}" />
+                    <TextBlock Text="批注栏、墨迹与显示选项（参考 Jalium Gallery 的信息密度与分区）"
+                               FontSize="12"
+                               Margin="0,6,0,0"
+                               TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextSecondary}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Padding="0,4,0,0">
+            <StackPanel Margin="24,8,24,28">
+                <!-- 外观 -->
+                <Border CornerRadius="12"
+                        BorderBrush="#18000000"
+                        BorderThickness="1"
+                        Padding="16,14"
+                        Background="{ThemeResource SurfaceBackground}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <SymbolIcon x:Name="SectionThemeIcon" Symbol="Palette" Width="20" Height="20" VerticalAlignment="Center" />
+                            <TextBlock Text="外观"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextPrimary}" />
+                        </StackPanel>
+                        <Grid ColumnSpacing="12" RowSpacing="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Row="0" Grid.Column="0">
+                                <TextBlock Text="高对比度强调色"
+                                           Foreground="{ThemeResource TextPrimary}" />
+                                <TextBlock Text="用于选中态与开关（占位，后续可接主题服务）"
+                                           FontSize="11"
+                                           Margin="0,4,0,0"
+                                           Foreground="{ThemeResource TextSecondary}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <CheckBox x:Name="AccentContrastCheck"
+                                      Grid.Row="0"
+                                      Grid.Column="1"
+                                      VerticalAlignment="Center"
+                                      Margin="8,0,0,0" />
+                            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,4,0,0">
+                                <SymbolIcon x:Name="HintThemeIcon" Symbol="Theme" Width="16" Height="16" VerticalAlignment="Center" Opacity="0.75" />
+                                <TextBlock Text="应用当前使用 ResourceDictionary.CurrentThemeKey 的全局浅色资源。"
+                                           FontSize="11"
+                                           Margin="8,0,0,0"
+                                           TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextSecondary}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- 墨迹 -->
+                <Border Margin="0,14,0,0"
+                        CornerRadius="12"
+                        BorderBrush="#18000000"
+                        BorderThickness="1"
+                        Padding="16,14"
+                        Background="{ThemeResource SurfaceBackground}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <SymbolIcon x:Name="SectionInkIcon" Symbol="InkingTool" Width="20" Height="20" VerticalAlignment="Center" />
+                            <TextBlock Text="墨迹"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextPrimary}" />
+                        </StackPanel>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="默认笔划粗细"
+                                           Foreground="{ThemeResource TextPrimary}" />
+                                <Slider x:Name="PenWidthSlider"
+                                        Minimum="1"
+                                        Maximum="24"
+                                        Value="4"
+                                        Margin="0,10,0,0"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True" />
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <SymbolIcon x:Name="PenHintIcon" Symbol="NewFile" Width="14" Height="14" VerticalAlignment="Center" Opacity="0.7" />
+                                    <TextBlock x:Name="PenWidthValueText"
+                                               Text="4 px"
+                                               FontSize="11"
+                                               Margin="6,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{ThemeResource TextSecondary}" />
+                                </StackPanel>
+                            </StackPanel>
+                            <Border Grid.Column="1"
+                                    Width="40"
+                                    Height="40"
+                                    CornerRadius="8"
+                                    BorderBrush="#28000000"
+                                    BorderThickness="1"
+                                    VerticalAlignment="Top"
+                                    Margin="0,22,0,0">
+                                <SymbolIcon x:Name="StrokePreviewIcon" Symbol="InkingTool" Width="22" Height="22" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- 画布与交互 -->
+                <Border Margin="0,14,0,0"
+                        CornerRadius="12"
+                        BorderBrush="#18000000"
+                        BorderThickness="1"
+                        Padding="16,14"
+                        Background="{ThemeResource SurfaceBackground}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <SymbolIcon x:Name="SectionCanvasIcon" Symbol="TouchPointer" Width="20" Height="20" VerticalAlignment="Center" />
+                            <TextBlock Text="画布与交互"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{ThemeResource TextPrimary}" />
+                        </StackPanel>
+                        <Grid ColumnSpacing="12" RowSpacing="12">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Row="0" Grid.Column="0">
+                                <TextBlock Text="打开画布后保持批注栏在最前"
+                                           Foreground="{ThemeResource TextPrimary}" />
+                                <TextBlock Text="与工具栏「置顶」逻辑一致，后续可写入配置"
+                                           FontSize="11"
+                                           Margin="0,4,0,0"
+                                           Foreground="{ThemeResource TextSecondary}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <CheckBox x:Name="KeepToolbarOnTopCheck"
+                                      Grid.Row="0"
+                                      Grid.Column="1"
+                                      IsChecked="True"
+                                      VerticalAlignment="Center"
+                                      Margin="8,0,0,0" />
+                            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal">
+                                <SymbolIcon x:Name="EraseHintIcon" Symbol="EraseTool" Width="16" Height="16" VerticalAlignment="Center" />
+                                <TextBlock Text="橡皮仅在墨迹层已打开时生效（当前产品行为）"
+                                           FontSize="11"
+                                           Margin="8,0,0,0"
+                                           TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextSecondary}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- 关于 -->
+                <Border Margin="0,14,0,0"
+                        CornerRadius="12"
+                        BorderBrush="#18000000"
+                        BorderThickness="1"
+                        Padding="16,14"
+                        Background="{ThemeResource SurfaceBackground}">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <SymbolIcon x:Name="AboutInfoIcon" Symbol="Info" Width="22" Height="22" VerticalAlignment="Top" Margin="0,2,0,0" />
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="关于 揽星书写"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextPrimary}" />
+                            <TextBlock x:Name="AboutVersionText"
+                                       Text="版本 1.0.0"
+                                       Margin="0,8,0,0"
+                                       Foreground="{ThemeResource TextSecondary}" />
+                            <TextBlock Text="基于 Jalium.UI 与 InkCanvas。"
+                                       FontSize="11"
+                                       Margin="0,6,0,0"
+                                       TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextSecondary}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <SymbolIcon x:Name="LinkExplorerIcon" Symbol="OpenFolder" Width="16" Height="16" VerticalAlignment="Center" />
+                                <TextBlock Text="项目仓库与文档链接可在后续版本接入。"
+                                           FontSize="11"
+                                           Margin="8,0,0,0"
+                                           TextWrapping="Wrap"
+                                           Foreground="{ThemeResource TextSecondary}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

@@ -13,6 +13,9 @@ internal static class Program
         var renderContext = RenderContext.GetOrCreateCurrent(RenderBackend.Auto);
         renderContext.DefaultRenderingEngine = RenderingEngine.Impeller;
 
+        // 全局主题键（静态）：暗色下 TextPrimary 为白，与浅色圆角批注栏不协调。
+        ResourceDictionary.CurrentThemeKey = "Light";
+
         var app = new Application();
         var window = new AnnotationToolbarWindow();
         app.MainWindow = window;
