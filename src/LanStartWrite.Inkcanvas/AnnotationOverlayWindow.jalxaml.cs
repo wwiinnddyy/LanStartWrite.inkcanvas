@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Reflection;
 using Jalium.UI;
 using Jalium.UI.Controls;
 using Jalium.UI.Controls.Ink;
@@ -14,6 +15,14 @@ public partial class AnnotationOverlayWindow : Window
     private bool _isRebuildingStroke;
     private PenKind _currentKind = PenKind.Pen;
     private readonly List<DispatcherTimer> _laserFadeTimers = [];
+    private readonly InkInputMetrics _metrics = new();
+    private int _lastPointerId = -1;
+    private StylusPointCollection? _lastRealtimePoints;
+    private PointerDeviceType _lastPointerDeviceType = PointerDeviceType.Mouse;
+
+    private static readonly MethodInfo[] RealtimeFeedMethods =
+        typeof(InkCanvas)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
     private static readonly Brush TransparentBrush =
         new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
@@ -35,9 +44,12 @@ public partial class AnnotationOverlayWindow : Window
 
         ApplyDefaultDrawingAttributes();
         Surface.StrokeCollected += Surface_OnStrokeCollected_EnforceSmoothAttributes;
+        Surface.PreviewPointerMove += Surface_OnPreviewPointerMove_RealtimeSampling;
         Surface.EditingMode = InkCanvasEditingMode.Ink;
 
         Closed += (_, _) => CancelLaserFadeTimers();
+        InkRuntimeOptions.Changed += OnInkRuntimeOptionsChanged;
+        ApplyRuntimeOptions(InkRuntimeOptions.Current);
 
 #if DEBUG
         Surface.PreviewPointerMove += Surface_OnPreviewPointerMove_InkDiag;
@@ -65,7 +77,7 @@ public partial class AnnotationOverlayWindow : Window
         da.StylusTip = StylusTip.Ellipse;
         da.FitToCurve = true;
         da.BrushType = BrushType.Round;
-        da.IgnorePressure = true;
+        da.IgnorePressure = !InkRuntimeOptions.Current.EnablePressure;
         da.IsHighlighter = false;
         SyncDynamicRendererAttributes(da);
     }
@@ -91,16 +103,23 @@ public partial class AnnotationOverlayWindow : Window
         var da = stroke.DrawingAttributes;
         da.StylusTip = StylusTip.Ellipse;
         da.FitToCurve = true;
-        da.IgnorePressure = true;
+        da.IgnorePressure = !InkRuntimeOptions.Current.EnablePressure;
         ApplyBrushTypeAndHighlighterForCurrentKind(da);
-
-        var activeStroke = TryRebuildSparseStroke(stroke) ?? stroke;
+        var runtime = InkRuntimeOptions.Current;
+        var activeStroke = runtime.EnableLegacyPostProcessFallback
+            ? TryRebuildSparseStroke(stroke, runtime, _lastPointerDeviceType) ?? stroke
+            : stroke;
+        _metrics.OnStrokeCommitted(activeStroke.StylusPoints.Count);
+        _metrics.EmitIfNeeded();
 
         if (_currentKind == PenKind.Laser)
             BeginLaserFade(activeStroke);
     }
 
-    private Stroke? TryRebuildSparseStroke(Stroke stroke)
+    private Stroke? TryRebuildSparseStroke(
+        Stroke stroke,
+        InkRuntimeSnapshot runtime,
+        PointerDeviceType deviceType)
     {
         if (_isRebuildingStroke)
             return null;
@@ -109,7 +128,7 @@ public partial class AnnotationOverlayWindow : Window
         if (source.Count < 3)
             return null;
 
-        var dense = BuildDensifiedPoints(source, minSegmentLength: 0.75);
+        var dense = BuildDensifiedPoints(source, runtime, deviceType);
         if (dense is null || dense.Count <= source.Count)
             return null;
 
@@ -127,6 +146,7 @@ public partial class AnnotationOverlayWindow : Window
         {
             _isRebuildingStroke = true;
             strokes[index] = replacement;
+            _metrics.RebuiltStrokeCount++;
             return replacement;
         }
         finally
@@ -206,6 +226,7 @@ public partial class AnnotationOverlayWindow : Window
         foreach (var t in _laserFadeTimers)
             t.Stop();
         _laserFadeTimers.Clear();
+        InkRuntimeOptions.Changed -= OnInkRuntimeOptionsChanged;
     }
 
     public void SetPenKind(PenKind kind)
@@ -236,11 +257,13 @@ public partial class AnnotationOverlayWindow : Window
 
     private static StylusPointCollection? BuildDensifiedPoints(
         StylusPointCollection source,
-        double minSegmentLength)
+        InkRuntimeSnapshot runtime,
+        PointerDeviceType deviceType)
     {
         if (source.Count < 2)
             return null;
 
+        var minSegmentLength = GetMinSegmentLength(runtime, deviceType);
         var dense = new StylusPointCollection();
         dense.Add(source[0]);
 
@@ -296,5 +319,171 @@ public partial class AnnotationOverlayWindow : Window
         var previewDa = Surface.DynamicRenderer.DrawingAttributes;
         previewDa.Width = t;
         previewDa.Height = t;
+    }
+
+    private void Surface_OnPreviewPointerMove_RealtimeSampling(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not InkCanvas canvas || e is not PointerMoveEventArgs p)
+            return;
+
+        var runtime = InkRuntimeOptions.Current;
+        var inter = p.GetIntermediatePoints(canvas);
+        if (inter.Count == 0)
+            return;
+
+        _metrics.OnIntermediatePoints(inter.Count);
+        if (runtime.EnableTilt)
+            _metrics.OnTiltSample(TryReadTiltMagnitude(p, canvas));
+        if (!runtime.EnableRealtimeSampling || Surface.EditingMode != InkCanvasEditingMode.Ink)
+            return;
+
+        var points = new StylusPointCollection();
+        foreach (var item in inter)
+            points.Add(new StylusPoint(item.Position.X, item.Position.Y));
+
+        var pointerId = p.Pointer.GetHashCode();
+        _lastPointerDeviceType = p.Pointer.PointerDeviceType;
+        if (pointerId != _lastPointerId)
+        {
+            _lastPointerId = pointerId;
+            _lastRealtimePoints = null;
+        }
+
+        if (_lastRealtimePoints is not null && points.Count > 0)
+        {
+            var first = points[0];
+            var prev = _lastRealtimePoints[^1];
+            if (Math.Abs(prev.X - first.X) < 0.001 && Math.Abs(prev.Y - first.Y) < 0.001)
+                points.RemoveAt(0);
+        }
+
+        if (points.Count == 0)
+            return;
+
+        _lastRealtimePoints = points;
+        TryFeedRealtimePoints(points);
+    }
+
+    private void TryFeedRealtimePoints(StylusPointCollection points)
+    {
+        // 优先探测 Jalium InkCanvas 可用的实时喂点入口；若当前版本未公开对应 API，保持兼容降级。
+        foreach (var m in RealtimeFeedMethods)
+        {
+            if (m.Name is not ("AddPoints" or "AppendPoints" or "FeedPoints" or "UpdateDrawing"))
+                continue;
+
+            var ps = m.GetParameters();
+            if (ps.Length == 1 && ps[0].ParameterType.IsAssignableFrom(typeof(StylusPointCollection)))
+            {
+                try
+                {
+                    m.Invoke(Surface, [points]);
+                }
+                catch
+                {
+                    // ignore and continue fallback
+                }
+
+                return;
+            }
+        }
+    }
+
+    private static double GetMinSegmentLength(
+        InkRuntimeSnapshot runtime,
+        PointerDeviceType deviceType)
+    {
+        var baseLength = runtime.SmoothingLevel switch
+        {
+            InkSmoothingLevel.Low => Math.Max(0.95, runtime.MinPointDistance * 1.35),
+            InkSmoothingLevel.High => Math.Max(0.45, runtime.MinPointDistance * 0.75),
+            _ => Math.Max(0.65, runtime.MinPointDistance),
+        };
+
+        return deviceType switch
+        {
+            PointerDeviceType.Pen => baseLength * 0.9,
+            PointerDeviceType.Touch => baseLength * 1.1,
+            _ => baseLength,
+        };
+    }
+
+    private void OnInkRuntimeOptionsChanged(InkRuntimeSnapshot snapshot)
+    {
+        Dispatcher.BeginInvoke(() => ApplyRuntimeOptions(snapshot));
+    }
+
+    private void ApplyRuntimeOptions(InkRuntimeSnapshot snapshot)
+    {
+        InkCanvasTuning.ApplyRuntimeMinPointDistance(snapshot.MinPointDistance, Surface);
+        var da = Surface.DefaultDrawingAttributes;
+        da.IgnorePressure = !snapshot.EnablePressure;
+        da.FitToCurve = snapshot.SmoothingLevel != InkSmoothingLevel.Low;
+        SyncDynamicRendererAttributes(da);
+    }
+
+    private static double TryReadTiltMagnitude(PointerMoveEventArgs p, InkCanvas canvas)
+    {
+        try
+        {
+            var point = p.GetCurrentPoint(canvas);
+            var props = point.Properties;
+            var t = props.GetType();
+            var x = t.GetProperty("XTilt")?.GetValue(props) as double?;
+            var y = t.GetProperty("YTilt")?.GetValue(props) as double?;
+            if (x is null || y is null)
+                return 0;
+            return Math.Sqrt((x.Value * x.Value) + (y.Value * y.Value));
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private sealed class InkInputMetrics
+    {
+        private readonly Stopwatch _watch = Stopwatch.StartNew();
+        private int _strokeCount;
+        private int _strokePointCount;
+        private int _intermediatePoints;
+        private int _tiltSamples;
+        private double _tiltSum;
+
+        internal int RebuiltStrokeCount { get; set; }
+
+        internal void OnIntermediatePoints(int count) => _intermediatePoints += count;
+
+        internal void OnStrokeCommitted(int strokePointCount)
+        {
+            _strokeCount++;
+            _strokePointCount += strokePointCount;
+        }
+
+        internal void OnTiltSample(double tiltMagnitude)
+        {
+            if (tiltMagnitude <= 0)
+                return;
+            _tiltSamples++;
+            _tiltSum += tiltMagnitude;
+        }
+
+        internal void EmitIfNeeded()
+        {
+            if (_watch.Elapsed < TimeSpan.FromSeconds(3))
+                return;
+
+            var avgStrokePoints = _strokeCount == 0 ? 0 : _strokePointCount / (double)_strokeCount;
+            var avgTilt = _tiltSamples == 0 ? 0 : _tiltSum / _tiltSamples;
+            Debug.WriteLine(
+                $"[ink-metrics] strokes={_strokeCount} avgPoints={avgStrokePoints:F1} inter={_intermediatePoints} rebuilt={RebuiltStrokeCount} avgTilt={avgTilt:F2}");
+            _watch.Restart();
+            _strokeCount = 0;
+            _strokePointCount = 0;
+            _intermediatePoints = 0;
+            _tiltSamples = 0;
+            _tiltSum = 0;
+            RebuiltStrokeCount = 0;
+        }
     }
 }

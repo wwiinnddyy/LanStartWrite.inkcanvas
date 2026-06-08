@@ -310,7 +310,10 @@ public partial class AnnotationToolbarWindow : Window
         Topmost = false;
         if (_penMenuWindow is not null)
             _penMenuWindow.Topmost = false;
-        _annotationOverlay?.Hide();
+        HidePenSecondaryMenu();
+        // 设置页期间彻底关闭全屏透明画布，避免透明窗口/置顶状态拦截输入。
+        DisposeAnnotationOverlay();
+        _annotationOverlayVisible = false;
 
         w.Closed += (_, _) =>
         {

@@ -44,4 +44,23 @@ internal static class InkCanvasTuning
             Debug.WriteLine($"[InkCanvasTuning] MinPointDistance not set: {ex.Message}");
         }
     }
+
+    internal static void ApplyRuntimeMinPointDistance(double minPointDistance, InkCanvas? canvas = null)
+    {
+        var f = MinPointDistanceField;
+        if (f is null || f.IsInitOnly)
+            return;
+
+        try
+        {
+            if (f.IsStatic)
+                f.SetValue(null, minPointDistance);
+            else if (canvas is not null)
+                f.SetValue(canvas, minPointDistance);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[InkCanvasTuning] runtime MinPointDistance not set: {ex.Message}");
+        }
+    }
 }
