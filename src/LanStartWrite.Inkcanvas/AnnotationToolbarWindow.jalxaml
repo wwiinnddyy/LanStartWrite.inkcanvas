@@ -2,111 +2,108 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:LanStartWrite.Inkcanvas"
         x:Class="LanStartWrite.Inkcanvas.AnnotationToolbarWindow"
-        Title=""
-        Width="300"
-        Height="88"
+        Title="揽星书写"
         SizeToContent="Manual"
         WindowStartupLocation="Manual"
-        Left="120"
-        Top="120"
         Topmost="True"
         ShowInTaskbar="True"
         ResizeMode="NoResize"
         WindowStyle="None"
         IsShowTitleBar="False"
-        IsShowMinimizeButton="False"
-        IsShowMaximizeButton="False"
-        IsShowCloseButton="False"
-        HasSystemMenu="False"
         AllowsTransparency="True"
         SystemBackdrop="None"
         Background="Transparent"
-        Foreground="#242424"
-        Opacity="1">
-    <!--
-      Jalium Themes\Controls\Windows.jalxaml 隐式样式把 Window.Foreground 设为 TextPrimary；
-      暗色主题下 TextPrimary 为白。无模板的 primitives:ToggleButton 子树会继承该前景，SymbolIcon glyph 变白。
-      此处显式 Foreground 覆盖；工具键用带完整 ControlTemplate 的 AppBar*（MenusToolbars.jalxaml）。
-    -->
+        Opacity="1"
+        Left="120"
+        Top="120"
+        Width="300"
+        Height="88">
+
+    <!-- 浮动 CommandBar：透明宿主 + 高 56 圆角 8 白色实体（WinUI3 OverlayCornerRadius） -->
     <Grid HorizontalAlignment="Center"
           VerticalAlignment="Top"
           Background="Transparent">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="8" />
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0"
                 Height="56"
                 Margin="6"
-                CornerRadius="12"
-                Background="#FFFFFF"
-                BorderBrush="#E8E8E8"
+                Background="{StaticResource ToolbarSurfaceBrush}"
+                BorderBrush="{StaticResource ControlStrokeColorDefaultBrush}"
                 BorderThickness="1"
-                Padding="8,4,8,4"
-                ClipToBounds="True">
+                CornerRadius="{StaticResource OverlayCornerRadius}"
+                ClipToBounds="True"
+                Padding="8,7">
             <StackPanel Orientation="Horizontal"
                         VerticalAlignment="Center"
                         Background="Transparent">
-                    <local:RadioToolToggleButton x:Name="MouseToolToggle"
-                                                 IsCompact="True"
-                                                 LabelPosition="Collapsed"
-                                                 Label="鼠标"
-                                                 CornerRadius="8"
-                                                 Width="40"
-                                                 Height="40"
-                                                 Margin="0,0,2,0"
-                                                 Background="Transparent"
-                                                 Foreground="#242424" />
-                    <local:RadioToolToggleButton x:Name="PenToolToggle"
-                                                 IsCompact="True"
-                                                 LabelPosition="Collapsed"
-                                                 Label="笔"
-                                                 CornerRadius="8"
-                                                 Width="40"
-                                                 Height="40"
-                                                 Margin="2,0"
-                                                 Background="Transparent"
-                                                 Foreground="#242424" />
-                    <local:RadioToolToggleButton x:Name="EraseToolToggle"
-                                                 IsCompact="True"
-                                                 LabelPosition="Collapsed"
-                                                 Label="橡皮"
-                                                 CornerRadius="8"
-                                                 Width="40"
-                                                 Height="40"
-                                                 Margin="2,0"
-                                                 Background="Transparent"
-                                                 Foreground="#242424" />
+                <local:RadioToolToggleButton x:Name="MouseToolToggle"
+                                             IsCompact="True"
+                                             Label="鼠标"
+                                             Margin="2,0" />
+                <local:RadioToolToggleButton x:Name="PenToolToggle"
+                                             IsCompact="True"
+                                             Label="笔"
+                                             Margin="2,0" />
+                <local:RadioToolToggleButton x:Name="EraseToolToggle"
+                                             IsCompact="True"
+                                             Label="橡皮"
+                                             Margin="2,0" />
 
-                    <Border Width="1" Height="26" Margin="8,0" Background="#E6E6E6" VerticalAlignment="Center" />
+                <Border Width="1"
+                        Height="26"
+                        Margin="{StaticResource CommandBarSeparatorMargin}"
+                        Background="{StaticResource DividerStrokeColorDefaultBrush}"
+                        VerticalAlignment="Center" />
 
-                    <AppBarButton x:Name="SettingsToolbarButton"
-                                  IsCompact="True"
-                                  LabelPosition="Collapsed"
-                                  Label="设置"
-                                  CornerRadius="8"
-                                  Width="40"
-                                  Height="40"
-                                  Margin="2,0"
-                                  Background="Transparent"
-                                  Foreground="#242424"
-                                  Click="SettingsToolbarButton_OnClick" />
+                <AppBarButton x:Name="SettingsToolbarButton"
+                              IsCompact="True"
+                              Label="设置"
+                              Margin="2,0"
+                              Click="SettingsToolbarButton_OnClick" />
             </StackPanel>
         </Border>
 
+        <!--
+          拖动把手直接由 Border 承担命中，不再在里面套 Button。
+          Button 会在按下时先获取鼠标捕获，和 Window.DragMove 的原生拖窗流程冲突，
+          表现为按住把手却无法移动窗口。
+        -->
         <Border x:Name="DragHandleChrome"
-                Grid.Column="2"
+                Grid.Column="1"
                 Height="56"
                 Width="40"
                 Margin="6,6,6,6"
-                CornerRadius="12"
-                Background="#FFFFFF"
-                BorderBrush="#E8E8E8"
+                CornerRadius="{StaticResource OverlayCornerRadius}"
+                Background="{StaticResource ToolbarSurfaceBrush}"
+                BorderBrush="{StaticResource ControlStrokeColorDefaultBrush}"
                 BorderThickness="1"
-                Padding="0,6"
                 ClipToBounds="True"
-                VerticalAlignment="Top" />
+                VerticalAlignment="Top"
+                IsHitTestVisible="True">
+            <!-- 自绘双竖线，避免图标字体自身留白导致视觉中心偏移。 -->
+            <Grid Width="8"
+                  Height="16"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  Background="Transparent"
+                  IsHitTestVisible="False">
+                <Border Width="1"
+                        Height="16"
+                        Margin="2,0,0,0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Background="{StaticResource TextFillColorPrimaryBrush}" />
+                <Border Width="1"
+                        Height="16"
+                        Margin="0,0,2,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Background="{StaticResource TextFillColorPrimaryBrush}" />
+            </Grid>
+        </Border>
     </Grid>
 </Window>

@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.Reflection;
 using Jalium.UI;
 using Jalium.UI.Controls;
-using Jalium.UI.Controls.Ink;
+using Jalium.UI.Ink;
 using Jalium.UI.Input;
+using Jalium.UI.Input.StylusPlugIns;
 using Jalium.UI.Media;
 using Jalium.UI.Threading;
 
@@ -24,10 +25,21 @@ public partial class AnnotationOverlayWindow : Window
         typeof(InkCanvas)
             .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
+    // 26.10.5+ 起 InkCanvas.DynamicRenderer 改为 protected；类型本身仍公开，经反射取实例后强类型使用。
+    private static readonly PropertyInfo? DynamicRendererProperty =
+        typeof(InkCanvas).GetProperty(
+            "DynamicRenderer",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
     private static readonly Brush TransparentBrush =
         new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
 
     private InkCanvas Surface => (InkCanvas)OverlayInk!;
+
+    private DrawingAttributes? TryGetDynamicRendererAttributes() =>
+        DynamicRendererProperty?.GetValue(Surface) is DynamicRenderer renderer
+            ? renderer.DrawingAttributes
+            : null;
 
     public AnnotationOverlayWindow()
     {
@@ -84,7 +96,10 @@ public partial class AnnotationOverlayWindow : Window
 
     private void SyncDynamicRendererAttributes(DrawingAttributes source)
     {
-        var previewDa = Surface.DynamicRenderer.DrawingAttributes;
+        var previewDa = TryGetDynamicRendererAttributes();
+        if (previewDa is null)
+            return;
+
         previewDa.Color = source.Color;
         previewDa.Width = source.Width;
         previewDa.Height = source.Height;
@@ -102,7 +117,7 @@ public partial class AnnotationOverlayWindow : Window
         var stroke = e.Stroke;
         var da = stroke.DrawingAttributes;
         da.StylusTip = StylusTip.Ellipse;
-        da.FitToCurve = true;
+        da.FitToCurve = InkRuntimeOptions.Current.SmoothingLevel != InkSmoothingLevel.Low;
         da.IgnorePressure = !InkRuntimeOptions.Current.EnablePressure;
         ApplyBrushTypeAndHighlighterForCurrentKind(da);
         var runtime = InkRuntimeOptions.Current;
@@ -307,7 +322,8 @@ public partial class AnnotationOverlayWindow : Window
     {
         var da = Surface.DefaultDrawingAttributes;
         da.Color = color;
-        Surface.DynamicRenderer.DrawingAttributes.Color = color;
+        if (TryGetDynamicRendererAttributes() is { } previewDa)
+            previewDa.Color = color;
     }
 
     public void SetPenThickness(double thickness)
@@ -316,9 +332,11 @@ public partial class AnnotationOverlayWindow : Window
         var da = Surface.DefaultDrawingAttributes;
         da.Width = t;
         da.Height = t;
-        var previewDa = Surface.DynamicRenderer.DrawingAttributes;
-        previewDa.Width = t;
-        previewDa.Height = t;
+        if (TryGetDynamicRendererAttributes() is { } previewDa)
+        {
+            previewDa.Width = t;
+            previewDa.Height = t;
+        }
     }
 
     private void Surface_OnPreviewPointerMove_RealtimeSampling(object? sender, RoutedEventArgs e)

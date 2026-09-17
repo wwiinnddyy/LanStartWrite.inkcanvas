@@ -19,14 +19,23 @@ internal static class Program
         // 降低 InkCanvas 最小点距（反射），减轻快速书写时的采样丢弃。
         InkCanvasTuning.ApplyStartupDefaults();
 
+        // 保持项目原有窗口生命周期：批注画布 / 工具栏的 Z 序逻辑依赖同一 Application
+        // 中由主窗口显式 Show + Activate 后再进入消息循环。
         var app = new Application();
+
+        // 加载项目级 Fluent(WinUI3) 主题字典（token 在前、控件样式在后）。
+        AppPreferences.Initialize();
+        FluentTheme.Initialize(app);
+
         var window = new AnnotationToolbarWindow();
         app.MainWindow = window;
 
         window.Show();
         window.Activate();
 
-        // 仅用无参 Run()：MainWindow 已 Show，内置逻辑会跳过重复 Show，只进入消息循环。
-        Environment.Exit(app.Run());
+        var exitCode = app.Run();
+        AppPreferences.Flush();
+        Environment.Exit(exitCode);
     }
+
 }

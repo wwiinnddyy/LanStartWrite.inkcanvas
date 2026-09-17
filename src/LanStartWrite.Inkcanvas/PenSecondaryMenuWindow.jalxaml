@@ -1,143 +1,30 @@
-<Window xmlns="http://schemas.jalium.ui/2024"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Class="LanStartWrite.Inkcanvas.PenSecondaryMenuWindow"
-        Title=""
-        SizeToContent="WidthAndHeight"
-        WindowStartupLocation="Manual"
-        Topmost="True"
-        ShowInTaskbar="False"
-        ShowActivated="False"
-        ResizeMode="NoResize"
-        WindowStyle="None"
-        IsShowTitleBar="False"
-        IsShowMinimizeButton="False"
-        IsShowMaximizeButton="False"
-        IsShowCloseButton="False"
-        HasSystemMenu="False"
-        AllowsTransparency="True"
-        SystemBackdrop="None"
-        Background="Transparent"
-        Foreground="#242424"
-        Opacity="1">
-    <Grid Background="Transparent">
-        <Border Margin="3"
-                CornerRadius="10"
-                Background="#FFFFFF"
-                BorderBrush="#E8E8E8"
-                BorderThickness="1"
-                Padding="8"
-                Foreground="#242424">
-            <Grid Foreground="#242424">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="7" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <!-- 左侧：9 色 + 粗细。保证可点面积，同时尽量贴边。 -->
-                <StackPanel Grid.Column="0"
-                            Orientation="Vertical"
-                            HorizontalAlignment="Left">
-                    <Grid Width="92" Height="92" HorizontalAlignment="Left">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="26" />
-                            <RowDefinition Height="7" />
-                            <RowDefinition Height="26" />
-                            <RowDefinition Height="7" />
-                            <RowDefinition Height="26" />
-                        </Grid.RowDefinitions>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="26" />
-                            <ColumnDefinition Width="7" />
-                            <ColumnDefinition Width="26" />
-                            <ColumnDefinition Width="7" />
-                            <ColumnDefinition Width="26" />
-                        </Grid.ColumnDefinitions>
-
-                        <Border x:Name="PenColorRing1" Grid.Row="0" Grid.Column="0" Width="26" Height="26" Padding="2" Background="Transparent" BorderBrush="Transparent" BorderThickness="2" CornerRadius="13">
-                            <Border Background="#202020" CornerRadius="10" Width="20" Height="20" />
-                        </Border>
-                        <Border x:Name="PenColorRing2" Grid.Row="0" Grid.Column="2" Width="26" Height="26" Padding="2" Background="Transparent" BorderBrush="Transparent" BorderThickness="2" CornerRadius="13">
-                            <Border Background="#D13438" CornerRadius="10" Width="20" Height="20" />
-                        </Border>
-                        <Border x:Name="PenColorRing3" Grid.Row="0" Grid.Column="4" Width="26" Height="26" Padding="2" Background="Transparent" BorderBrush="Transparent" BorderThickness="2" CornerRadius="13">
-                            <Border Background="#F26B1F" CornerRadius="10" Width="20" Height="20" />
-                        </Border>
-
-                        <Border x:Name="PenColorRing4" Grid.Row="2" Grid.Column="0" Width="26" Height="26" Padding="2" Background="Transparent" BorderBrush="Transparent" BorderThickness="2" CornerRadius="13">
-                            <Border Background="#F2C811" CornerRadius="10" Width="20" Height="20" />
-                        </Border>
-                        <Border x:Name="PenColorRing5" Grid.Row="2" Grid.Column="2" Width="26" Height="26" Padding="2" Background="Transparent" BorderBrush="Transparent" BorderThickness="2" CornerRadius="13">
-                            <Border Background="#107C10" CornerRadius="10" Width="20" Height="20" />
-                        </Border>
-                        <Border x:Name="PenColorRing6" Grid.Row="2" Grid.Column="4" Width="26" Height="26" Padding="2" Background="Transparent" BorderBrush="Transparent" BorderThickness="2" CornerRadius="13">
-                            <Border Background="#00B7C3" CornerRadius="10" Width="20" Height="20" />
-                        </Border>
-
-                        <Border x:Name="PenColorRing7" Grid.Row="4" Grid.Column="0" Width="26" Height="26" Padding="2" Background="Transparent" BorderBrush="Transparent" BorderThickness="2" CornerRadius="13">
-                            <Border Background="#0078D4" CornerRadius="10" Width="20" Height="20" />
-                        </Border>
-                        <Border x:Name="PenColorRing8" Grid.Row="4" Grid.Column="2" Width="26" Height="26" Padding="2" Background="Transparent" BorderBrush="Transparent" BorderThickness="2" CornerRadius="13">
-                            <Border Background="#8764B8" CornerRadius="10" Width="20" Height="20" />
-                        </Border>
-                        <Border x:Name="PenColorRing9" Grid.Row="4" Grid.Column="4" Width="26" Height="26" Padding="2" Background="Transparent" BorderBrush="Transparent" BorderThickness="2" CornerRadius="13">
-                            <Border Background="#737373" CornerRadius="10" Width="20" Height="20" />
-                        </Border>
-                    </Grid>
-
-                    <TextBlock x:Name="PenThicknessValueText"
-                               Text="粗细: 4 px"
-                               Margin="0,6,0,0"
-                               FontSize="12"
-                               Foreground="#5A5A5A" />
-                    <Slider x:Name="PenThicknessSlider"
-                            Margin="0,3,0,0"
-                            Width="92"
-                            HorizontalAlignment="Left"
-                            Minimum="1"
-                            Maximum="24"
-                            Value="4"
-                            TickFrequency="1"
-                            IsSnapToTickEnabled="True"
-                            ValueChanged="PenThicknessSlider_OnValueChanged" />
-                </StackPanel>
-
-                <!-- 右侧：笔类型。保持可读和可点，不再压缩到难用。 -->
-                <StackPanel Grid.Column="2"
-                            Orientation="Vertical"
-                            VerticalAlignment="Top"
-                            HorizontalAlignment="Left"
-                            Foreground="#242424">
-                    <RadioButton x:Name="PenKindPenRadio"
-                                 GroupName="PenKind"
-                                 Margin="0,0,0,3"
-                                 Padding="6,3"
-                                 HorizontalAlignment="Left"
-                                 Foreground="#242424"
-                                 FontSize="12">
-                        <TextBlock Text="书写笔" Foreground="#242424" FontSize="12" />
-                    </RadioButton>
-                    <RadioButton x:Name="PenKindHighlighterRadio"
-                                 GroupName="PenKind"
-                                 Margin="0,0,0,3"
-                                 Padding="6,3"
-                                 HorizontalAlignment="Left"
-                                 Foreground="#242424"
-                                 FontSize="12">
-                        <TextBlock Text="荧光笔" Foreground="#242424" FontSize="12" />
-                    </RadioButton>
-                    <RadioButton x:Name="PenKindLaserRadio"
-                                 GroupName="PenKind"
-                                 Margin="0,0,0,0"
-                                 Padding="6,3"
-                                 HorizontalAlignment="Left"
-                                 Foreground="#242424"
-                                 FontSize="12">
-                        <TextBlock Text="激光笔" Foreground="#242424" FontSize="12" />
-                    </RadioButton>
-                </StackPanel>
-            </Grid>
-        </Border>
-    </Grid>
+<Window xmlns="http://schemas.jalium.ui/2024" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ x:Class="LanStartWrite.Inkcanvas.PenSecondaryMenuWindow" Title="笔设置" WindowStartupLocation="Manual"
+ Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" WindowStyle="None"
+ IsShowTitleBar="False" IsShowMinimizeButton="False" IsShowMaximizeButton="False" IsShowCloseButton="False" HasSystemMenu="False"
+ AllowsTransparency="True" SystemBackdrop="None" Background="Transparent" Foreground="{StaticResource TextFillColorPrimaryBrush}">
+  <Border x:Name="PenMenuSurface" Margin="6" Padding="16" CornerRadius="8" Background="{StaticResource FlyoutPresenterBackgroundBrush}" BorderBrush="{StaticResource SurfaceStrokeColorDefaultBrush}" BorderThickness="1">
+    <StackPanel>
+      <TextBlock Text="画笔" Style="{StaticResource FluentBodyTextStyle}" FontWeight="SemiBold" />
+      <Grid Margin="0,12,0,12">
+        <Grid.ColumnDefinitions><ColumnDefinition Width="108" /><ColumnDefinition Width="16" /><ColumnDefinition Width="112" /></Grid.ColumnDefinitions>
+        <Grid Width="108" Height="108">
+          <Grid.RowDefinitions><RowDefinition Height="36" /><RowDefinition Height="36" /><RowDefinition Height="36" /></Grid.RowDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="36" /><ColumnDefinition Width="36" /><ColumnDefinition Width="36" /></Grid.ColumnDefinitions>
+          <RadioButton x:Name="PenColorRing1" Grid.Row="0" Grid.Column="0" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#202020" ToolTip="黑色" /><RadioButton x:Name="PenColorRing2" Grid.Row="0" Grid.Column="1" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#D13438" ToolTip="红色" /><RadioButton x:Name="PenColorRing3" Grid.Row="0" Grid.Column="2" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#F26B1F" ToolTip="橙色" /><RadioButton x:Name="PenColorRing4" Grid.Row="1" Grid.Column="0" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#F2C811" ToolTip="黄色" /><RadioButton x:Name="PenColorRing5" Grid.Row="1" Grid.Column="1" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#107C10" ToolTip="绿色" /><RadioButton x:Name="PenColorRing6" Grid.Row="1" Grid.Column="2" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#00B7C3" ToolTip="青色" /><RadioButton x:Name="PenColorRing7" Grid.Row="2" Grid.Column="0" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#0078D4" ToolTip="蓝色" /><RadioButton x:Name="PenColorRing8" Grid.Row="2" Grid.Column="1" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#8764B8" ToolTip="紫色" /><RadioButton x:Name="PenColorRing9" Grid.Row="2" Grid.Column="2" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#737373" ToolTip="灰色" />
+        </Grid>
+        <StackPanel Grid.Column="2" VerticalAlignment="Center">
+          <RadioButton x:Name="PenKindPenRadio" GroupName="PenKind" Content="书写笔" Style="{StaticResource FluentRadioButtonStyle}" Margin="0,2" />
+          <RadioButton x:Name="PenKindHighlighterRadio" GroupName="PenKind" Content="荧光笔" Style="{StaticResource FluentRadioButtonStyle}" Margin="0,2" />
+          <RadioButton x:Name="PenKindLaserRadio" GroupName="PenKind" Content="激光笔" Style="{StaticResource FluentRadioButtonStyle}" Margin="0,2" />
+        </StackPanel>
+      </Grid>
+      <Border Height="1" Background="{StaticResource DividerStrokeColorDefaultBrush}" Margin="0,0,0,12" />
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <TextBlock Text="粗细" Style="{StaticResource FluentBodyTextStyle}"  />
+        <TextBlock x:Name="PenThicknessValueText" Grid.Column="1" FontSize="12" Foreground="{StaticResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+      </Grid>
+      <Slider x:Name="PenThicknessSlider" Style="{StaticResource FluentSliderStyle}" Width="236" Margin="0,4,0,0" Minimum="1" Maximum="24" Value="4" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True" />
+    </StackPanel>
+  </Border>
 </Window>
-

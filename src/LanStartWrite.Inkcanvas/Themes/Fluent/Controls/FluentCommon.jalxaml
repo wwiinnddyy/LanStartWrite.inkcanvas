@@ -1,0 +1,122 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!-- WinUI source: microsoft-ui-xaml 19e3bdc3c. Jalium adapter, not WPF XAML. -->
+<ResourceDictionary xmlns="http://schemas.jalium.ui/2024" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:LanStartWrite.Inkcanvas">
+  <Style x:Key="FluentTitleTextStyle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="28" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorPrimaryBrush}" />
+  </Style>
+  <Style x:Key="FluentBodyTextStyle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorPrimaryBrush}" />
+  </Style>
+  <Style x:Key="FluentDescriptionTextStyle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorSecondaryBrush}" />
+  </Style>
+  <Style x:Key="FluentSectionTextStyle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Margin" Value="0,24,0,8" />
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorPrimaryBrush}" />
+  </Style>
+  <Style x:Key="FluentSettingsCardStyle" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource CardBackgroundFillColorDefaultBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource CardStrokeColorDefaultBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Margin" Value="0,0,0,4" />
+    <Setter Property="MinHeight" Value="72" />
+  </Style>
+  <Style x:Key="FluentButtonStyle" TargetType="Button">
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="12,5" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Background" Value="{StaticResource ControlFillColorDefaultBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource ControlStrokeColorDefaultBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="Button">
+        <Grid Background="Transparent">
+          <Border Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}" Padding="{TemplateBinding Padding}" TransitionProperty="Background" TransitionDuration="0:0:0.083">
+            <ContentPresenter Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" />
+          </Border>
+          <Border Name="FocusRing" Margin="2" BorderThickness="2" CornerRadius="3" BorderBrush="{StaticResource FocusStrokeColorOuterBrush}" Opacity="0" IsHitTestVisible="False" />
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True">
+            <Setter TargetName="Surface" Property="Background" Value="{StaticResource ControlFillColorSecondaryBrush}" />
+          </Trigger>
+          <Trigger Property="IsPressed" Value="True">
+            <Setter TargetName="Surface" Property="Background" Value="{StaticResource ControlFillColorTertiaryBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextFillColorSecondaryBrush}" />
+          </Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True">
+            <Setter TargetName="FocusRing" Property="Opacity" Value="1" />
+          </Trigger>
+          <Trigger Property="IsEnabled" Value="False">
+            <Setter TargetName="Surface" Property="Background" Value="{StaticResource ControlFillColorDisabledBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextFillColorDisabledBrush}" />
+            <Setter TargetName="FocusRing" Property="Opacity" Value="0" />
+          </Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style x:Key="FluentSubtleButtonStyle" TargetType="Button">
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="12,5" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Background" Value="{StaticResource SubtleFillColorTransparentBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource ControlStrokeColorDefaultBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="Button">
+        <Grid Background="Transparent">
+          <Border Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}" Padding="{TemplateBinding Padding}" TransitionProperty="Background" TransitionDuration="0:0:0.083">
+            <ContentPresenter Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" />
+          </Border>
+          <Border Name="FocusRing" Margin="2" BorderThickness="2" CornerRadius="3" BorderBrush="{StaticResource FocusStrokeColorOuterBrush}" Opacity="0" IsHitTestVisible="False" />
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True">
+            <Setter TargetName="Surface" Property="Background" Value="{StaticResource SubtleFillColorSecondaryBrush}" />
+          </Trigger>
+          <Trigger Property="IsPressed" Value="True">
+            <Setter TargetName="Surface" Property="Background" Value="{StaticResource SubtleFillColorTertiaryBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextFillColorSecondaryBrush}" />
+          </Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True">
+            <Setter TargetName="FocusRing" Property="Opacity" Value="1" />
+          </Trigger>
+          <Trigger Property="IsEnabled" Value="False">
+            <Setter TargetName="Surface" Property="Background" Value="{StaticResource ControlFillColorDisabledBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextFillColorDisabledBrush}" />
+            <Setter TargetName="FocusRing" Property="Opacity" Value="0" />
+          </Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style TargetType="ToolTip">
+    <Setter Property="Background" Value="{StaticResource FlyoutPresenterBackgroundBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorPrimaryBrush}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Padding" Value="8,6" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="{StaticResource SurfaceStrokeColorDefaultBrush}" />
+  </Style>
+</ResourceDictionary>

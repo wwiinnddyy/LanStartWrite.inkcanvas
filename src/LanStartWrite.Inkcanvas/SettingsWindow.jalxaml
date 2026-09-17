@@ -1,663 +1,259 @@
-<Window xmlns="http://schemas.jalium.ui/2024"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Class="LanStartWrite.Inkcanvas.SettingsWindow"
-        Title="设置"
-        Width="920"
-        Height="680"
-        MinWidth="760"
-        MinHeight="560"
-        WindowStartupLocation="CenterScreen"
-        ResizeMode="CanResize"
-        ShowInTaskbar="True"
-        Background="#FFF3F3F3"
-        AllowsTransparency="False"
-        SystemBackdrop="None">
-    <Grid Background="#FFF3F3F3">
-        <Grid Margin="0,10,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="1" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <Border x:Name="NavigationPaneRoot"
-                    Grid.Column="0"
-                    Width="236"
-                    Padding="8,16,12,16"
-                    Background="#FFFAFAFA">
-                <StackPanel x:Name="NavigationItemsStack">
-                    <Button x:Name="HamburgerButton"
-                            Width="40"
-                            Height="40"
-                            Margin="4,0,0,14"
-                            Padding="0"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Center"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Click="HamburgerButton_OnClick">
-                        <SymbolIcon x:Name="HamburgerSymbol"
-                                    Symbol="GlobalNavButton"
-                                    Width="18"
-                                    Height="18"
-                                    VerticalAlignment="Center"
-                                    HorizontalAlignment="Center"
-                                    Foreground="#242424" />
+<Window xmlns="http://schemas.jalium.ui/2024" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:LanStartWrite.Inkcanvas" x:Class="LanStartWrite.Inkcanvas.SettingsWindow" Title="设置" Width="960" Height="720" MinWidth="560" MinHeight="480" WindowStartupLocation="CenterScreen" ResizeMode="CanResize" ShowInTaskbar="True" AllowsTransparency="False" SystemBackdrop="None" Background="{StaticResource SolidBackgroundFillColorBaseBrush}" Foreground="{StaticResource TextFillColorPrimaryBrush}" UseLayoutRounding="True">
+    <Grid Background="{StaticResource SolidBackgroundFillColorBaseBrush}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Border x:Name="NavigationPaneRoot" Width="220" TransitionProperty="Width" TransitionDuration="0:0:0.20" TransitionTimingFunction="Recommended" ClipToBounds="True" Background="Transparent">
+            <Grid x:Name="NavigationPaneLayout" Margin="0,8,0,8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <StackPanel>
+                    <Button x:Name="HamburgerButton" Style="{StaticResource FluentNavigationPaneToggleButtonStyle}" Margin="4,0,4,12" HorizontalAlignment="Left" Click="HamburgerButton_OnClick" ToolTip="展开或折叠导航">
+                        <SymbolIcon Symbol="GlobalNavButton" Width="16" Height="16" Foreground="{StaticResource TextFillColorPrimaryBrush}" />
                     </Button>
-
-                    <Button x:Name="AppearanceNavButton"
-                            MinHeight="40"
-                            Margin="4,4,4,4"
-                            Padding="14,10,14,10"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Center"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Click="AppearanceNav_OnClick">
-                        <Grid>
-                            <Border x:Name="AppearanceNavSelectionBorder"
-                                    CornerRadius="6"
-                                    Background="#260078D4"
-                                    IsHitTestVisible="False"
-                                    Margin="0" />
-                            <StackPanel x:Name="AppearanceNavRow"
-                                        Orientation="Horizontal"
-                                        VerticalAlignment="Center">
-                                <SymbolIcon x:Name="AppearanceNavSymbol"
-                                            Symbol="Palette"
-                                            Width="16"
-                                            Height="16"
-                                            VerticalAlignment="Center"
-                                            Foreground="#242424" />
-                                <TextBlock x:Name="AppearanceNavLabel"
-                                           Text="外观"
-                                           Margin="14,0,0,0"
-                                           VerticalAlignment="Center"
-                                           FontSize="14"
-                                           Foreground="#242424" />
-                            </StackPanel>
+                    <local:FluentNavigationItem x:Name="AppearanceNavButton" Style="{StaticResource FluentNavigationItemButtonStyle}" Click="AppearanceNav_OnClick" ToolTip="外观">
+                        <Grid Height="36" HorizontalAlignment="Stretch">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="40" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <SymbolIcon Symbol="Palette" Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource TextFillColorPrimaryBrush}" />
+                                <TextBlock x:Name="AppearanceNavLabel" Grid.Column="1" Text="外观" FontSize="14" Margin="0,0,12,0" VerticalAlignment="Center" Foreground="{StaticResource TextFillColorPrimaryBrush}" />
+                            </Grid>
                         </Grid>
-                    </Button>
-
-                    <Button x:Name="InkNavButton"
-                            MinHeight="40"
-                            Margin="4,4,4,4"
-                            Padding="14,10,14,10"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Center"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Click="InkNav_OnClick">
-                        <Grid>
-                            <Border x:Name="InkNavSelectionBorder"
-                                    CornerRadius="6"
-                                    Background="Transparent"
-                                    IsHitTestVisible="False"
-                                    Margin="0" />
-                            <StackPanel x:Name="InkNavRow"
-                                        Orientation="Horizontal"
-                                        VerticalAlignment="Center">
-                                <SymbolIcon x:Name="InkNavSymbol"
-                                            Symbol="InkingTool"
-                                            Width="16"
-                                            Height="16"
-                                            VerticalAlignment="Center"
-                                            Foreground="#242424" />
-                                <TextBlock x:Name="InkNavLabel"
-                                           Text="墨迹"
-                                           Margin="14,0,0,0"
-                                           VerticalAlignment="Center"
-                                           FontSize="14"
-                                           Foreground="#242424" />
-                            </StackPanel>
+                    </local:FluentNavigationItem>
+                    <local:FluentNavigationItem x:Name="InkNavButton" Style="{StaticResource FluentNavigationItemButtonStyle}" Click="InkNav_OnClick" ToolTip="墨迹">
+                        <Grid Height="36" HorizontalAlignment="Stretch">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="40" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <SymbolIcon Symbol="InkingTool" Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource TextFillColorPrimaryBrush}" />
+                                <TextBlock x:Name="InkNavLabel" Grid.Column="1" Text="墨迹" FontSize="14" Margin="0,0,12,0" VerticalAlignment="Center" Foreground="{StaticResource TextFillColorPrimaryBrush}" />
+                            </Grid>
                         </Grid>
-                    </Button>
-
-                    <Button x:Name="InteractionNavButton"
-                            MinHeight="40"
-                            Margin="4,4,4,4"
-                            Padding="14,10,14,10"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Center"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Click="InteractionNav_OnClick">
-                        <Grid>
-                            <Border x:Name="InteractionNavSelectionBorder"
-                                    CornerRadius="6"
-                                    Background="Transparent"
-                                    IsHitTestVisible="False"
-                                    Margin="0" />
-                            <StackPanel x:Name="InteractionNavRow"
-                                        Orientation="Horizontal"
-                                        VerticalAlignment="Center">
-                                <SymbolIcon x:Name="InteractionNavSymbol"
-                                            Symbol="TouchPointer"
-                                            Width="16"
-                                            Height="16"
-                                            VerticalAlignment="Center"
-                                            Foreground="#242424" />
-                                <TextBlock x:Name="InteractionNavLabel"
-                                           Text="窗口与交互"
-                                           Margin="14,0,0,0"
-                                           VerticalAlignment="Center"
-                                           FontSize="14"
-                                           Foreground="#242424" />
-                            </StackPanel>
+                    </local:FluentNavigationItem>
+                    <local:FluentNavigationItem x:Name="InteractionNavButton" Style="{StaticResource FluentNavigationItemButtonStyle}" Click="InteractionNav_OnClick" ToolTip="窗口与交互">
+                        <Grid Height="36" HorizontalAlignment="Stretch">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="40" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <SymbolIcon Symbol="TouchPointer" Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource TextFillColorPrimaryBrush}" />
+                                <TextBlock x:Name="InteractionNavLabel" Grid.Column="1" Text="窗口与交互" FontSize="14" Margin="0,0,12,0" VerticalAlignment="Center" Foreground="{StaticResource TextFillColorPrimaryBrush}" />
+                            </Grid>
                         </Grid>
-                    </Button>
-
-                    <Button x:Name="AboutNavButton"
-                            MinHeight="40"
-                            Margin="4,4,4,4"
-                            Padding="14,10,14,10"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Center"
-                            Background="Transparent"
-                            BorderThickness="0"
-                            Click="AboutNav_OnClick">
-                        <Grid>
-                            <Border x:Name="AboutNavSelectionBorder"
-                                    CornerRadius="6"
-                                    Background="Transparent"
-                                    IsHitTestVisible="False"
-                                    Margin="0" />
-                            <StackPanel x:Name="AboutNavRow"
-                                        Orientation="Horizontal"
-                                        VerticalAlignment="Center">
-                                <SymbolIcon x:Name="AboutNavSymbol"
-                                            Symbol="Info"
-                                            Width="16"
-                                            Height="16"
-                                            VerticalAlignment="Center"
-                                            Foreground="#242424" />
-                                <TextBlock x:Name="AboutNavLabel"
-                                           Text="关于"
-                                           Margin="14,0,0,0"
-                                           VerticalAlignment="Center"
-                                           FontSize="14"
-                                           Foreground="#242424" />
-                            </StackPanel>
-                        </Grid>
-                    </Button>
+                    </local:FluentNavigationItem>
                 </StackPanel>
-            </Border>
-
-            <Border Grid.Column="1"
-                    Background="#16000000" />
-
-            <ScrollViewer Grid.Column="2"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
-                <Grid HorizontalAlignment="Center"
-                      MaxWidth="1040"
-                      Margin="32,24,32,32">
-                    <StackPanel x:Name="AppearanceSectionPanel"
-                                Visibility="Collapsed">
-                        <TextBlock Text="外观"
-                                   FontSize="30"
-                                   FontWeight="SemiBold"
-                                   Foreground="#242424" />
-                        <TextBlock Text="外观偏好与主题策略。"
-                                   Margin="0,8,0,0"
-                                   FontSize="13"
-                                   Foreground="#5C5C5C" />
-                        <Border Margin="0,18,0,0"
-                                CornerRadius="12"
-                                BorderBrush="#1F000000"
-                                BorderThickness="1"
-                                Background="#FFFFFF">
-                            <StackPanel>
-                                <Grid Padding="20,16">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="高对比度强调色"
-                                                   FontSize="14"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="#242424" />
-                                        <TextBlock Text="用于增强选中态和开关可见性。"
-                                                   Margin="0,4,0,0"
-                                                   FontSize="12"
-                                                   Foreground="#5C5C5C" />
-                                    </StackPanel>
-                                    <Button x:Name="AccentContrastSwitchButton"
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            Width="44"
-                                            Height="22"
-                                            Margin="16,0,0,0"
-                                            Padding="0"
-                                            Background="#01FFFFFF"
-                                            BorderThickness="0"
-                                            Click="AccentContrastSwitchButton_OnClick">
-                                        <Border x:Name="AccentContrastSwitchTrack"
-                                                Width="44"
-                                                Height="22"
-                                                CornerRadius="11"
-                                                Background="#1A000000"
-                                                Padding="2">
-                                            <Border x:Name="AccentContrastSwitchThumb"
-                                                    Width="18"
-                                                    Height="18"
-                                                    CornerRadius="9"
-                                                    Background="#242424"
-                                                    HorizontalAlignment="Left"
-                                                    VerticalAlignment="Center"
-                                                    Margin="0,0,0,0" />
-                                        </Border>
-                                    </Button>
-                                </Grid>
-                                <Border Height="1" Background="#12000000" />
-                                <Grid Padding="20,16">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="跟随系统亮暗模式（预留）"
-                                                   FontSize="14"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="#242424" />
-                                        <TextBlock Text="当前仍由应用固定浅色主题，后续可接入动态切换。"
-                                                   Margin="0,4,0,0"
-                                                   FontSize="12"
-                                                   Foreground="#5C5C5C" />
-                                    </StackPanel>
-                                    <Button x:Name="FollowSystemThemeSwitchButton"
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            Width="44"
-                                            Height="22"
-                                            Margin="16,0,0,0"
-                                            Padding="0"
-                                            Background="#01FFFFFF"
-                                            BorderThickness="0"
-                                            IsEnabled="False"
-                                            Click="FollowSystemThemeSwitchButton_OnClick">
-                                        <Border x:Name="FollowSystemThemeSwitchTrack"
-                                                Width="44"
-                                                Height="22"
-                                                CornerRadius="11"
-                                                Background="#14000000"
-                                                Padding="2">
-                                            <Border x:Name="FollowSystemThemeSwitchThumb"
-                                                    Width="18"
-                                                    Height="18"
-                                                    CornerRadius="9"
-                                                    Background="#55FFFFFF"
-                                                    HorizontalAlignment="Left"
-                                                    VerticalAlignment="Center"
-                                                    Margin="0,0,0,0" />
-                                        </Border>
-                                    </Button>
-                                </Grid>
-                                <Border Height="1" Background="#12000000" />
-                                <Grid Padding="20,16">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="倾斜映射（实验）"
-                                                   FontSize="14"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="#242424" />
-                                        <TextBlock Text="记录并尝试利用笔倾斜参数，未支持设备将自动忽略。"
-                                                   Margin="0,4,0,0"
-                                                   FontSize="12"
-                                                   Foreground="#5C5C5C" />
-                                    </StackPanel>
-                                    <Button x:Name="TiltSwitchButton"
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            Width="44"
-                                            Height="22"
-                                            Margin="16,0,0,0"
-                                            Padding="0"
-                                            Background="#01FFFFFF"
-                                            BorderThickness="0"
-                                            Click="TiltSwitchButton_OnClick">
-                                        <Border x:Name="TiltSwitchTrack"
-                                                Width="44"
-                                                Height="22"
-                                                CornerRadius="11"
-                                                Background="#1A000000"
-                                                Padding="2">
-                                            <Border x:Name="TiltSwitchThumb"
-                                                    Width="18"
-                                                    Height="18"
-                                                    CornerRadius="9"
-                                                    Background="#242424"
-                                                    HorizontalAlignment="Left"
-                                                    VerticalAlignment="Center"
-                                                    Margin="0,0,0,0" />
-                                        </Border>
-                                    </Button>
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-
-                    <StackPanel x:Name="InkSectionPanel"
-                                Visibility="Collapsed">
-                        <TextBlock Text="墨迹"
-                                   FontSize="30"
-                                   FontWeight="SemiBold"
-                                   Foreground="#242424" />
-                        <TextBlock Text="笔迹样式与书写参数。"
-                                   Margin="0,8,0,0"
-                                   FontSize="13"
-                                   Foreground="#5C5C5C" />
-                        <Border Margin="0,18,0,0"
-                                CornerRadius="12"
-                                BorderBrush="#1F000000"
-                                BorderThickness="1"
-                                Background="#FFFFFF">
-                            <StackPanel>
-                                <Grid Padding="20,16">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Row="0" Grid.Column="0">
-                                        <TextBlock Text="默认笔划粗细"
-                                                   FontSize="14"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="#242424" />
-                                        <TextBlock Text="影响新建墨迹时的初始笔宽。"
-                                                   Margin="0,4,0,0"
-                                                   FontSize="12"
-                                                   Foreground="#5C5C5C" />
-                                        <Slider x:Name="PenWidthSlider"
-                                                Margin="0,10,0,0"
-                                                Minimum="1"
-                                                Maximum="24"
-                                                Value="4"
-                                                TickFrequency="1"
-                                                IsSnapToTickEnabled="True" />
-                                    </StackPanel>
-                                    <Border Grid.Row="0"
-                                            Grid.Column="1"
-                                            Width="56"
-                                            Height="56"
-                                            Margin="16,2,0,0"
-                                            CornerRadius="10"
-                                            BorderBrush="#26000000"
-                                            BorderThickness="1">
-                                        <SymbolIcon x:Name="StrokePreviewIcon"
-                                                    Symbol="InkingTool"
-                                                    Width="24"
-                                                    Height="24"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center" />
-                                    </Border>
-                                    <TextBlock x:Name="PenWidthValueText"
-                                               Grid.Row="1"
-                                               Grid.Column="0"
-                                               Margin="0,8,0,0"
-                                               FontSize="12"
-                                               Foreground="#5C5C5C"
-                                               Text="4 px" />
-                                </Grid>
-                                <Border Height="1" Background="#12000000" />
-                                <Grid Padding="20,16">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="实时采样通道（RTS）"
-                                                   FontSize="14"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="#242424" />
-                                        <TextBlock Text="消费 intermediate points，优先降低高速书写断笔。"
-                                                   Margin="0,4,0,0"
-                                                   FontSize="12"
-                                                   Foreground="#5C5C5C" />
-                                    </StackPanel>
-                                    <Button x:Name="RealtimeSamplingSwitchButton"
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            Width="44"
-                                            Height="22"
-                                            Margin="16,0,0,0"
-                                            Padding="0"
-                                            Background="#01FFFFFF"
-                                            BorderThickness="0"
-                                            Click="RealtimeSamplingSwitchButton_OnClick">
-                                        <Border x:Name="RealtimeSamplingSwitchTrack"
-                                                Width="44"
-                                                Height="22"
-                                                CornerRadius="11"
-                                                Background="#1A000000"
-                                                Padding="2">
-                                            <Border x:Name="RealtimeSamplingSwitchThumb"
-                                                    Width="18"
-                                                    Height="18"
-                                                    CornerRadius="9"
-                                                    Background="#242424"
-                                                    HorizontalAlignment="Left"
-                                                    VerticalAlignment="Center"
-                                                    Margin="0,0,0,0" />
-                                        </Border>
-                                    </Button>
-                                </Grid>
-                                <Border Height="1" Background="#12000000" />
-                                <Grid Padding="20,16">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Row="0" Grid.Column="0">
-                                        <TextBlock Text="最小点距（MinPointDistance）"
-                                                   FontSize="14"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="#242424" />
-                                        <TextBlock Text="更低值保留更多采样点，适合高速书写。"
-                                                   Margin="0,4,0,0"
-                                                   FontSize="12"
-                                                   Foreground="#5C5C5C" />
-                                        <Slider x:Name="MinPointDistanceSlider"
-                                                Margin="0,10,0,0"
-                                                Minimum="0.4"
-                                                Maximum="2.5"
-                                                Value="0.75"
-                                                TickFrequency="0.05"
-                                                IsSnapToTickEnabled="True" />
-                                    </StackPanel>
-                                    <TextBlock x:Name="MinPointDistanceValueText"
-                                               Grid.Row="1"
-                                               Grid.Column="0"
-                                               Margin="0,8,0,0"
-                                               FontSize="12"
-                                               Foreground="#5C5C5C"
-                                               Text="0.75 px" />
-                                </Grid>
-                                <Border Height="1" Background="#12000000" />
-                                <Grid Padding="20,16">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="平滑等级"
-                                                   FontSize="14"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="#242424" />
-                                        <TextBlock Text="低延迟 / 平衡 / 高平滑（会影响插值强度）。"
-                                                   Margin="0,4,0,0"
-                                                   FontSize="12"
-                                                   Foreground="#5C5C5C" />
-                                    </StackPanel>
-                                    <ComboBox x:Name="SmoothingLevelComboBox"
-                                              Grid.Column="1"
-                                              Width="116"
-                                              Margin="16,0,0,0"
-                                              VerticalAlignment="Center"
-                                              SelectedIndex="1">
-                                        <ComboBoxItem Content="低延迟" />
-                                        <ComboBoxItem Content="平衡" />
-                                        <ComboBoxItem Content="高平滑" />
-                                    </ComboBox>
-                                </Grid>
-                                <Border Height="1" Background="#12000000" />
-                                <Grid Padding="20,16">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="压力映射"
-                                                   FontSize="14"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="#242424" />
-                                        <TextBlock Text="开启后根据笔压控制笔迹宽度/力度（设备支持时）。"
-                                                   Margin="0,4,0,0"
-                                                   FontSize="12"
-                                                   Foreground="#5C5C5C" />
-                                    </StackPanel>
-                                    <Button x:Name="PressureSwitchButton"
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            Width="44"
-                                            Height="22"
-                                            Margin="16,0,0,0"
-                                            Padding="0"
-                                            Background="#01FFFFFF"
-                                            BorderThickness="0"
-                                            Click="PressureSwitchButton_OnClick">
-                                        <Border x:Name="PressureSwitchTrack"
-                                                Width="44"
-                                                Height="22"
-                                                CornerRadius="11"
-                                                Background="#1A000000"
-                                                Padding="2">
-                                            <Border x:Name="PressureSwitchThumb"
-                                                    Width="18"
-                                                    Height="18"
-                                                    CornerRadius="9"
-                                                    Background="#242424"
-                                                    HorizontalAlignment="Left"
-                                                    VerticalAlignment="Center"
-                                                    Margin="0,0,0,0" />
-                                        </Border>
-                                    </Button>
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-
-                    <StackPanel x:Name="InteractionSectionPanel"
-                                Visibility="Collapsed">
-                        <TextBlock Text="窗口与交互"
-                                   FontSize="30"
-                                   FontWeight="SemiBold"
-                                   Foreground="#242424" />
-                        <TextBlock Text="窗口行为和交互偏好。"
-                                   Margin="0,8,0,0"
-                                   FontSize="13"
-                                   Foreground="#5C5C5C" />
-                        <Border Margin="0,18,0,0"
-                                CornerRadius="12"
-                                BorderBrush="#1F000000"
-                                BorderThickness="1"
-                                Background="#FFFFFF">
-                            <StackPanel>
-                                <Grid Padding="20,16">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="打开画布后保持批注栏在最前"
-                                                   FontSize="14"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="#242424" />
-                                        <TextBlock Text="与当前批注栏置顶逻辑一致。"
-                                                   Margin="0,4,0,0"
-                                                   FontSize="12"
-                                                   Foreground="#5C5C5C" />
-                                    </StackPanel>
-                                    <Button x:Name="KeepToolbarOnTopSwitchButton"
-                                            Grid.Column="1"
-                                            VerticalAlignment="Center"
-                                            Width="44"
-                                            Height="22"
-                                            Margin="16,0,0,0"
-                                            Padding="0"
-                                            Background="#01FFFFFF"
-                                            BorderThickness="0"
-                                            Click="KeepToolbarOnTopSwitchButton_OnClick">
-                                        <Border x:Name="KeepToolbarOnTopSwitchTrack"
-                                                Width="44"
-                                                Height="22"
-                                                CornerRadius="11"
-                                                Background="#1A000000"
-                                                Padding="2">
-                                            <Border x:Name="KeepToolbarOnTopSwitchThumb"
-                                                    Width="18"
-                                                    Height="18"
-                                                    CornerRadius="9"
-                                                    Background="#242424"
-                                                    HorizontalAlignment="Left"
-                                                    VerticalAlignment="Center"
-                                                    Margin="0,0,0,0" />
-                                        </Border>
-                                    </Button>
-                                </Grid>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-
-                    <StackPanel x:Name="AboutSectionPanel"
-                                Visibility="Collapsed">
-                        <TextBlock Text="关于"
-                                   FontSize="30"
-                                   FontWeight="SemiBold"
-                                   Foreground="#242424" />
-                        <TextBlock Text="应用信息与版本。"
-                                   Margin="0,8,0,0"
-                                   FontSize="13"
-                                   Foreground="#5C5C5C" />
-                        <Border Margin="0,16,0,0"
-                                CornerRadius="12"
-                                BorderBrush="#1F000000"
-                                BorderThickness="1"
-                                Background="#FFFFFF">
-                            <StackPanel Padding="20,16">
-                                <TextBlock Text="揽星书写"
-                                           FontSize="14"
-                                           FontWeight="SemiBold"
-                                           Foreground="#242424" />
-                                <TextBlock x:Name="AboutVersionText"
-                                           Margin="0,6,0,0"
-                                           FontSize="12"
-                                           Foreground="#5C5C5C"
-                                           Text="版本 1.0.0" />
-                                <TextBlock Margin="0,6,0,0"
-                                           FontSize="12"
-                                           Foreground="#5C5C5C"
-                                           Text="基于 Jalium.UI 与 InkCanvas。" />
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
+                <Grid Grid.Row="2">
+                    <local:FluentNavigationItem x:Name="AboutNavButton" Style="{StaticResource FluentNavigationItemButtonStyle}" Click="AboutNav_OnClick" ToolTip="关于">
+                        <Grid Height="36" HorizontalAlignment="Stretch">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="40" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <SymbolIcon Symbol="Info" Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource TextFillColorPrimaryBrush}" />
+                                <TextBlock x:Name="AboutNavLabel" Grid.Column="1" Text="关于" FontSize="14" Margin="0,0,12,0" VerticalAlignment="Center" Foreground="{StaticResource TextFillColorPrimaryBrush}" />
+                            </Grid>
+                        </Grid>
+                    </local:FluentNavigationItem>
                 </Grid>
-            </ScrollViewer>
-        </Grid>
+                <!-- One shared indicator crosses item boundaries without changing hit testing. -->
+                <Canvas x:Name="NavigationIndicatorLayer" Grid.RowSpan="3" IsHitTestVisible="False" Focusable="False">
+                    <Border x:Name="NavigationSelectionIndicator" Width="3" Height="16" CornerRadius="2"
+                            Background="{StaticResource AccentFillColorDefaultBrush}" Opacity="0"
+                            IsHitTestVisible="False" Focusable="False" />
+                </Canvas>
+            </Grid>
+        </Border>
+        <Border Grid.Column="1" Margin="0,8,8,8" Background="{StaticResource LayerFillColorDefaultBrush}" BorderBrush="{StaticResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" ClipToBounds="True">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <ScrollViewer x:Name="SettingsScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <Grid x:Name="SettingsContentHost" Margin="24,24,24,24" HorizontalAlignment="Stretch" MaxWidth="960">
+                        <StackPanel x:Name="AppearanceSectionPanel">
+                            <TextBlock Text="外观" Style="{StaticResource FluentTitleTextStyle}" />
+                            <TextBlock Text="选择应用主题与动态效果。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,8,0,0" />
+                            <TextBlock Text="主题与显示" Style="{StaticResource FluentSectionTextStyle}" />
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <local:FluentSettingsRow Margin="16,12" StackAtWidth="420" x:Name="ThemeSettingsRow">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="应用主题" Style="{StaticResource FluentBodyTextStyle}" />
+                                        <TextBlock Text="同时应用于工具栏、笔菜单和设置窗口。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <ComboBox x:Name="ThemeComboBox" Style="{StaticResource FluentComboBoxStyle}" Width="144">
+                                            <ComboBoxItem Content="浅色" />
+                                            <ComboBoxItem Content="深色" />
+                                            <ComboBoxItem Content="跟随系统" />
+                                        </ComboBox>
+                                    </Grid>
+                                </local:FluentSettingsRow>
+                            </Border>
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <local:FluentSettingsRow Margin="16,12" StackAtWidth="320">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="减少动画" Style="{StaticResource FluentBodyTextStyle}" />
+                                        <TextBlock Text="关闭控件过渡和页面淡入；也尊重系统动画设置。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <local:FluentToggleSwitch x:Name="ReduceMotionSwitch" Style="{StaticResource FluentToggleSwitchStyle}" ToolTip="减少动画" />
+                                    </Grid>
+                                </local:FluentSettingsRow>
+                            </Border>
+                            <TextBlock Text="界面规范" Style="{StaticResource FluentSectionTextStyle}" />
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <StackPanel Margin="16,16">
+                                    <TextBlock Text="WinUI 3 / Fluent Design" Style="{StaticResource FluentBodyTextStyle}" />
+                                    <TextBlock Text="统一的圆角、间距、字体层级、选中态与键盘焦点。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,6,0,0" />
+                                    <TextBlock Text="浮动窗口采用不透明主题表面，保证在任意桌面背景上清晰可见。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,6,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel x:Name="InkSectionPanel">
+                            <TextBlock Text="墨迹" Style="{StaticResource FluentTitleTextStyle}" />
+                            <TextBlock Text="配置画笔和采样方式。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,8,0,0" />
+                            <TextBlock Text="笔迹" Style="{StaticResource FluentSectionTextStyle}" />
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <StackPanel Margin="16,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="画笔粗细" Style="{StaticResource FluentBodyTextStyle}" />
+                                        <TextBlock x:Name="PenWidthValueText" Grid.Column="1" Margin="12,0,0,0" Foreground="{StaticResource TextFillColorSecondaryBrush}" FontSize="12" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <TextBlock Text="与工具栏的笔设置保持同步。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,4,0,0" />
+                                    <Slider x:Name="PenWidthSlider" Style="{StaticResource FluentSliderStyle}" Margin="0,8,0,0" Minimum="1" Maximum="24" Value="4" TickFrequency="1" SmallChange="1" IsSnapToTickEnabled="True" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <local:FluentSettingsRow Margin="16,12" StackAtWidth="320">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="压力感应" Style="{StaticResource FluentBodyTextStyle}" />
+                                        <TextBlock Text="支持压感的笔可根据压力改变笔迹宽度。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <local:FluentToggleSwitch x:Name="PressureSwitch" Style="{StaticResource FluentToggleSwitchStyle}" ToolTip="压力感应" />
+                                    </Grid>
+                                </local:FluentSettingsRow>
+                            </Border>
+                            <TextBlock Text="采样与平滑" Style="{StaticResource FluentSectionTextStyle}" />
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <local:FluentSettingsRow Margin="16,12" StackAtWidth="420" x:Name="SmoothingSettingsRow">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="平滑等级" Style="{StaticResource FluentBodyTextStyle}" />
+                                        <TextBlock Text="在响应速度与笔迹平滑程度之间调整。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <ComboBox x:Name="SmoothingLevelComboBox" Style="{StaticResource FluentComboBoxStyle}" Width="144">
+                                            <ComboBoxItem Content="低延迟" />
+                                            <ComboBoxItem Content="平衡" />
+                                            <ComboBoxItem Content="高平滑" />
+                                        </ComboBox>
+                                    </Grid>
+                                </local:FluentSettingsRow>
+                            </Border>
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <StackPanel Margin="16,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="最小采样点距" Style="{StaticResource FluentBodyTextStyle}" />
+                                        <TextBlock x:Name="MinPointDistanceValueText" Grid.Column="1" Margin="12,0,0,0" Foreground="{StaticResource TextFillColorSecondaryBrush}" FontSize="12" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <TextBlock Text="较小的值保留更多书写采样点。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,4,0,0" />
+                                    <Slider x:Name="MinPointDistanceSlider" Style="{StaticResource FluentSliderStyle}" Margin="0,8,0,0" Minimum="0.4" Maximum="2.5" Value="0.75" TickFrequency="0.05" SmallChange="0.05" IsSnapToTickEnabled="True" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <local:FluentSettingsRow Margin="16,12" StackAtWidth="320">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="实时采样通道" Style="{StaticResource FluentBodyTextStyle}" />
+                                        <TextBlock Text="尝试读取中间采样点；不支持时保留默认通道。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <local:FluentToggleSwitch x:Name="RealtimeSamplingSwitch" Style="{StaticResource FluentToggleSwitchStyle}" ToolTip="实时采样通道" />
+                                    </Grid>
+                                </local:FluentSettingsRow>
+                            </Border>
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <local:FluentSettingsRow Margin="16,12" StackAtWidth="320">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="倾斜数据采集（实验）" Style="{StaticResource FluentBodyTextStyle}" />
+                                        <TextBlock Text="记录支持设备的倾斜数据，暂不改变笔尖形状。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <local:FluentToggleSwitch x:Name="TiltSwitch" Style="{StaticResource FluentToggleSwitchStyle}" ToolTip="倾斜数据采集" />
+                                    </Grid>
+                                </local:FluentSettingsRow>
+                            </Border>
+                            <Button x:Name="ResetInkButton" Content="重置书写参数" Style="{StaticResource FluentButtonStyle}" HorizontalAlignment="Left" Margin="0,12,0,0" />
+                        </StackPanel>
+                        <StackPanel x:Name="InteractionSectionPanel">
+                            <TextBlock Text="窗口与交互" Style="{StaticResource FluentTitleTextStyle}" />
+                            <TextBlock Text="让工具栏适应你的操作方式。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,8,0,0" />
+                            <TextBlock Text="窗口行为" Style="{StaticResource FluentSectionTextStyle}" />
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <local:FluentSettingsRow Margin="16,12" StackAtWidth="320">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="始终置顶工具栏" Style="{StaticResource FluentBodyTextStyle}" />
+                                        <TextBlock Text="鼠标模式下也保持置顶；书写时始终在画布上方。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <Grid Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center">
+                                        <local:FluentToggleSwitch x:Name="KeepToolbarOnTopSwitch" Style="{StaticResource FluentToggleSwitchStyle}" ToolTip="始终置顶工具栏" />
+                                    </Grid>
+                                </local:FluentSettingsRow>
+                            </Border>
+                            <TextBlock Text="操作方式" Style="{StaticResource FluentSectionTextStyle}" />
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <StackPanel Margin="16,16">
+                                    <TextBlock Text="鼠标与触摸" Style="{StaticResource FluentBodyTextStyle}" />
+                                    <TextBlock Text="按住右侧双竖线把手移动工具栏；触摸使用独立的触点捕获。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,6,0,0" />
+                                    <TextBlock Text="再次点击已选中的笔打开颜色、粗细与笔类型菜单。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,8,0,0" />
+                                    <TextBlock Text="键盘" Style="{StaticResource FluentBodyTextStyle}" Margin="0,16,0,0" />
+                                    <TextBlock Text="Tab 切换控件，空格切换开关，方向键调整滑块，Esc 关闭笔菜单或返回鼠标模式。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,6,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <StackPanel x:Name="AboutSectionPanel">
+                            <TextBlock Text="关于" Style="{StaticResource FluentTitleTextStyle}" />
+                            <TextBlock Text="应用信息与设计基线。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,8,0,0" />
+                            <TextBlock Text="揽星书写" Style="{StaticResource FluentSectionTextStyle}" />
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <StackPanel Margin="16,16">
+                                    <TextBlock Text="LanStartWrite.Inkcanvas" Style="{StaticResource FluentBodyTextStyle}" />
+                                    <TextBlock x:Name="AboutVersionText" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,6,0,0" />
+                                    <TextBlock Text="基于 Jalium.UI 的桌面批注工具。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,6,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="设计与实现" Style="{StaticResource FluentSectionTextStyle}" />
+                            <Border Style="{StaticResource FluentSettingsCardStyle}">
+                                <StackPanel Margin="16,16">
+                                    <TextBlock Text="WinUI 3 设计语言，Jalium 原生控件" Style="{StaticResource FluentBodyTextStyle}" />
+                                    <TextBlock Text="依据 microsoft-ui-xaml 的资源与状态定义适配；保留 Jalium 的输入、布局和窗口模型。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,6,0,0" />
+                                    <TextBlock Text="像素对齐按设备无关单位与当前显示缩放计算，不将静态截图视为交互验证。" Style="{StaticResource FluentDescriptionTextStyle}" Margin="0,8,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+                <TextBlock x:Name="SaveStatusText" Grid.Row="1" Margin="24,0,24,12" Style="{StaticResource FluentDescriptionTextStyle}" />
+            </Grid>
+        </Border>
     </Grid>
 </Window>

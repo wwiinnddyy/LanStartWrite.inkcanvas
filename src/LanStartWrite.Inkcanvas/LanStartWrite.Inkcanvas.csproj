@@ -19,21 +19,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jalium.UI" Version="26.10.2" />
+    <PackageReference Include="Jalium.UI" Version="26.10.9" />
   </ItemGroup>
 
-  <!-- 不嵌入 .uic：避免 LoadFromCompiledResource 路线丢失 x:Name。强制走 XamlReader + 嵌入的 .jalxaml。 -->
-  <Target Name="InkcanvasAnnotationToolbarSkipUicEmbed" AfterTargets="EmbedCompiledJalxaml">
-    <ItemGroup>
-      <EmbeddedResource Remove="@(EmbeddedResource)"
-                        Condition="$([System.String]::Copy('%(LogicalName)').EndsWith('AnnotationToolbarWindow.uic'))" />
-      <EmbeddedResource Remove="@(EmbeddedResource)"
-                        Condition="$([System.String]::Copy('%(LogicalName)').EndsWith('AnnotationOverlayWindow.uic'))" />
-      <EmbeddedResource Remove="@(EmbeddedResource)"
-                        Condition="$([System.String]::Copy('%(LogicalName)').EndsWith('SettingsWindow.uic'))" />
-      <EmbeddedResource Remove="@(EmbeddedResource)"
-                        Condition="$([System.String]::Copy('%(LogicalName)').EndsWith('PenSecondaryMenuWindow.uic'))" />
-    </ItemGroup>
-  </Target>
+  <ItemGroup>
+    <!-- Fluent(WinUI3) 主题字典：嵌入资源，启动时由 XamlReader 加载到应用资源 -->
+    <EmbeddedResource Include="Themes\Fluent\*.jalxaml" LogicalName="Themes/Fluent/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Themes\Fluent\Controls\*.jalxaml" LogicalName="Themes/Fluent/Controls/%(Filename)%(Extension)" />
+  </ItemGroup>
 
 </Project>

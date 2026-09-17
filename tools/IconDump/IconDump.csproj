@@ -7,8 +7,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="FluentIcons.Common" Version="2.1.325" />
-    <PackageReference Include="FluentIcons.WinUI" Version="2.1.325" />
-    <PackageReference Include="FluentIcons.Wpf" Version="2.1.325" />
+    <PackageReference Include="FluentIcons.Common" Version="2.1.341" />
   </ItemGroup>
 </Project>

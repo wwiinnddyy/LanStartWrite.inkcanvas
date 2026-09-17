@@ -2,3 +2,6 @@ bin/
 obj/
 artifacts/
 *.user
+.arts/winui-audit/
+.arts/winui-preview/
+.arts/smoke/

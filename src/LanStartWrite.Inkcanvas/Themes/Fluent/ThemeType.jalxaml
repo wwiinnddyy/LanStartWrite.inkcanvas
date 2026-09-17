@@ -1,0 +1,17 @@
+<!--
+  Fluent (WinUI3) 字体 / 字重 token。
+  来源：microsoft-ui-xaml TextBlock_themeresources.xaml
+  Title 28 SemiBold / Subtitle 20 / BodyLarge 18 / Body 14 / Caption 12。
+  注意：x:Double 资源不被运行时 XamlReader 支持，字号以字面量写入
+  各窗口/样式（28/20/18/14/12），此处仅提供字重与字体族资源。
+-->
+<ResourceDictionary
+    xmlns="http://schemas.jalium.ui/2024"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <FontFamily x:Key="ContentControlThemeFontFamily">Segoe UI Variable Text, Segoe UI</FontFamily>
+
+    <FontWeight x:Key="StrongTextFontWeight">SemiBold</FontWeight>
+    <FontWeight x:Key="NormalTextFontWeight">Normal</FontWeight>
+
+</ResourceDictionary>

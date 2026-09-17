@@ -1,0 +1,18 @@
+<!-- WinUI source: microsoft-ui-xaml 19e3bdc3c. Jalium adapter, not WPF XAML. -->
+<ResourceDictionary xmlns="http://schemas.jalium.ui/2024"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:local="clr-namespace:LanStartWrite.Inkcanvas">
+
+    <!-- Runtime loader: FluentTheme.Initialize, exact resource names and one-level merging. -->
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="ThemeTokens.Light.jalxaml" />
+        <ResourceDictionary Source="ThemeMetrics.jalxaml" />
+        <ResourceDictionary Source="ThemeType.jalxaml" />
+        <ResourceDictionary Source="ThemeAnimation.jalxaml" />
+        <ResourceDictionary Source="Controls/FluentCommon.jalxaml" />
+        <ResourceDictionary Source="Controls/AppBarTools.jalxaml" />
+        <ResourceDictionary Source="Controls/FluentInput.jalxaml" />
+        <ResourceDictionary Source="Controls/FluentNavigation.jalxaml" />
+    </ResourceDictionary.MergedDictionaries>
+
+</ResourceDictionary>

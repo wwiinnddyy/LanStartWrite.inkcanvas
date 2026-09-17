@@ -1,0 +1,115 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WinUI3 NavigationView 左侧导航的 Jalium 适配。
+  几何值直接对齐 microsoft-ui-xaml/controls/dev/NavigationView/NavigationView_themeresources.xaml：
+  - PaneToggleButton 40x36
+  - 左侧 NavigationViewItem MinHeight 36
+  - Item 外边距 4,2
+  - 选中指示条 3x16，r=2（指示条本体由窗口内容层绘制）
+-->
+<ResourceDictionary xmlns="http://schemas.jalium.ui/2024" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:LanStartWrite.Inkcanvas">
+  <Style x:Key="FluentNavigationPaneToggleButtonStyle" TargetType="Button">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="MinWidth" Value="40" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="{StaticResource SubtleFillColorTransparentBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorPrimaryBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="Button">
+        <Grid Background="Transparent">
+          <Border Name="Root" Shape="RoundedRectangle" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Background}" TransitionProperty="Background" TransitionDuration="0:0:0.083" TransitionTimingFunction="Recommended">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" />
+          </Border>
+          <Border xmlns="http://schemas.jalium.ui/2024" Name="NavigationFocus" Margin="1" BorderThickness="2" CornerRadius="4" BorderBrush="{StaticResource FocusStrokeColorOuterBrush}" Opacity="0" IsHitTestVisible="False">
+            <Border BorderThickness="1" CornerRadius="2" BorderBrush="{StaticResource FocusStrokeColorInnerBrush}" />
+          </Border>
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True">
+            <Setter TargetName="Root" Property="Background" Value="{StaticResource SubtleFillColorSecondaryBrush}" />
+          </Trigger>
+          <Trigger Property="IsPressed" Value="True">
+            <Setter TargetName="Root" Property="Background" Value="{StaticResource SubtleFillColorTertiaryBrush}" />
+          </Trigger>
+          <Trigger Property="IsEnabled" Value="False">
+            <Setter Property="Foreground" Value="{StaticResource TextFillColorDisabledBrush}" />
+          </Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True">
+            <Setter TargetName="NavigationFocus" Property="Opacity" Value="1" />
+          </Trigger>
+          <Trigger Property="IsEnabled" Value="False">
+            <Setter TargetName="NavigationFocus" Property="Opacity" Value="0" />
+          </Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style x:Key="FluentNavigationItemButtonStyle" TargetType="local:FluentNavigationItem">
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="Margin" Value="4,2" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Background" Value="{StaticResource SubtleFillColorTransparentBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorPrimaryBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="{StaticResource NavigationViewItemCornerRadius}" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="local:FluentNavigationItem">
+        <Grid Background="Transparent">
+          <Border Name="Root" Shape="RoundedRectangle" CornerRadius="{TemplateBinding CornerRadius}" Background="{TemplateBinding Background}" TransitionProperty="Background" TransitionDuration="0:0:0.083" TransitionTimingFunction="Recommended">
+            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}" />
+          </Border>
+          <Border xmlns="http://schemas.jalium.ui/2024" Name="NavigationFocus" Margin="1" BorderThickness="2" CornerRadius="4" BorderBrush="{StaticResource FocusStrokeColorOuterBrush}" Opacity="0" IsHitTestVisible="False">
+            <Border BorderThickness="1" CornerRadius="2" BorderBrush="{StaticResource FocusStrokeColorInnerBrush}" />
+          </Border>
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsSelected" Value="True">
+            <Setter TargetName="Root" Property="Background" Value="{StaticResource SubtleFillColorSecondaryBrush}" />
+          </Trigger>
+          <Trigger Property="IsMouseOver" Value="True">
+            <Setter TargetName="Root" Property="Background" Value="{StaticResource SubtleFillColorSecondaryBrush}" />
+          </Trigger>
+          <Trigger Property="IsPressed" Value="True">
+            <Setter TargetName="Root" Property="Background" Value="{StaticResource SubtleFillColorTertiaryBrush}" />
+          </Trigger>
+          <Trigger Property="IsEnabled" Value="False">
+            <Setter Property="Foreground" Value="{StaticResource TextFillColorDisabledBrush}" />
+          </Trigger>
+          <MultiTrigger xmlns="http://schemas.jalium.ui/2024">
+            <MultiTrigger.Conditions>
+              <Condition Property="IsSelected" Value="True" />
+              <Condition Property="IsMouseOver" Value="True" />
+              <Condition Property="IsEnabled" Value="True" />
+            </MultiTrigger.Conditions>
+            <Setter TargetName="Root" Property="Background" Value="{StaticResource SubtleFillColorTertiaryBrush}" />
+          </MultiTrigger>
+          <MultiTrigger xmlns="http://schemas.jalium.ui/2024">
+            <MultiTrigger.Conditions>
+              <Condition Property="IsSelected" Value="True" />
+              <Condition Property="IsPressed" Value="True" />
+              <Condition Property="IsEnabled" Value="True" />
+            </MultiTrigger.Conditions>
+            <Setter TargetName="Root" Property="Background" Value="{StaticResource SubtleFillColorSecondaryBrush}" />
+          </MultiTrigger>
+          <Trigger Property="IsKeyboardFocused" Value="True">
+            <Setter TargetName="NavigationFocus" Property="Opacity" Value="1" />
+          </Trigger>
+          <Trigger Property="IsEnabled" Value="False">
+            <Setter TargetName="NavigationFocus" Property="Opacity" Value="0" />
+          </Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+</ResourceDictionary>

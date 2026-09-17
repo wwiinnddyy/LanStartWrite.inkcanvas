@@ -1,401 +1,273 @@
 using System.Reflection;
 using Jalium.UI;
+using Jalium.UI.Automation;
 using Jalium.UI.Controls;
+using Jalium.UI.Input;
 using Jalium.UI.Media;
 
 namespace LanStartWrite.Inkcanvas;
 
 public partial class SettingsWindow : Window
 {
-    private const double SwitchThumbOnMarginLeft = 22;
+    private readonly Dictionary<SettingsNavPage, FrameworkElement> _pages;
+    private readonly Dictionary<SettingsNavPage, (FluentNavigationItem Button, TextBlock Label)> _navigation;
+    private readonly NavigationIndicatorAnimator _navigationIndicator;
+    private bool _sync;
+    private bool _loaded;
+    private bool? _manualCompact;
+    private bool _compact;
+    private bool _lastNarrow;
+    private double _layoutWidth = 960;
+    private SettingsNavPage _page;
 
-    private static readonly SolidColorBrush SectionIconBrush = new(Color.FromRgb(0x24, 0x24, 0x24));
-    private static readonly Brush NavSelectionBrush =
-        new SolidColorBrush(Color.FromArgb(38, 0, 120, 212));
-    private static readonly Brush NavIdleBrush =
-        new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
-
-    private static readonly Brush WindowChromeBrush =
-        new SolidColorBrush(Color.FromRgb(0xF3, 0xF3, 0xF3));
-
-    private const double ExpandedPaneWidth = 236;
-    private const double CompactPaneWidth = 64;
-
-    private Button AccentContrastSwitchButtonEl =>
-        (Button)AccentContrastSwitchButton!;
-    private Border AccentContrastSwitchTrackEl =>
-        (Border)AccentContrastSwitchTrack!;
-    private Border AccentContrastSwitchThumbEl =>
-        (Border)AccentContrastSwitchThumb!;
-
-    private Button FollowSystemThemeSwitchButtonEl =>
-        (Button)FollowSystemThemeSwitchButton!;
-    private Border FollowSystemThemeSwitchTrackEl =>
-        (Border)FollowSystemThemeSwitchTrack!;
-    private Border FollowSystemThemeSwitchThumbEl =>
-        (Border)FollowSystemThemeSwitchThumb!;
-
-    private Button KeepToolbarOnTopSwitchButtonEl =>
-        (Button)KeepToolbarOnTopSwitchButton!;
-    private Border KeepToolbarOnTopSwitchTrackEl =>
-        (Border)KeepToolbarOnTopSwitchTrack!;
-    private Border KeepToolbarOnTopSwitchThumbEl =>
-        (Border)KeepToolbarOnTopSwitchThumb!;
-    private Button RealtimeSamplingSwitchButtonEl =>
-        (Button)RealtimeSamplingSwitchButton!;
-    private Border RealtimeSamplingSwitchTrackEl =>
-        (Border)RealtimeSamplingSwitchTrack!;
-    private Border RealtimeSamplingSwitchThumbEl =>
-        (Border)RealtimeSamplingSwitchThumb!;
-    private Button PressureSwitchButtonEl =>
-        (Button)PressureSwitchButton!;
-    private Border PressureSwitchTrackEl =>
-        (Border)PressureSwitchTrack!;
-    private Border PressureSwitchThumbEl =>
-        (Border)PressureSwitchThumb!;
-    private Button TiltSwitchButtonEl =>
-        (Button)TiltSwitchButton!;
-    private Border TiltSwitchTrackEl =>
-        (Border)TiltSwitchTrack!;
-    private Border TiltSwitchThumbEl =>
-        (Border)TiltSwitchThumb!;
-
-    private bool _accentContrast;
-    private bool _followSystemTheme;
-    private bool _keepToolbarOnTop = true;
-    private bool _realtimeSampling = InkRuntimeOptions.Current.EnableRealtimeSampling;
-    private bool _pressureMapping = InkRuntimeOptions.Current.EnablePressure;
-    private bool _tiltMapping = InkRuntimeOptions.Current.EnableTilt;
-
-    private Border NavigationPane => (Border)NavigationPaneRoot!;
-
-    private Button HamburgerBtn => (Button)HamburgerButton!;
-
-    private Button AppearanceBtn => (Button)AppearanceNavButton!;
-    private Border AppearanceSelBorder => (Border)AppearanceNavSelectionBorder!;
-    private StackPanel AppearanceRow => (StackPanel)AppearanceNavRow!;
-    private TextBlock AppearanceLbl => (TextBlock)AppearanceNavLabel!;
-
-    private Button InkBtn => (Button)InkNavButton!;
-    private Border InkSelBorder => (Border)InkNavSelectionBorder!;
-    private StackPanel InkRow => (StackPanel)InkNavRow!;
-    private TextBlock InkLbl => (TextBlock)InkNavLabel!;
-
-    private Button InteractionBtn => (Button)InteractionNavButton!;
-    private Border InteractionSelBorder => (Border)InteractionNavSelectionBorder!;
-    private StackPanel InteractionRow => (StackPanel)InteractionNavRow!;
-    private TextBlock InteractionLbl => (TextBlock)InteractionNavLabel!;
-
-    private Button AboutBtn => (Button)AboutNavButton!;
-    private Border AboutSelBorder => (Border)AboutNavSelectionBorder!;
-    private StackPanel AboutRow => (StackPanel)AboutNavRow!;
-    private TextBlock AboutLbl => (TextBlock)AboutNavLabel!;
-
-    private Slider PenWidthSliderEl => (Slider)PenWidthSlider!;
-    private Slider MinPointDistanceSliderEl => (Slider)MinPointDistanceSlider!;
-    private TextBlock PenWidthValueTextEl => (TextBlock)PenWidthValueText!;
-    private TextBlock MinPointDistanceValueTextEl => (TextBlock)MinPointDistanceValueText!;
-    private ComboBox SmoothingLevelComboBoxEl => (ComboBox)SmoothingLevelComboBox!;
-    private TextBlock AboutVersionTextEl => (TextBlock)AboutVersionText!;
-
-    private FrameworkElement AppearancePanel => (FrameworkElement)AppearanceSectionPanel!;
-    private FrameworkElement InkPanel => (FrameworkElement)InkSectionPanel!;
-    private FrameworkElement InteractionPanel => (FrameworkElement)InteractionSectionPanel!;
-    private FrameworkElement AboutPanel => (FrameworkElement)AboutSectionPanel!;
-
-    private SettingsNavPage _navPage;
-
-    /// <summary>左侧导航窄带模式（仅图标），对应 WinUI NavigationView Compact 的常见形态。</summary>
-    private bool _isPaneCompact;
+    private Grid PageHost => (Grid)SettingsContentHost!;
+    private Border Pane => (Border)NavigationPaneRoot!;
+    private Slider PenWidth => (Slider)PenWidthSlider!;
+    private Slider PointDistance => (Slider)MinPointDistanceSlider!;
+    private ComboBox ThemeChoice => (ComboBox)ThemeComboBox!;
+    private ComboBox SmoothingChoice => (ComboBox)SmoothingLevelComboBox!;
 
     public SettingsWindow()
     {
         InitializeComponent();
-
-        AllowsTransparency = false;
-        SystemBackdrop = WindowBackdropType.None;
-        Background = WindowChromeBrush;
-
-        ApplySwitchVisuals();
+        _pages = new()
+        {
+            [SettingsNavPage.Appearance] = AppearanceSectionPanel!,
+            [SettingsNavPage.Ink] = InkSectionPanel!,
+            [SettingsNavPage.Interaction] = InteractionSectionPanel!,
+            [SettingsNavPage.About] = AboutSectionPanel!,
+        };
+        _navigation = new()
+        {
+            [SettingsNavPage.Appearance] = ((FluentNavigationItem)AppearanceNavButton!, (TextBlock)AppearanceNavLabel!),
+            [SettingsNavPage.Ink] = ((FluentNavigationItem)InkNavButton!, (TextBlock)InkNavLabel!),
+            [SettingsNavPage.Interaction] = ((FluentNavigationItem)InteractionNavButton!, (TextBlock)InteractionNavLabel!),
+            [SettingsNavPage.About] = ((FluentNavigationItem)AboutNavButton!, (TextBlock)AboutNavLabel!),
+        };
+        _navigationIndicator = new NavigationIndicatorAnimator((Border)NavigationSelectionIndicator!);
+        NavigationPaneLayout!.LayoutUpdated += NavigationPane_OnLayoutUpdated;
+        // Only the current page belongs to the live tree: no hidden controls in Tab/UIA.
+        PageHost.Children.Clear();
         NavigateTo(SettingsNavPage.Appearance, force: true);
 
-        Loaded += OnLoaded;
-    }
+        WireControls();
+        Synchronize(AppPreferences.Current);
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        ((TextBlock)AboutVersionText!).Text = $"版本 {version?.Major}.{version?.Minor}.{version?.Build} · Jalium.UI 26.10.9";
+        UpdateSaveStatus();
+        UpdatePane();
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        ApplyStrokePreviewGlyph();
-        WirePenSlider();
-        WireInkRuntimeControls();
-        ApplyVersionText();
-    }
-
-    private void ApplyStrokePreviewGlyph()
-    {
-        if (StrokePreviewIcon is SymbolIcon si)
-            si.Foreground = SectionIconBrush;
-    }
-
-    private void WirePenSlider()
-    {
-        var s = PenWidthSliderEl;
-        s.ValueChanged += (_, _) => UpdatePenWidthLabel();
-        UpdatePenWidthLabel();
-    }
-
-    private void WireInkRuntimeControls()
-    {
-        var runtime = InkRuntimeOptions.Current;
-        _realtimeSampling = runtime.EnableRealtimeSampling;
-        _pressureMapping = runtime.EnablePressure;
-        _tiltMapping = runtime.EnableTilt;
-
-        MinPointDistanceSliderEl.Value = runtime.MinPointDistance;
-        MinPointDistanceSliderEl.ValueChanged += (_, _) =>
+        AppPreferences.Changed += Synchronize;
+        AppPreferences.SaveStatusChanged += UpdateSaveStatus;
+        FluentTheme.Changed += OnThemeChanged;
+        SystemSettingsChanged += (_, _) => FluentTheme.ApplyPreferences();
+        Loaded += (_, _) =>
         {
-            InkRuntimeOptions.SetMinPointDistance(MinPointDistanceSliderEl.Value);
-            UpdateMinPointDistanceLabel();
+            _loaded = true;
+            if (Content is FrameworkElement layout && layout.RenderSize.Width > 0)
+                _layoutWidth = layout.RenderSize.Width;
+            UpdatePane();
+            OnThemeChanged();
+            FluentTheme.ApplyMotionPolicy(this);
         };
-        UpdateMinPointDistanceLabel();
-
-        SmoothingLevelComboBoxEl.SelectedIndex = runtime.SmoothingLevel switch
+        // The content root, unlike the Window's declared Width, follows native client resizing.
+        ((FrameworkElement)Content!).SizeChanged += (_, e) =>
         {
-            InkSmoothingLevel.Low => 0,
-            InkSmoothingLevel.High => 2,
-            _ => 1,
+            _layoutWidth = e.NewSize.Width;
+            var narrow = _layoutWidth < 800;
+            if (narrow != _lastNarrow) _manualCompact = null;
+            _lastNarrow = narrow;
+            UpdatePane();
         };
-        SmoothingLevelComboBoxEl.SelectionChanged += (_, _) =>
+        Closed += (_, _) =>
         {
-            var level = SmoothingLevelComboBoxEl.SelectedIndex switch
+            NavigationPaneLayout!.LayoutUpdated -= NavigationPane_OnLayoutUpdated;
+            _navigationIndicator.Complete();
+            AppPreferences.Changed -= Synchronize;
+            AppPreferences.SaveStatusChanged -= UpdateSaveStatus;
+            FluentTheme.Changed -= OnThemeChanged;
+            AppPreferences.Flush();
+        };
+    }
+
+    private void WireControls()
+    {
+        foreach (var item in _navigation.Values)
+        {
+            AutomationProperties.SetName(item.Button, item.Label.Text);
+            item.Button.PreviewKeyDown += Navigation_OnPreviewKeyDown;
+        }
+        AutomationProperties.SetName((Button)HamburgerButton!, "展开或折叠导航");
+        BindSwitch((FluentToggleSwitch)ReduceMotionSwitch!, "减少动画", value =>
+            AppPreferences.Update(AppPreferences.Current with { ReduceMotion = value }));
+        BindSwitch((FluentToggleSwitch)KeepToolbarOnTopSwitch!, "始终置顶工具栏", value =>
+            AppPreferences.Update(AppPreferences.Current with { KeepToolbarOnTop = value }));
+        BindSwitch((FluentToggleSwitch)PressureSwitch!, "压力感应", InkRuntimeOptions.SetEnablePressure);
+        BindSwitch((FluentToggleSwitch)RealtimeSamplingSwitch!, "实时采样通道", InkRuntimeOptions.SetRealtimeSampling);
+        BindSwitch((FluentToggleSwitch)TiltSwitch!, "倾斜数据采集", InkRuntimeOptions.SetEnableTilt);
+        AutomationProperties.SetName(ThemeChoice, "应用主题");
+        AutomationProperties.SetName(SmoothingChoice, "平滑等级");
+        AutomationProperties.SetName(PenWidth, "画笔粗细");
+        AutomationProperties.SetName(PointDistance, "最小采样点距");
+        ThemeChoice.SelectionChanged += (_, _) =>
+        {
+            if (_sync) return;
+            var index = SelectedIndex(ThemeChoice);
+            if (index >= 0) AppPreferences.Update(AppPreferences.Current with { Theme = (AppTheme)index });
+        };
+        SmoothingChoice.SelectionChanged += (_, _) =>
+        {
+            if (_sync) return;
+            var index = SelectedIndex(SmoothingChoice);
+            if (index >= 0) InkRuntimeOptions.SetSmoothingLevel((InkSmoothingLevel)index);
+        };
+        PenWidth.ValueChanged += (_, _) =>
+        {
+            ((TextBlock)PenWidthValueText!).Text = $"{Math.Round(PenWidth.Value):0} px";
+            if (!_sync) AppPreferences.Update(AppPreferences.Current with { PenWidth = PenWidth.Value });
+        };
+        PointDistance.ValueChanged += (_, _) =>
+        {
+            ((TextBlock)MinPointDistanceValueText!).Text = $"{PointDistance.Value:F2} px";
+            if (!_sync) InkRuntimeOptions.SetMinPointDistance(PointDistance.Value);
+        };
+        ((Button)ResetInkButton!).Click += (_, _) =>
+        {
+            AppPreferences.Update(AppPreferences.Current with
             {
-                0 => InkSmoothingLevel.Low,
-                2 => InkSmoothingLevel.High,
-                _ => InkSmoothingLevel.Balanced,
-            };
-            InkRuntimeOptions.SetSmoothingLevel(level);
+                PenWidth = 4, Pressure = false, Tilt = false, RealtimeSampling = true,
+                Smoothing = InkSmoothingLevel.Balanced, MinPointDistance = 0.75,
+            });
         };
     }
 
-    private void UpdatePenWidthLabel()
+    private void Navigation_OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        var v = (int)Math.Round(PenWidthSliderEl.Value);
-        PenWidthValueTextEl.Text = $"{v} px";
+        if (e.KeyboardModifiers != ModifierKeys.None) return;
+        var buttons = _navigation.Values.Select(item => item.Button).ToArray();
+        var current = Array.FindIndex(buttons, button => ReferenceEquals(button, sender));
+        if (current < 0) return;
+        var target = e.Key switch
+        {
+            Key.Down => (current + 1) % buttons.Length,
+            Key.Up => (current + buttons.Length - 1) % buttons.Length,
+            Key.Home => 0,
+            Key.End => buttons.Length - 1,
+            _ => -1,
+        };
+        if (target < 0) return;
+        buttons[target].Focus();
+        e.Handled = true;
     }
 
-    private void UpdateMinPointDistanceLabel()
+    private void BindSwitch(FluentToggleSwitch control, string name, Action<bool> change)
     {
-        MinPointDistanceValueTextEl.Text = $"{MinPointDistanceSliderEl.Value:F2} px";
+        AutomationProperties.SetName(control, name);
+        control.Checked += Handle;
+        control.Unchecked += Handle;
+        void Handle(object sender, RoutedEventArgs e)
+        {
+            if (!_sync) change(control.IsChecked == true);
+        }
     }
 
-    private void ApplyVersionText()
+    private void Synchronize(PreferenceSnapshot value)
     {
-        var v = Assembly.GetExecutingAssembly().GetName().Version;
-        if (v is not null)
-            AboutVersionTextEl.Text = $"版本 {v.Major}.{v.Minor}.{v.Build}";
+        _sync = true;
+        try
+        {
+            ThemeChoice.SelectedItem = ThemeChoice.Items[(int)value.Theme];
+            SmoothingChoice.SelectedItem = SmoothingChoice.Items[(int)value.Smoothing];
+            ((FluentToggleSwitch)ReduceMotionSwitch!).IsChecked = value.ReduceMotion;
+            ((FluentToggleSwitch)KeepToolbarOnTopSwitch!).IsChecked = value.KeepToolbarOnTop;
+            ((FluentToggleSwitch)PressureSwitch!).IsChecked = value.Pressure;
+            ((FluentToggleSwitch)RealtimeSamplingSwitch!).IsChecked = value.RealtimeSampling;
+            ((FluentToggleSwitch)TiltSwitch!).IsChecked = value.Tilt;
+            PenWidth.Value = value.PenWidth;
+            PointDistance.Value = value.MinPointDistance;
+            ((TextBlock)PenWidthValueText!).Text = $"{value.PenWidth:0} px";
+            ((TextBlock)MinPointDistanceValueText!).Text = $"{value.MinPointDistance:F2} px";
+        }
+        finally { _sync = false; }
     }
 
-    private void ApplySwitchVisuals()
+    private static int SelectedIndex(ComboBox combo)
     {
-        // AccentContrast
-        AccentContrastSwitchTrackEl.Background = _accentContrast
-            ? new SolidColorBrush(Color.FromArgb(0x26, 0x00, 0x78, 0xD4))
-            : new SolidColorBrush(Color.FromArgb(0x1A, 0x00, 0x00, 0x00));
-        AccentContrastSwitchThumbEl.HorizontalAlignment = HorizontalAlignment.Left;
-        AccentContrastSwitchThumbEl.Margin = new Thickness(
-            _accentContrast ? SwitchThumbOnMarginLeft : 0, 0, 0, 0);
-
-        // FollowSystemTheme (currently reserved/disabled in UI)
-        FollowSystemThemeSwitchTrackEl.Background = _followSystemTheme
-            ? new SolidColorBrush(Color.FromArgb(0x26, 0x00, 0x78, 0xD4))
-            : new SolidColorBrush(Color.FromArgb(0x14, 0x00, 0x00, 0x00));
-        FollowSystemThemeSwitchThumbEl.HorizontalAlignment = HorizontalAlignment.Left;
-        FollowSystemThemeSwitchThumbEl.Margin = new Thickness(
-            _followSystemTheme ? SwitchThumbOnMarginLeft : 0, 0, 0, 0);
-
-        // KeepToolbarOnTop
-        KeepToolbarOnTopSwitchTrackEl.Background = _keepToolbarOnTop
-            ? new SolidColorBrush(Color.FromArgb(0x26, 0x00, 0x78, 0xD4))
-            : new SolidColorBrush(Color.FromArgb(0x1A, 0x00, 0x00, 0x00));
-        KeepToolbarOnTopSwitchThumbEl.HorizontalAlignment = HorizontalAlignment.Left;
-        KeepToolbarOnTopSwitchThumbEl.Margin = new Thickness(
-            _keepToolbarOnTop ? SwitchThumbOnMarginLeft : 0, 0, 0, 0);
-
-        // RealtimeSampling
-        RealtimeSamplingSwitchTrackEl.Background = _realtimeSampling
-            ? new SolidColorBrush(Color.FromArgb(0x26, 0x00, 0x78, 0xD4))
-            : new SolidColorBrush(Color.FromArgb(0x1A, 0x00, 0x00, 0x00));
-        RealtimeSamplingSwitchThumbEl.HorizontalAlignment = HorizontalAlignment.Left;
-        RealtimeSamplingSwitchThumbEl.Margin = new Thickness(
-            _realtimeSampling ? SwitchThumbOnMarginLeft : 0, 0, 0, 0);
-
-        // PressureMapping
-        PressureSwitchTrackEl.Background = _pressureMapping
-            ? new SolidColorBrush(Color.FromArgb(0x26, 0x00, 0x78, 0xD4))
-            : new SolidColorBrush(Color.FromArgb(0x1A, 0x00, 0x00, 0x00));
-        PressureSwitchThumbEl.HorizontalAlignment = HorizontalAlignment.Left;
-        PressureSwitchThumbEl.Margin = new Thickness(
-            _pressureMapping ? SwitchThumbOnMarginLeft : 0, 0, 0, 0);
-
-        // Tilt mapping
-        TiltSwitchTrackEl.Background = _tiltMapping
-            ? new SolidColorBrush(Color.FromArgb(0x26, 0x00, 0x78, 0xD4))
-            : new SolidColorBrush(Color.FromArgb(0x1A, 0x00, 0x00, 0x00));
-        TiltSwitchThumbEl.HorizontalAlignment = HorizontalAlignment.Left;
-        TiltSwitchThumbEl.Margin = new Thickness(
-            _tiltMapping ? SwitchThumbOnMarginLeft : 0, 0, 0, 0);
+        for (var i = 0; i < combo.Items.Count; i++)
+            if (ReferenceEquals(combo.Items[i], combo.SelectedItem)) return i;
+        return -1;
     }
 
-    private void AccentContrastSwitchButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        _accentContrast = !_accentContrast;
-        ApplySwitchVisuals();
-    }
+    private void UpdateSaveStatus() => ((TextBlock)SaveStatusText!).Text =
+        AppPreferences.SaveError ?? (AppPreferences.IsSavePending ? "正在保存更改…" : "更改会自动应用并保存。");
 
-    private void FollowSystemThemeSwitchButton_OnClick(object sender, RoutedEventArgs e)
+    private void OnThemeChanged()
     {
-        _ = sender;
-        _ = e;
-        _followSystemTheme = !_followSystemTheme;
-        ApplySwitchVisuals();
-    }
-
-    private void KeepToolbarOnTopSwitchButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        _keepToolbarOnTop = !_keepToolbarOnTop;
-        ApplySwitchVisuals();
-    }
-
-    private void RealtimeSamplingSwitchButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        _realtimeSampling = !_realtimeSampling;
-        InkRuntimeOptions.SetRealtimeSampling(_realtimeSampling);
-        ApplySwitchVisuals();
-    }
-
-    private void PressureSwitchButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        _pressureMapping = !_pressureMapping;
-        InkRuntimeOptions.SetEnablePressure(_pressureMapping);
-        ApplySwitchVisuals();
-    }
-
-    private void TiltSwitchButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        _tiltMapping = !_tiltMapping;
-        InkRuntimeOptions.SetEnableTilt(_tiltMapping);
-        ApplySwitchVisuals();
-    }
-
-    private void HamburgerButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        _isPaneCompact = !_isPaneCompact;
-        ApplyPaneChrome();
-    }
-
-    private void AppearanceNav_OnClick(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        NavigateTo(SettingsNavPage.Appearance);
-    }
-
-    private void InkNav_OnClick(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        NavigateTo(SettingsNavPage.Ink);
-    }
-
-    private void InteractionNav_OnClick(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        NavigateTo(SettingsNavPage.Interaction);
-    }
-
-    private void AboutNav_OnClick(object sender, RoutedEventArgs e)
-    {
-        _ = sender;
-        _ = e;
-        NavigateTo(SettingsNavPage.About);
+        Background = FluentTheme.Brush("SolidBackgroundFillColorBaseBrush");
+        Foreground = FluentTheme.Brush("TextFillColorPrimaryBrush");
+        if (TitleBar is { } titleBar)
+        {
+            titleBar.Background = Background;
+            titleBar.Foreground = Foreground;
+        }
+        UpdateNavigation();
+        if (!FluentTheme.AnimationsEnabled) _navigationIndicator.Complete();
     }
 
     private void NavigateTo(SettingsNavPage page, bool force = false)
     {
-        if (!force && page == _navPage)
-            return;
-        _navPage = page;
-
-        var appearance = page == SettingsNavPage.Appearance;
-        AppearancePanel.Visibility = appearance ? Visibility.Visible : Visibility.Collapsed;
-
-        var ink = page == SettingsNavPage.Ink;
-        InkPanel.Visibility = ink ? Visibility.Visible : Visibility.Collapsed;
-
-        var interaction = page == SettingsNavPage.Interaction;
-        InteractionPanel.Visibility = interaction ? Visibility.Visible : Visibility.Collapsed;
-
-        var about = page == SettingsNavPage.About;
-        AboutPanel.Visibility = about ? Visibility.Visible : Visibility.Collapsed;
-
-        AppearanceSelBorder.Background = appearance ? NavSelectionBrush : NavIdleBrush;
-        InkSelBorder.Background = ink ? NavSelectionBrush : NavIdleBrush;
-        InteractionSelBorder.Background = interaction ? NavSelectionBrush : NavIdleBrush;
-        AboutSelBorder.Background = about ? NavSelectionBrush : NavIdleBrush;
-    }
-
-    private void ApplyPaneChrome()
-    {
-        NavigationPane.Width = _isPaneCompact ? CompactPaneWidth : ExpandedPaneWidth;
-
-        var labelsVisible = !_isPaneCompact;
-        AppearanceLbl.Visibility = labelsVisible ? Visibility.Visible : Visibility.Collapsed;
-        InkLbl.Visibility = labelsVisible ? Visibility.Visible : Visibility.Collapsed;
-        InteractionLbl.Visibility = labelsVisible ? Visibility.Visible : Visibility.Collapsed;
-        AboutLbl.Visibility = labelsVisible ? Visibility.Visible : Visibility.Collapsed;
-
-        var rowAlign = _isPaneCompact ? HorizontalAlignment.Center : HorizontalAlignment.Left;
-        AppearanceRow.HorizontalAlignment = rowAlign;
-        InkRow.HorizontalAlignment = rowAlign;
-        InteractionRow.HorizontalAlignment = rowAlign;
-        AboutRow.HorizontalAlignment = rowAlign;
-
-        HamburgerBtn.HorizontalAlignment =
-            _isPaneCompact ? HorizontalAlignment.Center : HorizontalAlignment.Left;
-
-        void StyleNavBtn(Button b)
+        if (!force && page == _page) return;
+        ThemeChoice.IsDropDownOpen = false;
+        SmoothingChoice.IsDropDownOpen = false;
+        _page = page;
+        UpdateNavigation(animateIndicator: _loaded);
+        PageHost.Children.Clear();
+        var panel = _pages[page];
+        PageHost.Children.Add(panel);
+        ((ScrollViewer)SettingsScrollViewer!).ScrollToVerticalOffset(0);
+        if (_loaded)
         {
-            b.HorizontalAlignment = HorizontalAlignment.Stretch;
-            if (_isPaneCompact)
-            {
-                b.Padding = new Thickness(10);
-                b.Margin = new Thickness(4);
-            }
-            else
-            {
-                b.Padding = new Thickness(14, 10, 14, 10);
-                b.Margin = new Thickness(4);
-            }
+            FluentTheme.ApplyMotionPolicy(panel);
+            FluentTheme.Enter(panel);
         }
-
-        StyleNavBtn(AppearanceBtn);
-        StyleNavBtn(InkBtn);
-        StyleNavBtn(InteractionBtn);
-        StyleNavBtn(AboutBtn);
     }
-}
 
+    private void UpdateNavigation(bool animateIndicator = false)
+    {
+        foreach (var (page, parts) in _navigation)
+            parts.Button.IsSelected = page == _page;
+        UpdateSelectionIndicator(animateIndicator);
+    }
+
+    private void NavigationPane_OnLayoutUpdated(object? sender, EventArgs e) => UpdateSelectionIndicator(false);
+
+    private void UpdateSelectionIndicator(bool animate)
+    {
+        var item = _navigation[_page].Button;
+        var layer = (Canvas)NavigationIndicatorLayer!;
+        if (item.ActualHeight <= 0 || layer.ActualHeight <= 0) return;
+        var transform = item.TransformToVisual(layer);
+        if (transform is null) return;
+        var position = transform.Transform(new Point(0,
+            (item.ActualHeight - NavigationIndicatorAnimator.RestingHeight) / 2));
+        // Use laid-out item positions: compact mode, DPI changes and the footer item
+        // must not depend on a hard-coded row index or cached window height.
+        _navigationIndicator.MoveTo(position.X, position.Y,
+            animate && _loaded && FluentTheme.AnimationsEnabled);
+    }
+
+    private void UpdatePane()
+    {
+        _compact = _manualCompact ?? (_layoutWidth < 800);
+        Pane.Width = _compact ? 48 : 220;
+        PageHost.Margin = new Thickness(_layoutWidth < 640 ? 16 : 24);
+        foreach (var parts in _navigation.Values)
+            parts.Label.Visibility = _compact ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void HamburgerButton_OnClick(object sender, RoutedEventArgs e) { _manualCompact = !_compact; UpdatePane(); }
+    private void AppearanceNav_OnClick(object sender, RoutedEventArgs e) => NavigateTo(SettingsNavPage.Appearance);
+    private void InkNav_OnClick(object sender, RoutedEventArgs e) => NavigateTo(SettingsNavPage.Ink);
+    private void InteractionNav_OnClick(object sender, RoutedEventArgs e) => NavigateTo(SettingsNavPage.Interaction);
+    private void AboutNav_OnClick(object sender, RoutedEventArgs e) => NavigateTo(SettingsNavPage.About);
+}
