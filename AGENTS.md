@@ -296,10 +296,11 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
 7. 截不到（句柄没建出来、矩形为空、DIB 分配失败）就**没有底图**：画布回到透明，功能降级但不崩。
 
 
-## Critical: 两端安装包走 CI，细节看 `packaging/README.md`
+## Critical: 安装包走 CI（Windows 1 件 + Linux 4 件），细节看 `packaging/README.md`
 
-`.github/workflows/release.yml` 产 Windows（NSIS 安装包）+ Linux（AppImage），并可选建 GitHub Release。
-这一节只记"红一轮才知道"的四条，改工作流前先读它们：
+`.github/workflows/release.yml` 一次跑五个 job：`resolve`（版本号只算一次）→ `build`（矩阵：Windows
+NSIS / Linux AppImage + deb）→ `flatpak`、`linglong`（都只装包，取 `linux-publish-*` 那份产物，不重编）
+→ `release`。下面这些是"红一轮才知道"的，改工作流前先读：
 
 1. **还原走的是双目标整张图**：应用在 `net10.0-windows` + `net10.0` 两条腿上，所以在 **Windows** 上
    `publish -f net10.0-windows` 一样会去问 FluentJalium 的 net10.0 —— 单目标时报
@@ -318,9 +319,29 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
    工作流因此把 makensis 的日志读一遍，见 `no sections will be executed` 就红。
    **退出码 0 不等于包是对的**：这条是回读日志才发现的。
 
-实测（run 36014243074，版本 0.0.0-test）：三个 job 全绿；产物 setup.exe 31.8 MiB（PE +
-`Nullsoft Inst` 签名、Uninstall 2 pages）、AppImage 41.6 MiB（ELF 运行时 + `AI\x02` 魔数、272 个文件、
-未压 112.9 MB → 40.7 MB）。
+5. **Linux 四件共用一次 `dotnet publish`**：`flatpak` 与 `linglong` 两个 job 下载 `linux-publish-*`
+   那个中间产物，只装包不再编第二遍（各编一次迟早分出两个版本）。那个中间产物**不许**进 Release。
+6. **`download-artifact` 丢 Unix 的 +x 位**：所以每个装包脚本自己 `chmod +x` 那个 apphost，
+   而 `build-deb.sh` 的入口守门只断言"文件在"。曾经过早上用 `test -x`：deb 静默变空串，
+   错误报在玲珑的"取源失败"上，跟根因隔了三层。
+7. **`ll-builder` 取 `kind: file` 用的是 `/usr/bin/wget`** → `file://` 与相对路径都不吃；CI 就地起
+   `python3 -m http.server` 喂同一个 .deb。工具链在 `ppa.linyaps.org.cn` 的 OBS（Ubuntu 那份目录名
+   `Ubuntu_24.04`，flat repo；官方 install.md 写的 `ci.deepin.com/…/xUbuntu_24.04` 已 404），
+   而且 `linglong-box` 必须点名装 —— 它的 Depends 写 `linglong-box | crun`，runner 上有 crun，
+   apt 便跳过 box，而 `ll-builder` 找的是 `ll-box` 这个可执行文件。
+   产出的离线单文件是 **`.uab`**（`ll-builder export` 的默认），不是 `.lca`。
+8. **APPID 一处定义、CI 扫一致性**：`packaging/linux/appid` = `io.github.wwiinnddyy.lanstartwrite`，
+   `.desktop` / 图标按它命名，deb / Flatpak 清单 / 玲珑模板都读它；deb 那一步扫 `packaging/linux`
+   下所有 `*.lanstartwrite` 形状的名字，出现第二个值就红（抄不一致的症状是"装了三个各带一张
+   默认图的同名应用"，不会报错）。
+9. **deb 的验收是"在 docker 的 ubuntu:24.04 里真装一遍"**：`apt install` + 落位条数 +
+   `desktop-file-validate` + 白名单外的缺库即红。实测唯一缺的是 `liblttng-ust.so.0`
+   （coreclr 的 LTTng provider，24.04 只给 `.so.1`，缺了只是没追踪）—— 所以它进白名单，
+   不是往 `Depends` 里写一条装不上的包；`Depends` 实测只需 `libc6, libstdc++6`。
+
+实测（run 36030896388，v1.0.1，五个 job 全绿，Release 上正好五件资产）：setup.exe 32 MiB、
+deb 35 MiB（296 条落位、apt install OK、desktop-file-validate OK）、AppImage 42 MiB、
+flatpak 32 MiB（沙箱内自检 `/app/bin/lanstartwrite` 与 apphost 均可执行）、玲珑 uab 65 MiB。
 
 ## Jalium.UI Framework Reference
 

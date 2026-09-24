@@ -1,11 +1,15 @@
 # 打包与发布（release workflow）
 
-`.github/workflows/release.yml` 产出两端安装包，并（可选）创建 GitHub Release：
+`.github/workflows/release.yml` 产出五件安装包，并（可选）创建 GitHub Release。
+Linux 这一端四种装法共用同一份 `dotnet publish` 产物（`linux-publish-*` 那个中间产物不上传 Release）：
 
-| 平台 | 产物 | 打法 |
+| 平台 | 产物（v1.0.1 实测大小） | 打法 |
 |---|---|---|
-| Windows | `LanStartWrite.Inkcanvas-<版本>-windows-x64-setup.exe` | NSIS（`packaging/windows/installer.nsi`） |
-| Linux | `LanStartWrite.Inkcanvas-<版本>-linux-x64.AppImage` | appimagetool（`packaging/linux/build-appimage.sh`，工具由脚本自己取并解包 —— CI 上没有 FUSE） |
+| Windows | `…-windows-x64-setup.exe` 32 MiB | NSIS（`packaging/windows/installer.nsi`），每用户装到 `$LOCALAPPDATA` |
+| Linux · deb | `…-linux-amd64.deb` 35 MiB | `dpkg-deb`（`packaging/linux/build-deb.sh`），载荷在 `/opt/lanstartwrite` |
+| Linux · AppImage | `…-linux-x64.AppImage` 42 MiB | appimagetool（`packaging/linux/build-appimage.sh`，工具自己解包 —— CI 没 FUSE） |
+| Linux · Flatpak | `…-linux-x64.flatpak` 32 MiB | flatpak-builder + 清单 `packaging/linux/<appid>.json` |
+| Linux · 玲珑 | `io.github.wwiinnddyy.lanstartwrite_1.0.1.0_x86_64_main.uab` 65 MiB | `ll-builder`（模板 `packaging/linux/linglong.yaml.in`，把上面那个 .deb 摊进容器） |
 
 ## 怎么发一个版本
 
@@ -42,6 +46,29 @@
   上游已于 `e1f3366` 多目标，工作流里那条 sed 兜底随之删掉；哪天它退回单目标，CI 会红在 NU1201 上。
 - **Linux 产物里混着一些 Windows 原生 dll**（`jalium.native.*.dll`）：Jalium 的 build targets
   无条件拷贝所致，AppImage 里是死重（几 MB），不影响运行；该问题应报给上游。
+- **`actions/download-artifact` 会丢掉 Unix 的 +x 位**：所以 flatpak 清单与 `build-deb.sh`
+  都自己 `chmod +x` 那个 apphost，而 `build-deb.sh` 的入口守门只看"文件在"不看"可执行"
+  —— 早先它用 `test -x`，在玲珑那一步里静默把 deb 变成空串，报错报在完全无关的地方。
+- **自包含 .NET 在 Ubuntu 24.04 上唯一解析不出来的库是 `liblttng-ust.so.0`**（coreclr 的 LTTng
+  追踪 provider 要它；24.04 只提供 `.so.1`，缺了只是没有 LTTng 追踪，运行时自己降级）。
+  因此它进 deb 那步的白名单，**不是**往 `Depends` 里加一条装不上的包；白名单外的缺库 CI 直接红。
+  deb 的 `Depends` 实测只需要 `libc6, libstdc++6`。
+- **Wayland 会话做不到全屏批注**，这不是打包能补的：无边框全屏输入覆盖层与屏幕取帧都被合成器挡住。
+  Flatpak 因此只申请 `fallback-x11` + `wayland` + `dri` + `ipc`，X11 会话下正常。玲珑 / deb 同理。
+- **玲珑的工具链只认 HTTP(S) 取源**：`kind: file` 是交给 `/usr/bin/wget` 的，`file://` 与相对路径
+  都不吃（后者被当主机名解析）。CI 就地起 `python3 -m http.server` 喂同一个 .deb，
+  不依赖外部托管也不用先把包公开。另外它默认连接超时 5 秒，海外 runner 取
+  `mirror-repo-linglong.deepin.com`（UAB 要 `cn.org.linyaps.builder.utils`）不够，
+  这里给 `LINGLONG_CONNECT_TIMEOUT=120`。`ll-builder export` 产的是 **.uab**（离线单文件），不是 `.lca`。
+
+## 装（Linux 四种）
+
+```sh
+sudo apt install ./LanStartWrite.Inkcanvas-1.0.1-linux-amd64.deb   # deb
+chmod +x LanStartWrite.Inkcanvas-1.0.1-linux-x64.AppImage && ./LanStartWrite.Inkcanvas-1.0.1-linux-x64.AppImage
+flatpak install ./LanStartWrite.Inkcanvas-1.0.1-linux-x64.flatpak  # Flatpak 单文件包
+chmod +x io.github.wwiinnddyy.lanstartwrite_1.0.1.0_x86_64_main.uab && ./*.uab   # 玲珑 UAB（免装）
+```
 
 ## 本机验证（改了打包脚本先在本地跑一遍）
 
