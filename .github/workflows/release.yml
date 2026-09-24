@@ -466,7 +466,9 @@ jobs:
         shell: bash
         run: |
           tag="v$VERSION"
-          mapfile -t files < <(find artifacts -type f)
+          # linux-publish-* 是给 flatpak / 玲珑 用的中间产物（裸发布目录，几百个文件），
+          # 不是给人装的东西 —— 不排除的话会被一起挂到 Release 上。
+          mapfile -t files < <(find artifacts -type f -not -path 'artifacts/linux-publish-*')
           echo "本次上传："; printf '  %s\n' "${files[@]}"
           if [ "${#files[@]}" = 0 ]; then echo "::error::一个产物都没找到"; exit 1; fi
 
