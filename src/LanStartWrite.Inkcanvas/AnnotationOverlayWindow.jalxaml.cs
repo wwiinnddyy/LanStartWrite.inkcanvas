@@ -1,9 +1,3 @@
-using System.Diagnostics;
-using Dusk.Adapter.Jalium;
-using Dusk.Ink.Controls;
-using Dusk.Ink.Document;
-using Dusk.Ink.Model;
-using Dusk.Ink.Primitives;
 using Jalium.UI;
 using Jalium.UI.Controls;
 using Jalium.UI.Interop;
@@ -12,17 +6,20 @@ using Jalium.UI.Media.Imaging;
 
 namespace LanStartWrite.Inkcanvas;
 
+/// <summary>
+/// 屏幕批注画布：一块<b>透明</b>的全屏墨迹面，盖在当前桌面上。
+/// <para>
+/// 这块面本身（引擎控件、撤销历史、属性下发、拆销）在 <see cref="CanvasSurface"/> ——
+/// 白板那一块用的是同一个类。这个窗口只管屏幕批注特有的三件事：
+/// <b>透明</b>、<b>穿透</b>、<b>冻结底图</b>。
+/// </para>
+/// </summary>
 public partial class AnnotationOverlayWindow : Window
 {
     private static readonly Brush TransparentBrush =
         new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
 
-    private readonly JaliumInkCanvas _surface = new();
-    private readonly InkHistory _history;
-    private PenKind _currentKind = PenKind.Pen;
-    private Color _currentColor = Colors.Black;
-    private double _currentThickness = 3;
-    private EraserMode _eraserMode = EraserMode.Area;
+    private readonly CanvasSurface _surface;
 
     /// <summary>穿透的<b>目标状态</b>。外壳可能抹掉样式位，所以这里记着"应该是什么"，
     /// 好在下一次补救时知道往哪边补。</summary>
@@ -44,55 +41,46 @@ public partial class AnnotationOverlayWindow : Window
         // 它还会在画布显形 / 隐藏 / 被激活时自己重排（见那个类的注释）。
         WindowLayerManager.Register(this, WindowLayer.Canvas, "画布");
 
-        InkHost.Children.Add(_surface);
-
-        // 撤销/重做挂在文档上：书写、擦除、清空、整笔擦都进同一条历史。
-        _history = new InkHistory(_surface.Document);
-        _surface.Document.AttachHistory(_history);
-        _surface.Document.Changed += (_, _) => HistoryStateChanged?.Invoke();
-
-        ApplyAttributes();
-        ApplyTipOptions();
-        InkRuntimeOptions.Changed += OnInkRuntimeOptionsChanged;
-        InkTipOptions.Changed += OnInkTipOptionsChanged;
-        ApplyRuntimeOptions(InkRuntimeOptions.Current);
+        _surface = new CanvasSurface(Dispatcher);
+        _surface.AttachTo(InkHost);
         Closed += OnClosed;
-
-#if DEBUG
-        // 可见区由 ArrangeOverride 报进来的尺寸算出；格子塌成零尺寸时画面全空且不报错。
-        _surface.Loaded += (_, _) => Debug.Assert(
-            _surface.ActualWidth > 0, "ink host arranged to zero size: nothing will render");
-        _surface.StrokeCommitted += (_, _) => Debug.WriteLine(
-            $"[ink-metrics] doc={_surface.Document.Count} passes={_surface.RenderPassCount} "
-            + $"last={_surface.LastInputToRenderMs:F1}ms peak={_surface.PeakInputToRenderMs:F1}ms");
-#endif
     }
 
-    public void SetInkMode()
-    {
-        _surface.IsEraserMode = false;
-    }
+    /// <summary>这块画布的墨迹面。窗口只管形态，凡是要读引擎真实状态的一律从这里走。</summary>
+    internal CanvasSurface Surface => _surface;
 
-    public void SetEraseMode()
-    {
-        SetEraserMode(_eraserMode);
-    }
+    public void SetInkMode() => _surface.SetInkMode();
+
+    public void SetEraseMode() => _surface.SetEraseMode();
 
     /// <summary>换橡皮的擦法：面积擦＝引擎点擦，笔迹擦＝整笔摘除。</summary>
-    public void SetEraserMode(EraserMode mode)
-    {
-        _eraserMode = mode;
-        _surface.EditingMode = mode == EraserMode.Stroke
-            ? InkEditingMode.EraseByStroke
-            : InkEditingMode.EraseByPoint;
-    }
+    public void SetEraserMode(EraserMode mode) => _surface.SetEraserMode(mode);
 
-    public void SetEraserRadius(double radius)
-    {
-        _surface.EraserRadius = double.IsFinite(radius) ? Math.Clamp(radius, 4, 48) : 14;
-    }
+    /// <summary>橡皮半径，<b>单位是屏幕像素</b>；换成世界坐标这一步在 <see cref="CanvasSurface"/> 里做。</summary>
+    public void SetEraserRadius(double radius) => _surface.SetEraserRadius(radius);
 
-    public void ClearCanvas() => _surface.Clear();
+    public void ClearCanvas() => _surface.ClearCanvas();
+
+    public void SetPenKind(PenKind kind) => _surface.SetPenKind(kind);
+
+    public void SetPenColor(Color color) => _surface.SetPenColor(color);
+
+    public void SetPenThickness(double thickness) => _surface.SetPenThickness(thickness);
+
+    public bool CanUndo => _surface.CanUndo;
+
+    public bool CanRedo => _surface.CanRedo;
+
+    public void Undo() => _surface.Undo();
+
+    public void Redo() => _surface.Redo();
+
+    /// <summary>文档变了（因而可撤销/可重做的东西也变了）。宿主工具栏据此刷按钮状态。</summary>
+    public event Action? HistoryStateChanged
+    {
+        add => _surface.HistoryStateChanged += value;
+        remove => _surface.HistoryStateChanged -= value;
+    }
 
     /// <summary>
     /// 穿透：画布<b>留在屏上</b>，但鼠标与触摸直接落到它下面的窗口上。
@@ -184,94 +172,9 @@ public partial class AnnotationOverlayWindow : Window
                source.PixelHeight * 96.0 / Math.Max(1.0, source.DpiY))
             : (0, 0);
 
-    public bool CanUndo => _history.CanUndo;
-
-    public bool CanRedo => _history.CanRedo;
-
-    public void Undo() => _history.Undo();
-
-    public void Redo() => _history.Redo();
-
-    /// <summary>文档变了（因而可撤销/可重做的东西也变了）。宿主工具栏据此刷按钮状态。</summary>
-    public event Action? HistoryStateChanged;
-
-    public void SetPenKind(PenKind kind)
-    {
-        _currentKind = kind;
-        ApplyAttributes();
-    }
-
-    public void SetPenColor(Color color)
-    {
-        _currentColor = color;
-        ApplyAttributes();
-    }
-
-    public void SetPenThickness(double thickness)
-    {
-        _currentThickness = Math.Max(1, thickness);
-        ApplyAttributes();
-    }
-
-    private void ApplyAttributes()
-    {
-        var da = _surface.InkAttributes;
-        da.Kind = KindFor(_currentKind);
-        da.Color = new InkColor(
-            _currentColor.R,
-            _currentColor.G,
-            _currentColor.B,
-            AlphaFor(_currentKind));
-        da.Width = _currentThickness;
-        da.Height = _currentThickness;
-    }
-
-    private static StrokeKind KindFor(PenKind kind) => kind switch
-    {
-        PenKind.Highlighter => StrokeKind.Uniform,
-        PenKind.Laser => StrokeKind.Laser,
-        _ => StrokeKind.VariableWidth,
-    };
-
-    private static byte AlphaFor(PenKind kind) => kind switch
-    {
-        PenKind.Highlighter => InkBrushes.HighlighterAlpha,
-        PenKind.Laser => InkBrushes.LaserAlpha,
-        _ => byte.MaxValue,
-    };
-
-    private void OnInkRuntimeOptionsChanged(InkRuntimeSnapshot snapshot)
-    {
-        Dispatcher.BeginInvoke(() => ApplyRuntimeOptions(snapshot));
-    }
-
-    private void ApplyRuntimeOptions(InkRuntimeSnapshot snapshot)
-    {
-        _surface.InkAttributes.IgnorePressure = !snapshot.EnablePressure;
-    }
-
-    /// <summary>
-    /// 笔锋的注入点只有这一处：把应用侧的笔锋状态写进墨迹控件的 <c>TipSettings</c>。
-    /// <para>
-    /// 走的是引擎的快照往返（按参数名对齐、批量写），因此参数只改一次就只请求一次重绘。
-    /// 排队一拍的理由与墨迹偏好一致 —— 变更可能来自别的窗口的输入事件，
-    /// 同一拍里改画布属性会让那一拍的渲染读到半套参数。
-    /// </para>
-    /// </summary>
-    private void OnInkTipOptionsChanged()
-    {
-        Dispatcher.BeginInvoke(ApplyTipOptions);
-    }
-
-    private void ApplyTipOptions()
-    {
-        InkTipOptions.ApplyTo(_surface.TipSettings);
-    }
-
     private void OnClosed(object? sender, EventArgs e)
     {
-        InkRuntimeOptions.Changed -= OnInkRuntimeOptionsChanged;
-        InkTipOptions.Changed -= OnInkTipOptionsChanged;
+        // 墨迹控件必须显式拆：Jalium 不代调，而它挂着整棵墨迹视觉树（见 AGENTS）。
         _surface.Dispose();
     }
 }
