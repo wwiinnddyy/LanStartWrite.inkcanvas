@@ -15,6 +15,12 @@
                 <fluent:FluentNavigationItem x:Name="InkNavButton" Content="墨迹" ToolTip="墨迹">
                     <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE76D;" FontFamily="Segoe Fluent Icons" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
+                <fluent:FluentNavigationItem x:Name="CanvasNavButton" Content="画布" ToolTip="画布">
+                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE7F4;" FontFamily="Segoe Fluent Icons" /></fluent:FluentNavigationItem.Icon>
+                </fluent:FluentNavigationItem>
+                <fluent:FluentNavigationItem x:Name="ToolbarNavButton" Content="工具栏" ToolTip="工具栏">
+                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE700;" FontFamily="Segoe Fluent Icons" /></fluent:FluentNavigationItem.Icon>
+                </fluent:FluentNavigationItem>
                 <fluent:FluentNavigationItem x:Name="InteractionNavButton" Content="窗口与交互" ToolTip="窗口与交互">
                     <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE7C9;" FontFamily="Segoe Fluent Icons" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
@@ -81,7 +87,7 @@
                                             <TextBlock Text="画笔粗细" Style="{StaticResource BodyTextBlockStyle}" />
                                             <TextBlock x:Name="PenWidthValueText" Grid.Column="1" Margin="12,0,0,0" Foreground="{StaticResource TextFillColorSecondaryBrush}" FontSize="12" VerticalAlignment="Center" />
                                         </Grid>
-                                        <TextBlock Text="与工具栏的笔设置保持同步。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        <TextBlock Text="改的是工具栏上当前选中的那支笔。换一支笔就是另一套粗细 —— 想让两支笔不一样，在工具栏上点一下那一支再改。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                                         <Slider x:Name="PenWidthSlider" Margin="0,8,0,0" Minimum="1" Maximum="24" Value="4" TickFrequency="1" SmallChange="1" IsSnapToTickEnabled="True" />
                                     </StackPanel>
                                 </Border>
@@ -130,9 +136,33 @@
                                 <StackPanel x:Name="TipParameterSections" />
                                 <Button x:Name="ResetInkButton" Content="重置书写参数" HorizontalAlignment="Left" Margin="0,12,0,0" />
                             </StackPanel>
-                            <StackPanel x:Name="InteractionSectionPanel">
-                                <TextBlock Text="窗口与交互" Style="{StaticResource TitleTextBlockStyle}" />
-                                <TextBlock Text="让工具栏适应你的操作方式。" Style="{StaticResource HelperTextStyle}" Margin="0,8,0,0" />
+                            <StackPanel x:Name="CanvasSectionPanel">
+                                <TextBlock Text="画布" Style="{StaticResource TitleTextBlockStyle}" />
+                                <TextBlock Text="画布是「盖在当前屏幕之上的那一层」，它的行为按场景分开配。现在只有「屏幕批注」一个场景。" Style="{StaticResource HelperTextStyle}" Margin="0,8,0,0" />
+                                <TextBlock Text="屏幕批注" Style="{StaticResource SectionTextStyle}" />
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="380">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="穿透模式" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock Text="鼠标模式下画布仍然盖在最上层，但鼠标与触摸直接落到它下面的窗口上 —— 批注留在原地，人继续操作电脑。书写与擦除不受影响。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <fluent:FluentToggleSwitch x:Name="PassThroughSwitch" ToolTip="穿透模式" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="380">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="冻结模式" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock Text="进入画布（书写 / 擦除）时把当前屏幕截一张图铺在最底下，底下的画面就不再变了 —— 视频、滚动页面、闪烁的进度条都停在那一刻。每次重新进入都会重截一张。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <fluent:FluentToggleSwitch x:Name="FreezeSwitch" ToolTip="冻结模式" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <TextBlock x:Name="CanvasBehaviorText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                            </StackPanel>
+                            <StackPanel x:Name="ToolbarSectionPanel">
+                                <TextBlock Text="工具栏" Style="{StaticResource TitleTextBlockStyle}" />
+                                <TextBlock Text="工具栏上有哪些按钮、要不要始终置顶。" Style="{StaticResource HelperTextStyle}" Margin="0,8,0,0" />
                                 <TextBlock Text="窗口行为" Style="{StaticResource SectionTextStyle}" />
                                 <Border Style="{StaticResource SettingsCardStyle}">
                                     <fluent:FluentSettingsRow StackAtWidth="320">
@@ -143,6 +173,23 @@
                                         <fluent:FluentToggleSwitch x:Name="KeepToolbarOnTopSwitch" ToolTip="始终置顶工具栏" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
+                                <TextBlock Text="工具栏按钮" Style="{StaticResource SectionTextStyle}" />
+                                <TextBlock Text="每个按钮自带一套数据：两支笔可以各是一种颜色、粗细与笔锋，两支橡皮可以各是一种擦法与半径，互不影响。改某一项的数据在工具栏上做 —— 点中它（或选中后打开它的菜单），改颜色粗细当场生效；这里只管它的位置与去留。" Style="{StaticResource HelperTextStyle}" Margin="0,0,0,8" />
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <StackPanel Margin="0,12">
+                                        <StackPanel x:Name="ToolbarToolRows" />
+                                        <StackPanel Orientation="Horizontal" Margin="16,12,16,0">
+                                            <Button x:Name="AddPenToolButton" Content="加一支笔" />
+                                            <Button x:Name="AddEraserToolButton" Content="加一把橡皮" Margin="8,0,0,0" />
+                                            <Button x:Name="AddSeparatorToolButton" Content="加一条分隔线" Margin="8,0,0,0" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="ToolbarToolHintText" Style="{StaticResource HelperTextStyle}" Margin="16,8,16,0" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                            <StackPanel x:Name="InteractionSectionPanel">
+                                <TextBlock Text="窗口与交互" Style="{StaticResource TitleTextBlockStyle}" />
+                                <TextBlock Text="窗口怎么摆、键盘怎么用。" Style="{StaticResource HelperTextStyle}" Margin="0,8,0,0" />
                                 <TextBlock Text="操作方式" Style="{StaticResource SectionTextStyle}" />
                                 <Border Style="{StaticResource SettingsCardStyle}">
                                     <StackPanel>

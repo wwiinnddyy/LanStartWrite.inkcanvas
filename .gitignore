@@ -5,3 +5,9 @@ artifacts/
 .arts/winui-audit/
 .arts/winui-preview/
 .arts/smoke/
+
+# 打包产物（NSIS 安装包 / AppImage / 本地 publish 试跑）
+packaging/windows/dist/
+packaging/linux/dist/
+dist/
+publish/

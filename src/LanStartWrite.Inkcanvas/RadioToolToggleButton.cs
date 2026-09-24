@@ -8,7 +8,7 @@ namespace LanStartWrite.Inkcanvas;
 /// 具备 Radio 语义：<see cref="ToggleButton"/> 在已选中时再次点击不会取消选中，
 /// 而是触发 <see cref="Reactivated"/>（用于笔工具的二级菜单等）。
 /// </summary>
-public sealed class RadioToolToggleButton : AppBarToggleButton
+public sealed class RadioToolToggleButton : ToggleButton
 {
     public static readonly RoutedEvent ReactivatedEvent = EventManager.RegisterRoutedEvent(
         nameof(Reactivated),

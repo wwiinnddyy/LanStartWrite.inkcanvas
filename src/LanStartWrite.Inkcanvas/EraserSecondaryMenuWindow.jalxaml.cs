@@ -42,6 +42,9 @@ public partial class EraserSecondaryMenuWindow : Window
         Background = TransparentBrush;
         Opacity = 1;
 
+        // 层级登记：二级菜单层（在批注栏之上）。Topmost 不在这里声明 —— 见 WindowLayerManager。
+        WindowLayerManager.Register(this, WindowLayer.Panel, "橡皮菜单");
+
         EraserAreaRadio!.Checked += OnModeRadioChecked;
         EraserStrokeRadio!.Checked += OnModeRadioChecked;
         EraserRadius.ValueChanged += OnRadiusChanged;

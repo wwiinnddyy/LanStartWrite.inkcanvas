@@ -14,7 +14,11 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<SettingsNavPage, FrameworkElement> _pages;
     private readonly Dictionary<SettingsNavPage, FluentNavigationItem> _navigation;
     private readonly StrokeTipEditor _tipEditor;
+    private readonly ToolbarToolListEditor _toolListEditor;
     private readonly JaliumInkCanvas _tipPreview;
+
+    /// <summary>「工具栏按钮」那份列表的编辑器。探针据此按项标识取行里的按钮（代码建的元素没有 x:Name）。</summary>
+    internal ToolbarToolListEditor ToolEditor => _toolListEditor;
 
     /// <summary>
     /// 笔锋档位下拉里每一项对应的档位标识（下标即 <c>ComboBox.Items</c> 的下标）。
@@ -38,10 +42,18 @@ public partial class SettingsWindow : Window
     public SettingsWindow()
     {
         InitializeComponent();
+
+        // 层级登记：对话框层，全应用最高。这条层级保证的是"画布压不住设置窗口" ——
+        // 与"设置窗口必须是最前"是两回事：没有画布在场时它就是个普通窗口（不置顶），
+        // 可以被压到别的应用后面，这一点由 WindowLayerManager 里"对话框在场即退出置顶带"算出来。
+        WindowLayerManager.Register(this, WindowLayer.Dialog, "设置");
+
         _pages = new()
         {
             [SettingsNavPage.Appearance] = AppearanceSectionPanel!,
             [SettingsNavPage.Ink] = InkSectionPanel!,
+            [SettingsNavPage.Canvas] = CanvasSectionPanel!,
+            [SettingsNavPage.Toolbar] = ToolbarSectionPanel!,
             [SettingsNavPage.Interaction] = InteractionSectionPanel!,
             [SettingsNavPage.About] = AboutSectionPanel!,
         };
@@ -49,6 +61,8 @@ public partial class SettingsWindow : Window
         {
             [SettingsNavPage.Appearance] = (FluentNavigationItem)AppearanceNavButton!,
             [SettingsNavPage.Ink] = (FluentNavigationItem)InkNavButton!,
+            [SettingsNavPage.Canvas] = (FluentNavigationItem)CanvasNavButton!,
+            [SettingsNavPage.Toolbar] = (FluentNavigationItem)ToolbarNavButton!,
             [SettingsNavPage.Interaction] = (FluentNavigationItem)InteractionNavButton!,
             [SettingsNavPage.About] = (FluentNavigationItem)AboutNavButton!,
         };
@@ -61,6 +75,9 @@ public partial class SettingsWindow : Window
         _tipPreview = new JaliumInkCanvas();
         ((Grid)TipPreviewHost!).Children.Add(_tipPreview);
         InkTipOptions.ApplyTo(_tipPreview.TipSettings);
+
+        // 工具栏按钮列表：同样是照数据生成的（见 ToolbarToolListEditor）。
+        _toolListEditor = new ToolbarToolListEditor((Panel)ToolbarToolRows!);
 
         // Only the current page belongs to the live tree: no hidden controls in Tab/UIA.
         PageHost.Children.Clear();
@@ -91,6 +108,9 @@ public partial class SettingsWindow : Window
             FluentThemeManager.Changed -= OnThemeChanged;
             InkTipOptions.Changed -= OnTipOptionsChanged;
             InkTipOptions.PresetsChanged -= OnTipPresetsChanged;
+            ToolbarTools.LayoutChanged -= OnToolbarToolsChanged;
+            ToolbarTools.SelectionChanged -= OnToolbarToolsChanged;
+            CanvasOptions.Changed -= SyncCanvasSection;
 
             // 墨迹控件必须显式拆：Jalium 不代调，而它挂着整棵墨迹视觉树（见 AGENTS）。
             _tipPreview.Dispose();
@@ -119,16 +139,62 @@ public partial class SettingsWindow : Window
         PenWidth.ValueChanged += (_, _) =>
         {
             ((TextBlock)PenWidthValueText!).Text = $"{Math.Round(PenWidth.Value):0} px";
-            if (!_sync) AppPreferences.Update(AppPreferences.Current with { PenWidth = PenWidth.Value });
+            if (_sync) return;
+            // 改的是<b>当前选中的那支笔</b>，不是某个全局值 —— 这正是"两个笔按钮数据独立"：
+            // 在红笔上调粗细，不会把蓝笔一起改掉。
+            ToolbarTools.UpdateSelectedPen(pen => pen with { Thickness = PenWidth.Value });
         };
         ((Button)ResetInkButton!).Click += (_, _) =>
         {
             // 笔锋的落点是确定的「标准」档：这个按钮叫"重置书写参数"，
             // 不该因为当前是不是自定义而有时生效、有时不生效。
             InkTipOptions.ResetToDefault();
-            AppPreferences.Update(AppPreferences.Current with { PenWidth = 4, Pressure = false });
+            ToolbarTools.UpdateSelectedPen(pen => pen with { Thickness = 4 });
+            AppPreferences.Update(AppPreferences.Current with { Pressure = false });
         };
         WireTipControls();
+        WireToolbarControls();
+        WireCanvasControls();
+    }
+
+    /// <summary>
+    /// 「画布」页的接线。两个开关都是"下次进画布才看得出来"的那种，所以除了绑开关本身，
+    /// 还<b>用一句话把当前行为念出来</b>（见 <see cref="CanvasBehaviorSummary"/>）——
+    /// 拨完开关没有任何即时反馈时，这句话是用户唯一能确认"它记住了"的地方。
+    /// </summary>
+    private void WireCanvasControls()
+    {
+        BindSwitch((FluentToggleSwitch)PassThroughSwitch!, "穿透模式", CanvasOptions.SetPassThrough);
+        BindSwitch((FluentToggleSwitch)FreezeSwitch!, "冻结模式", CanvasOptions.SetFreeze);
+
+        CanvasOptions.Changed += SyncCanvasSection;
+        SyncCanvasSection();
+    }
+
+    private void SyncCanvasSection()
+    {
+        _sync = true;
+        try
+        {
+            ((FluentToggleSwitch)PassThroughSwitch!).IsChecked = CanvasOptions.PassThrough;
+            ((FluentToggleSwitch)FreezeSwitch!).IsChecked = CanvasOptions.Freeze;
+        }
+        finally { _sync = false; }
+
+        ((TextBlock)CanvasBehaviorText!).Text = CanvasBehaviorSummary();
+    }
+
+    /// <summary>把两个开关翻译成人话。<b>不是装饰</b>：这两个开关生效的时机在别处
+    /// （一个在鼠标模式、一个在进入画布的瞬间），念一遍是为了不用去猜。</summary>
+    private static string CanvasBehaviorSummary()
+    {
+        var mouse = CanvasOptions.PassThrough
+            ? "鼠标模式下画布留着，但鼠标与触摸穿到下面的窗口上"
+            : "鼠标模式下画布收起来";
+        var entering = CanvasOptions.Freeze
+            ? "进入书写 / 擦除时先截一张屏铺在底下"
+            : "进入书写 / 擦除时直接写在实时画面上";
+        return $"现在的行为：{mouse}；{entering}。";
     }
 
     /// <summary>
@@ -169,6 +235,68 @@ public partial class SettingsWindow : Window
         var index = TipPreset.SelectedIndex;
         return index >= 0 && index < _tipPresetIds.Count ? _tipPresetIds[index] : null;
     }
+
+    // ------------------------------------------------------------------ 工具栏按钮
+
+    /// <summary>
+    /// 「工具栏按钮」那一块的接线。三条来源收在一个刷新点上（<see cref="SyncToolbarSection"/>）：
+    /// 数据变了、选中项变了、窗口刚建好。
+    /// </summary>
+    private void WireToolbarControls()
+    {
+        AutomationProperties.SetName((Button)AddPenToolButton!, "再加一支笔");
+        AutomationProperties.SetName((Button)AddEraserToolButton!, "再加一把橡皮");
+        AutomationProperties.SetName((Button)AddSeparatorToolButton!, "加一条分隔线");
+
+        ((Button)AddPenToolButton!).Click += (_, _) => AddTool(ToolbarToolKind.Pen);
+        ((Button)AddEraserToolButton!).Click += (_, _) => AddTool(ToolbarToolKind.Eraser);
+        ((Button)AddSeparatorToolButton!).Click += (_, _) => AddTool(ToolbarToolKind.Separator);
+
+        ToolbarTools.LayoutChanged += OnToolbarToolsChanged;
+        ToolbarTools.SelectionChanged += OnToolbarToolsChanged;
+        SyncToolbarSection();
+    }
+
+    /// <summary>
+    /// 加一项，并<b>顺手选中它</b>：用户点"加一支笔"接下来几乎一定要调它的颜色 / 粗细，
+    /// 不选中就会变成"加了一支跟当前一样的笔，然后不知道该改哪一支"。
+    /// </summary>
+    private void AddTool(ToolbarToolKind kind)
+    {
+        var added = ToolbarTools.Add(kind);
+        if (added is null) return;
+        ToolbarTools.Select(added.Id);
+        SyncToolbarSection();
+    }
+
+    /// <summary>
+    /// 工具列表或选中项变了。<b>两个事件走同一条刷新</b>：
+    /// 列表面板要重建/刷新，而"画笔粗细"那条滑杆读的是<b>当前选中那一支笔</b> ——
+    /// 从工具栏那边改粗细时它也得跟着动，否则设置页会显示一个过期的数。
+    /// </summary>
+    private void OnToolbarToolsChanged()
+    {
+        SyncToolbarSection();
+        Synchronize(AppPreferences.Current);
+    }
+
+    private void SyncToolbarSection()
+    {
+        _toolListEditor.Sync();
+
+        var drawing = ToolbarTools.Items.Count(static tool => tool.Kind is ToolbarToolKind.Pen or ToolbarToolKind.Eraser);
+        var canAdd = ToolbarTools.Items.Count < ToolbarTools.MaxItems;
+        ((Button)AddPenToolButton!).IsEnabled = canAdd;
+        ((Button)AddEraserToolButton!).IsEnabled = canAdd;
+        ((Button)AddSeparatorToolButton!).IsEnabled = canAdd;
+
+        ((TextBlock)ToolbarToolHintText!).Text = canAdd
+            ? $"共 {ToolbarTools.Items.Count} 项，其中 {drawing} 个可画的工具。鼠标、撤销、重做、设置是固定项：可以移动，不能删除。"
+            : $"已到上限（{ToolbarTools.MaxItems} 项）。先删掉几项再加。";
+    }
+
+    private static double SelectedPenThickness() =>
+        ToolbarTools.Selected is { Kind: ToolbarToolKind.Pen } pen ? pen.Thickness : 4;
 
     private void OnTipOptionsChanged()
     {
@@ -254,14 +382,20 @@ public partial class SettingsWindow : Window
             ((FluentToggleSwitch)ReduceMotionSwitch!).IsChecked = value.ReduceMotion;
             ((FluentToggleSwitch)KeepToolbarOnTopSwitch!).IsChecked = value.KeepToolbarOnTop;
             ((FluentToggleSwitch)PressureSwitch!).IsChecked = value.Pressure;
-            PenWidth.Value = value.PenWidth;
-            ((TextBlock)PenWidthValueText!).Text = $"{value.PenWidth:0} px";
+
+            // 粗细这一项现在属于"当前选中的那支笔"：选中的不是笔时滑杆没有对象，直接禁用 ——
+            // 留一条能动但改了没反应的滑杆比禁用更糟。
+            var thickness = SelectedPenThickness();
+            var isPen = ToolbarTools.Selected is { Kind: ToolbarToolKind.Pen };
+            PenWidth.Value = thickness;
+            PenWidth.IsEnabled = isPen;
+            ((TextBlock)PenWidthValueText!).Text = isPen ? $"{thickness:0} px" : "未选中笔";
         }
         finally { _sync = false; }
 
         // 试写区跟着画笔粗细走：它要说的是"这一档写出来什么样"，粗细对不上会让人误判笔锋。
-        _tipPreview.InkAttributes.Width = value.PenWidth;
-        _tipPreview.InkAttributes.Height = value.PenWidth;
+        _tipPreview.InkAttributes.Width = SelectedPenThickness();
+        _tipPreview.InkAttributes.Height = SelectedPenThickness();
         SyncTipState();
     }
 

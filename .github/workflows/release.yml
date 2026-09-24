@@ -1,0 +1,215 @@
+# 揽星书写 · Release 工作流
+#
+# 产物（Windows 用 NSIS 安装包，Linux 用 AppImage）：
+#   LanStartWrite.Inkcanvas-<版本>-windows-x64-setup.exe
+#   LanStartWrite.Inkcanvas-<版本>-linux-x64.AppImage
+#
+# 怎么触发：
+#   1. Actions 页手动触发（workflow_dispatch），填版本号（如 1.2.0，不带 v 前缀）；
+#   2. 或推送 v 开头的 tag（v1.2.0 → 版本号取 1.2.0）。
+#
+# 两个必须知道的依赖（都签出在仓库之外，见 fluentjalium 那一步）：
+#   - FluentJalium（兄弟仓库，源码直引）—— 签出 ref 可用仓库变量 FLUENT_JALIUM_REF 覆盖；
+#     它多目标 net10.0 之前，Linux 这一端靠工作流里的兜底补丁（上游改完即可删）。
+#   - Dusk（闭源 SDK，feed 在 ../dusk-feed）—— packaging/feed 里随仓库带了一份拷贝，
+#     所以 CI 不依赖那台机器的本地路径；Dusk 升版本时记得同步 packaging/feed。
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（三段式，如 1.2.0，不带 v 前缀）'
+        required: true
+        type: string
+      self_contained:
+        description: '自带 .NET 运行时（体积大但开箱即跑）'
+        type: boolean
+        default: true
+      create_release:
+        description: '打完包后创建 GitHub Release 并上传产物'
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CONFIGURATION: Release
+  DOTNET_VERSION: '10.0.x'
+
+jobs:
+  build:
+    name: 打包（${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+      strategy:
+        fail-fast: false
+        matrix:
+          include:
+            - os: windows-latest
+              platform: windows-x64
+              target_framework: net10.0-windows
+              # 安装包在 packaging/dist 下（NSIS 脚本从自己的目录算相对路径，见该文件）。
+              artifact_glob: packaging/dist/*.exe
+            - os: ubuntu-latest
+              platform: linux-x64
+              target_framework: net10.0
+              artifact_glob: dist/*.AppImage
+
+    steps:
+      - name: 校验并解析版本号
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            raw="${{ inputs.version }}"
+          else
+            raw="${GITHUB_REF_NAME#v}"
+          fi
+          if ! echo "$raw" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::版本号必须是三段式（如 1.2.0），收到：$raw"
+            exit 1
+          fi
+          # 自带运行时是默认（AppImage 的"开箱即跑"与安装器的零依赖都靠它）；
+          # 只有手动触发、且显式取消勾选时才退回 framework-dependent（装包小，但要求机器装了 .NET 10）。
+          self_contained="true"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.self_contained }}" = "false" ]; then
+            self_contained="false"
+          fi
+          echo "version=$raw" >> "$GITHUB_OUTPUT"
+          echo "self_contained=$self_contained" >> "$GITHUB_OUTPUT"
+
+      - name: 签出本仓库
+        uses: actions/checkout@v4
+
+      # FluentJalium 是兄弟仓库、源码直引（见 csproj 的 FluentJaliumProject 属性）。
+      # ref 默认 main，可用仓库变量 FLUENT_JALIUM_REF 钉到某个提交。
+      - name: 签出 FluentJalium
+        uses: actions/checkout@v4
+        with:
+          repository: wwiinnddyy/FluentJalium
+          ref: ${{ vars.FLUENT_JALIUM_REF || 'main' }}
+          path: fluentjalium
+
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 发布（${{ matrix.platform }}）
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SELF_CONTAINED: ${{ steps.version.outputs.self_contained }}
+          FLUENT_JALIUM: ${{ github.workspace }}/fluentjalium/src/FluentJalium/FluentJalium.csproj
+        run: |
+          dotnet publish src/LanStartWrite.Inkcanvas/LanStartWrite.Inkcanvas.csproj \
+            -c ${{ env.CONFIGURATION }} \
+            -f ${{ matrix.target_framework }} \
+            -r ${{ matrix.platform }} \
+            --self-contained "$SELF_CONTAINED" \
+            -p:Version="$VERSION" \
+            -p:FluentJaliumProject="$FLUENT_JALIUM" \
+            -o publish
+
+      - name: FluentJalium 尚未多目标时补上 net10.0（上游改完可删）
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SELF_CONTAINED: ${{ steps.version.outputs.self_contained }}
+          FLUENT_JALIUM: ${{ github.workspace }}/fluentjalium/src/FluentJalium/FluentJalium.csproj
+        run: |
+          csproj="fluentjalium/src/FluentJalium/FluentJalium.csproj"
+          if ! grep -q "net10.0-windows;net10.0" "$csproj"; then
+            sed -i 's|<TargetFramework>net10.0-windows</TargetFramework>|<TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>|' "$csproj"
+            echo "已为 FluentJalium 补上 net10.0 目标（上游多目标之后这一步就是空操作）"
+            dotnet publish src/LanStartWrite.Inkcanvas/LanStartWrite.Inkcanvas.csproj \
+              -c ${{ env.CONFIGURATION }} -f net10.0 -r linux-x64 \
+              --self-contained "$SELF_CONTAINED" \
+              -p:Version="$VERSION" \
+              -p:FluentJaliumProject="$FLUENT_JALIUM" \
+              -o publish
+          fi
+
+      - name: Windows · NSIS 安装包
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+          }
+          # installer.nsi 是 UTF-8 BOM 的：makensis 靠 BOM 认出中文（英文机器上尤其要紧）。
+          # 版本资源要四段数字，预发布后缀进不去 —— 从 VERSION 抠出三段数字补 .0。
+          $version4 = if ($env:VERSION -match '^(\d+\.\d+\.\d+)') { $Matches[1] + '.0' } else { '0.0.0.0' }
+          # 在脚本自己的目录里跑：installer.nsi 的 OutFile 是 ..\dist\，相对它才算得对。
+          Set-Location packaging/windows
+          New-Item -ItemType Directory -Force dist | Out-Null
+          makensis /DVERSION=$env:VERSION `
+                   /DVERSION4=$version4 `
+                   /DBINDIR="$env:GITHUB_WORKSPACE\publish" `
+                   installer.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Linux · AppImage
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          curl -L --fail -o linuxdeploy \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+          sudo mv linuxdeploy /usr/local/bin/linuxdeploy
+          chmod +x packaging/linux/build-appimage.sh
+          packaging/linux/build-appimage.sh publish "$VERSION" dist
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanStartWrite.Inkcanvas-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+  release:
+    name: 创建 Release
+    needs: build
+    if: ${{ github.event_name == 'push' || inputs.create_release }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 解析版本号
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            raw="${{ inputs.version }}"
+          else
+            raw="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$raw" >> "$GITHUB_OUTPUT"
+      - name: 下载全部构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          tag="v$VERSION"
+          files=$(find artifacts -type f)
+          echo "本次上传："; echo "$files"
+
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "揽星书写 $VERSION" \
+            --generate-notes \
+            $files

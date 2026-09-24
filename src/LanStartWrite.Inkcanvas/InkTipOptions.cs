@@ -209,48 +209,85 @@ internal static class InkTipOptions
     }
 
     /// <summary>
-    /// 从存档读入。顺序很讲究：<b>先把"我的笔锋"装回库里</b>，再取值、再定归属 ——
-    /// 否则上一轮存下的自定义笔锋标识会在库里查不到，被当成坏 id 降级成自定义。
+    /// 只把「我的笔锋」（用户自存的笔锋预设）装回库里。
     /// <para>
-    /// 只在确有变化时发通知：这个方法会被 <see cref="AppPreferences.Update"/> 反复调到
-    /// （每一次偏好变更都会走一遍全量应用），无条件通知会变成"存一次偏好，画布重绘两次"。
+    /// <b>取值不在这里读</b>：一份笔锋参数属于<b>某一支笔</b>（见 <see cref="ToolbarTools"/>），
+    /// 由那支笔选中时经 <see cref="LoadState"/> 推过来。这里再读一遍就是第二个真相 ——
+    /// 而"两支笔各有一套参数"这件事正是靠"取值只归它那一支笔"成立的。
     /// </para>
     /// </summary>
-    internal static void Load(PreferenceSnapshot snapshot)
+    internal static void LoadCustomPresets(TipPresetCollection presets)
     {
-        var presetsChanged = false;
+        var changed = false;
+        _suppress++;
+        try { changed = SyncCustomPresets(presets.Items ?? []); }
+        finally { _suppress--; }
+
+        if (changed) PresetsChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// 把<b>某一支笔</b>的笔锋状态推成"当前"。这是"选工具"与"参数生效"之间的那一段。
+    /// <para>
+    /// 两条分支，取决于那支笔有没有自己的一份取值：
+    /// <list type="bullet">
+    /// <item><paramref name="values"/> 有值 → 用它的取值。<b>手调过的笔走这条，各自独立就落在这里；</b></item>
+    /// <item>没有 → 跟着 <paramref name="presetId"/> 那一档走。新加的笔就是这样，不预存一份拷贝 ——
+    /// 于是"改了预设的定义，引用它的笔跟着变"这件事还成立。</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// 档位标识认不得（档位被删了、存档是手写的）时按取值重新认一次，认不出就落到"自定义"，
+    /// 而不是硬指一个不存在的名字。既没有取值、档位也不认得时<b>什么都不改</b> ——
+    /// "没有这一项"不等于"清成默认"。
+    /// </para>
+    /// <para>
+    /// 只在确有变化时发通知：调用方（选工具）会连着调它，无条件通知会变成
+    /// "点一下工具，画布重绘两次"。而且这一条很要紧 —— 通知会触发"把当前参数写回选中的笔"，
+    /// 若无条件通知，每选一次笔都会把"跟着档位走"的那支笔物化成一份显式拷贝。
+    /// </para>
+    /// </summary>
+    internal static void LoadState(string presetId, bool enabled, IReadOnlyList<double>? values)
+    {
         var valuesChanged = false;
         var presetIdChanged = false;
+        var nextPresetId = _presetId;
 
         _suppress++;
         try
         {
-            // 集合可能为 null —— 它从 JSON 来。真正进到这里的那份已被 AppPreferences 洗过，
-            // 但这条通道也允许被直接调（探针就是这么做的），所以自己也要挡得住。
-            presetsChanged = SyncCustomPresets(snapshot.TipCustomPresets.Items ?? []);
-
-            if (snapshot.TipValues is { Values.Length: > 0 } vector && !SameValues(vector.Values))
+            if (values is { Count: > 0 } explicitValues)
             {
-                StrokeTipParameters.Apply(Master, vector.Values);
+                if (!SameValues(explicitValues))
+                {
+                    StrokeTipParameters.Apply(Master, explicitValues);
+                    valuesChanged = true;
+                }
+
+                nextPresetId = ResolvePresetId(presetId);
+            }
+            else if (StrokeTipPresetLibrary.Default.Find(presetId) is { } preset)
+            {
+                var before = CurrentValues;
+                preset.ApplyTo(Master);
+                valuesChanged |= !SameValues(before);
+                nextPresetId = presetId;
+            }
+
+            if (Master.Enabled != enabled)
+            {
+                Master.Enabled = enabled;
                 valuesChanged = true;
             }
 
-            if (Master.Enabled != snapshot.TipEnabled)
+            if (!string.Equals(nextPresetId, _presetId, StringComparison.Ordinal))
             {
-                Master.Enabled = snapshot.TipEnabled;
-                valuesChanged = true;
-            }
-
-            var resolved = ResolvePresetId(snapshot.TipPresetId);
-            if (_presetId != resolved)
-            {
-                _presetId = resolved;
+                _presetId = nextPresetId;
                 presetIdChanged = true;
             }
         }
         finally { _suppress--; }
 
-        if (presetsChanged) PresetsChanged?.Invoke();
         if (valuesChanged || presetIdChanged) Changed?.Invoke();
     }
 

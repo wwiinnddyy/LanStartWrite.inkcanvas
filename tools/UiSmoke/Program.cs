@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using FluentJalium.Controls;
 using FluentJalium.Themes;
@@ -34,6 +35,12 @@ internal static class Program
         var app = new Application();
         AppPreferences.Initialize(path);
         FluentTheme.Initialize(app);
+
+        // 第一拍就要量导航面板的宽度。面板打开带 0.2 秒过渡，而第一拍在 320ms ——
+        // 看着够，实测仍会抖（6 个导航项那一次就是它红的）。于是从一开头就关掉动画：
+        // 这里量的是"布局事实"，不是"动画对不对"。导航动画那组需要动的时候自己会再打开。
+        AppPreferences.Update(AppPreferences.Current with { ReduceMotion = true });
+
         if (preview)
         {
             var toolbar = new AnnotationToolbarWindow
@@ -58,7 +65,8 @@ internal static class Program
         steps.Enqueue(() =>
         {
             Check(((Grid)settings.FindName("SettingsContentHost")!).Children.Count == 1, "Only the selected page is attached");
-            Check(!navigation.IsCompact && PaneWidth(navigation) == 220, "Expanded navigation width");
+            Check(!navigation.IsCompact && PaneWidth(navigation) == 220,
+                $"Expanded navigation width（compact={navigation.IsCompact}，量到的宽={PaneWidth(navigation)}）");
             // 面板宽度带 0.2 秒过渡（库里读的是 SplitViewPaneAnimationOpenDuration），
             // 所以"下一拍就该读到 48"其实是道时序题 —— 实测会抖。把过渡关掉再量宽度，
             // 用的正是应用自己那一项"减少动画"；两态是否真的换了由 IsCompact 与标签折叠那两条管。
@@ -84,6 +92,8 @@ internal static class Program
             CheckResponsiveRows(settings);
             CheckNavigation(settings);
             CheckToolbarTouch();
+            CheckToolbarTools(settings);
+            CheckCanvasModes(settings);
             CheckPenMenu();
             CheckTipMenu();
             CheckTipOptions(settings);
@@ -91,12 +101,18 @@ internal static class Program
             CheckTipEditor(settings);
             CheckEraserMenu();
             CheckFlyoutPlacement();
+            CheckToolbarPlacement();
             CheckPreferences(path);
             CheckInkSurface();
+            CheckWindowLayers();
         });
         // 排在导航动画那组之前：那组里有一条本机常红的时序检查，而 Check() 一红就中断整个队列。
         steps.Enqueue(CheckInkPreferenceLands);
         QueueNavigationAnimationChecks(settings, steps);
+        // 自愈那道网得真的在跑。它由 DispatcherTimer 驱动（1.5 秒一拍），
+        // 而队列每拍 320ms、前面还压着一组导航动画检查 —— 排到最后，到这里早就过了一拍。
+        steps.Enqueue(() => Check(WindowLayerManager.AutoRepairChecks > 0,
+            $"周期自检确实在跑（跑了 {WindowLayerManager.AutoRepairChecks} 拍，不是只写了没接上）"));
 
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(320) };
         timer.Tick += (_, _) =>
@@ -352,16 +368,37 @@ internal static class Program
         Windows.Add(toolbar);
         toolbar.Show();
         toolbar.ForceRenderFrame();
-        // 六个工具键都要真的落在 FluentJalium 的 AppBar 模板上：三个 RadioToolToggleButton 是显式点的键，
-        // 另外三个 AppBarButton 靠隐式样式命中 —— 后者一旦没命中就会安静地退回框架默认外观，
-        // 构建与渲染都不会报错，所以这里按模板部件名逐个验。
-        Check(new[] { "MouseToolToggle", "PenToolToggle", "EraseToolToggle", "UndoToolbarButton", "RedoToolbarButton", "SettingsToolbarButton" }
-            .Select(name => toolbar.FindName(name)!)
-            .All(control => Descendants((UIElement)control).OfType<Border>().Any(part => part.Name == "AppBarButtonInnerBorder")),
-            "All six toolbar tools render the FluentJalium AppBar template");
-        Check(new[] { "MouseToolToggle", "PenToolToggle", "EraseToolToggle", "UndoToolbarButton", "RedoToolbarButton", "SettingsToolbarButton" }
-            .All(name => ((Control)toolbar.FindName(name)!).GetValue(Control.FocusVisualStyleProperty) is not null),
-            "Toolbar tools carry keyboard focus visuals (FluentJalium's AppBar styles set none)");
+        // 批注栏那六颗钮用的是 Button / ToggleButton 这一族的 40x40 方格，不是 AppBarButton：
+        // 后者是"图标 + 下方标签"的 68x64 命令条按钮，它的 compact 触发器只收标签、内层边框仍留着
+        // 22 DIP 的标签带，于是整条过长且选中实底只盖到上面一块。这两条钉的就是那两个症状。
+        // 按钮是数据驱动的，没有 x:Name 可查 —— 按项标识取。默认列表的六个标识是固定的。
+        var tools = new[] { "mouse", "pen.1", "eraser.1", "undo", "redo", "settings" };
+        Check(tools.All(id => toolbar.FindToolControl(id) is not null),
+            "默认工具栏那六颗钮都渲染出来了（按项标识取得到）");
+        Check(tools.All(id =>
+            {
+                var button = toolbar.FindToolControl(id)!;
+                return Math.Abs(button.ActualWidth - 40) < 0.1 && Math.Abs(button.ActualHeight - 40) < 0.1;
+            }),
+            "All six toolbar tools are 40 x 40 icon buttons, not 68 x 64 AppBar buttons");
+        Check(tools.All(id => ((Control)toolbar.FindToolControl(id)!).GetValue(Control.FocusVisualStyleProperty) is not null),
+            "Toolbar tools carry the library's keyboard focus visual through the style chain");
+        // 批注栏起来时鼠标模式就是选中的，直接读它，不去点任何一颗（点开会牵出画布窗口）。
+        var checkedTool = (Jalium.UI.Controls.Primitives.ToggleButton)toolbar.FindToolControl("mouse")!;
+        var uncheckedTool = (Jalium.UI.Controls.Primitives.ToggleButton)toolbar.FindToolControl("pen.1")!;
+        Check(checkedTool.IsChecked == true && ReferenceEquals(checkedTool.GetValue(Control.BackgroundProperty),
+                FluentThemeManager.GetBrush("AccentFillColorDefaultBrush")),
+            "The checked tool fills its whole square with the accent brush");
+        // 图标没设本地前景，靠 ContentPresenter 把控件前景继承下来 —— 这两条一起才说明
+        // "白字在 accent 上"和"未选透明"是真的，而不是恰好看着像。
+        // 图标现在包在一层 Grid 里（底下多了一条色标），所以要往下找那颗 FontIcon，而不是直接读 Content。
+        Check(Descendants(checkedTool).OfType<FontIcon>().Any(icon => ReferenceEquals(
+                icon.GetValue(TextBlock.ForegroundProperty),
+                FluentThemeManager.GetBrush("TextOnAccentFillColorPrimaryBrush"))),
+            "The checked tool's icon inherits the on-accent ink");
+        Check(ReferenceEquals(uncheckedTool.GetValue(Control.BackgroundProperty),
+                FluentThemeManager.GetBrush("SubtleFillColorTransparentBrush")),
+            "An unchecked tool sits on a transparent surface");
         var grip = (Border)toolbar.FindName("DragHandleChrome")!;
         var root = (UIElement)toolbar.Content!;
         var start = grip.TransformToVisual(root)!.Transform(new Point(20, 28));
@@ -385,6 +422,254 @@ internal static class Program
         // 而"六个工具键都有键盘焦点环"是本应用自己承诺过的一条 —— 焦点环得在应用侧补上，这条守的就是补没补。
         first.Finish();
         second.Finish();
+    }
+
+    /// <summary>
+    /// 数据驱动的工具栏，以及这次改动的正题：<b>每一项自带一套数据</b>。
+    /// 用户要的形状是"放两个笔按钮，他俩的数据还要独立"（也就是拿按钮当色板用），
+    /// 所以断言就钉在这里：两支笔的颜色 / 粗细 / 笔锋互不影响，橡皮同理。
+    /// </summary>
+    private static void CheckToolbarTools(SettingsWindow settings)
+    {
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        Check(ToolbarTools.Items.Count == 7, "默认工具栏是七项（六颗钮加一条分隔线）");
+        Check(ToolbarTools.Items.Select(static tool => tool.Kind).SequenceEqual(new[]
+            {
+                ToolbarToolKind.Mouse, ToolbarToolKind.Pen, ToolbarToolKind.Eraser,
+                ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Separator, ToolbarToolKind.Settings,
+            }),
+            "默认顺序是 鼠标 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置");
+        Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Mouse }, "启动时停在鼠标模式");
+
+        // ---------------------------------------------------------- 两支笔
+        var firstPen = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen);
+        ToolbarTools.Select(firstPen.Id);
+        ToolbarTools.UpdateSelectedPen(pen => pen with { ColorArgb = 0xFFD13438, Thickness = 9 });
+        Check(ToolbarTools.Find(firstPen.Id) is { Thickness: 9, ColorArgb: 0xFFD13438 },
+            "选中一支笔之后，改的是它自己的颜色与粗细");
+
+        var secondPen = ToolbarTools.Add(ToolbarToolKind.Pen);
+        Check(secondPen is not null && secondPen.Id != firstPen.Id, "能再加一支笔");
+        if (secondPen is null) return;
+        Check(ToolbarTools.Find(secondPen.Id)!.ColorArgb == 0xFFD13438,
+            "新加的那支笔复制的是当前那支的数据，不是一支空白笔");
+        Check(toolbar.FindToolControl(secondPen.Id) is not null, "新加的那支笔在工具栏上真多出了一格");
+
+        ToolbarTools.Select(secondPen.Id);
+        ToolbarTools.UpdateSelectedPen(pen => pen with { ColorArgb = 0xFF0078D4, Thickness = 3 });
+        ToolbarTools.Select(firstPen.Id);
+        Check(ToolbarTools.Find(firstPen.Id) is { Thickness: 9, ColorArgb: 0xFFD13438 }
+            && ToolbarTools.Find(secondPen.Id) is { Thickness: 3, ColorArgb: 0xFF0078D4 },
+            "两支笔的颜色与粗细互不影响");
+
+        // 笔锋也各归各的：手调一支，切走再切回来，那一支的形状必须还在。
+        // 这一条是"只存档位标识"那种做法过不去的坎 —— 手调的参数会在两支笔之间串味。
+        var taper = StrokeTipParameters.Find("exitTaperLength")!;
+        ToolbarTools.Select(firstPen.Id);
+        taper.Set(InkTipOptions.Settings, 55);
+        Check(ToolbarTools.Find(firstPen.Id) is { TipValues: not null }, "手调之后参数写回了那一支笔");
+        ToolbarTools.Select(secondPen.Id);
+        Check(Math.Abs(taper.Get(InkTipOptions.Settings) - 55) > 1e-9, "切到另一支笔，笔锋换成那一支的");
+        ToolbarTools.Select(firstPen.Id);
+        Check(Math.Abs(taper.Get(InkTipOptions.Settings) - 55) < 1e-9,
+            "切回来，第一支笔手调的形状还在（笔锋也是各归各的）");
+
+        // ---------------------------------------------------------- 两把橡皮
+        var firstEraser = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Eraser);
+        ToolbarTools.Select(firstEraser.Id);
+        ToolbarTools.UpdateSelectedEraser(eraser => eraser with { EraseMode = EraserMode.Stroke, EraserRadius = 30 });
+        var secondEraser = ToolbarTools.Add(ToolbarToolKind.Eraser);
+        Check(secondEraser is not null, "能再加一把橡皮");
+        if (secondEraser is null) return;
+        ToolbarTools.Select(secondEraser.Id);
+        ToolbarTools.UpdateSelectedEraser(eraser => eraser with { EraseMode = EraserMode.Area, EraserRadius = 8 });
+        Check(ToolbarTools.Find(firstEraser.Id) is { EraseMode: EraserMode.Stroke, EraserRadius: 30 }
+            && ToolbarTools.Find(secondEraser.Id) is { EraseMode: EraserMode.Area, EraserRadius: 8 },
+            "两把橡皮的擦法与半径互不影响");
+
+        // ---- 改数据必须<b>当场</b>落到画布 ----
+        // 这条是用户报的严重缺陷：菜单里拖粗细毫无反应，要切到别的工具再切回来才看得到。
+        // 根因是数据模型改了、按钮图标刷了，但没有人把新值写进引擎 —— 于是这条断言钉在引擎手里那份上。
+        var inkHost = (Panel)toolbar.Canvas!.FindName("InkHost")!;
+        var surface = inkHost.Children.OfType<JaliumInkCanvas>().Single();
+
+        ToolbarTools.Select(firstPen.Id);
+        ToolbarTools.UpdateSelectedPen(pen => pen with { Thickness = 11, ColorArgb = 0xFF107C10 });
+        Check(Math.Abs(surface.InkAttributes.Width - 11) < 1e-9
+            && surface.InkAttributes.Color.G == 0x7C && surface.InkAttributes.Color.A == 255,
+            "菜单里改粗细 / 颜色当场落到画布（不用切工具再切回来）");
+
+        ToolbarTools.Select(firstEraser.Id);
+        ToolbarTools.UpdateSelectedEraser(eraser => eraser with { EraseMode = EraserMode.Stroke, EraserRadius = 31 });
+        Check(surface.IsEraserMode && Math.Abs(surface.EraserRadius - 31) < 1e-9
+            && surface.EditingMode == InkEditingMode.EraseByStroke,
+            "橡皮的擦法与半径也是当场生效");
+
+        // ---------------------------------------------------------- 增删与换序
+        var beforeRemove = ToolbarTools.Items.Count;
+        ToolbarTools.Remove(secondPen.Id);
+        Check(ToolbarTools.Items.Count == beforeRemove - 1 && ToolbarTools.Find(secondPen.Id) is null, "能删掉一项");
+        Check(toolbar.FindToolControl(secondPen.Id) is null, "删掉之后工具栏上那一格也没了");
+        Check(!ToolbarTools.Remove("mouse") && !ToolbarTools.Remove("settings") && !ToolbarTools.Remove("undo"),
+            "鼠标模式 / 撤销 / 设置删不掉 —— 少了它们用户会出不去、也改不了工具栏");
+        Check(!ToolbarTools.Remove("不存在的项"), "删不存在的项不抛也不动列表");
+
+        var penIndex = ToolbarTools.IndexOf(firstPen.Id);
+        Check(penIndex > 0 && ToolbarTools.Move(firstPen.Id, -1), "能往前挪一格");
+        Check(ToolbarTools.IndexOf(firstPen.Id) == penIndex - 1, "挪完位置真的变了");
+        Check(!ToolbarTools.Move(firstPen.Id, -1) || ToolbarTools.IndexOf(firstPen.Id) == 0,
+            "挪到头就不再动");
+
+        // 删掉当前选中的那一项之后，选中态要落到另一个能画的工具上，而不是悬空。
+        ToolbarTools.Select(firstPen.Id);
+        ToolbarTools.Remove(firstPen.Id);
+        Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Pen or ToolbarToolKind.Eraser or ToolbarToolKind.Mouse },
+            "删掉选中的那一项之后，选中态落到另一个能用的工具上");
+
+        // ---------------------------------------------------------- 设置页那份列表
+        var editor = settings.ToolEditor;
+        Check(editor.RowCount == ToolbarTools.Items.Count, "设置页的工具栏列表行数等于数据项数");
+        // 拿还活着的那把橡皮来验行 —— 上面那一段把两支笔都删掉了，正是为了验"删干净也不炸"。
+        Check(editor.FindRowButton(firstEraser.Id, "use") is not null
+            && editor.FindRowButton(firstEraser.Id, "remove") is not null
+            && editor.FindRowButton(firstEraser.Id, "up") is not null,
+            "每一行都有『用这支』『上移』『删除』");
+        Check(editor.FindRowButton("settings", "remove")?.IsEnabled == false, "固定项的『删除』是灰的");
+
+        var countBeforeAdd = ToolbarTools.Items.Count;
+        ((Button)settings.FindName("AddPenToolButton")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(ToolbarTools.Items.Count == countBeforeAdd + 1 && editor.RowCount == countBeforeAdd + 1,
+            "设置页的『加一支笔』真的加了一项，列表也跟着长");
+        Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Pen },
+            "加完顺手选中它（接下来几乎一定要调它的颜色）");
+        Check(editor.FindRowButton(ToolbarTools.SelectedId, "remove") is { IsEnabled: true },
+            "新加的那一项能被删掉");
+
+        // 收尾：把工具栏还原成默认七项，后面的检查与存档往返都按默认形状走。
+        ToolbarTools.Load(ToolbarTools.DefaultItems(), "pen.1");
+        Check(ToolbarTools.Items.Count == 7 && editor.RowCount == 7, "收尾：列表回到默认七项");
+    }
+
+    /// <summary>
+    /// 画布场景设置：穿透模式与冻结模式。
+    /// <para>
+    /// 这两个开关都是"<b>下次进画布才看得出来</b>"的，所以断言全部钉在"进出画布"这条路上，
+    /// 而不是钉在开关的 <c>IsChecked</c> 上 —— 开关亮着但行为没变，正是这类功能最容易出的错。
+    /// </para>
+    /// </summary>
+    private static void CheckCanvasModes(SettingsWindow settings)
+    {
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        var mouse = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse);
+        var pen = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen);
+        var eraser = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Eraser);
+
+        // 从确定的状态出发：两个开关都关着。
+        CanvasOptions.SetPassThrough(false);
+        CanvasOptions.SetFreeze(false);
+        ToolbarTools.Select(mouse.Id);
+        Check(!toolbar.CanvasPresented, "鼠标模式下默认收起画布");
+
+        ToolbarTools.Select(pen.Id);
+        Check(toolbar.CanvasPresented && toolbar.Canvas is not null, "选中笔之后画布显形");
+        var overlay = toolbar.Canvas!;
+
+        // 画布是最大化全屏的，验收里<b>不去改它的尺寸</b>：对已经最大化的窗口写
+        // <c>WindowState</c> / <c>Width</c> 不生效（实测它照样是全屏），改了反而让下面那条
+        // "底图 1:1 铺满"的断言失去意义。代价是这一段会实打实地截一张全屏并铺上去 ——
+        // 屏幕上会闪一下，那正是这个功能本身的行为，不是测试的副作用。
+        // 所以下面一发完断言就立刻退回鼠标模式把画布收起来。
+
+        // ---------------------------------------------------------- 冻结模式
+        CanvasOptions.SetFreeze(true);
+        ToolbarTools.Select(mouse.Id);
+        Check(!toolbar.CanvasPresented, "开冻结不影响鼠标模式：画布照样收起");
+        Check(!overlay.HasFrozenBackground, "收起期间底图被撤掉 —— 否则用户关了画布还能看见一张冻结的屏");
+
+        ToolbarTools.Select(pen.Id);
+        Check(overlay.HasFrozenBackground, "开了冻结之后进入画布会截一张屏铺在底下");
+        var frozen = overlay.FrozenBackgroundSize;
+        Check(frozen.Width > 0 && frozen.Height > 0, $"截到的图有实际像素（{frozen.Width}×{frozen.Height}）");
+        // 落到界面上的尺寸必须等于画布本身：像素数本身说明不了这件事（要乘 DPI 才知道），
+        // 而这条挡的是"只截了左上角一块"与"DPI 算错导致整张被缩放"两种错 —— 两种都不报错，只是错位。
+        var natural = overlay.FrozenBackgroundNaturalSize;
+        Check(Math.Abs(natural.Width - overlay.ActualWidth) <= 1 && Math.Abs(natural.Height - overlay.ActualHeight) <= 1,
+            $"底图铺上去正好 1:1（图的自然尺寸 {natural.Width:0}×{natural.Height:0}，画布 {overlay.ActualWidth:0}×{overlay.ActualHeight:0}）");
+
+        // 同一轮画布里换工具不该重截：这一刻屏幕上已经有笔记了，重截会把笔记烙进底图。
+        var frozenBefore = overlay.FrozenBackgroundSize;
+        ToolbarTools.Select(eraser.Id);
+        ToolbarTools.Select(pen.Id);
+        Check(overlay.FrozenBackgroundSize == frozenBefore, "同一轮画布里换工具不会重截");
+
+        CanvasOptions.SetFreeze(false);
+        ToolbarTools.Select(mouse.Id);
+        ToolbarTools.Select(pen.Id);
+        Check(!overlay.HasFrozenBackground, "关掉冻结之后底图被撤掉（回到透明，看得见真桌面）");
+
+        // ---------------------------------------------------------- 穿透模式
+        // 与冻结一起开着用 —— 这两个是最容易打架的一对：穿透要让开底图，冻结要铺上底图。
+        CanvasOptions.SetFreeze(true);
+        CanvasOptions.SetPassThrough(true);
+        ToolbarTools.Select(mouse.Id);
+        Check(toolbar.CanvasPresented, "开了穿透之后，鼠标模式下画布仍然留在屏上");
+
+        // 让外壳把首帧画完再验：它可能在 Show / 首帧 / 改置顶时重算扩展样式，把穿透位抹掉。
+        overlay.ForceRenderFrame();
+        Check(overlay.IsClickThrough, "而且它是穿透的（样式位在首帧之后还在）");
+
+        // 穿透必须是<b>系统层面</b>的穿透。样式位设上了不算数：命中测试是外壳做的，
+        // 这里直接问"画布中心那一点，系统会把鼠标交给谁" —— 回答不是画布，才算穿透。
+        // （用户报的正是这条：位设上了、点下去还是在写字。根因是少了跨进程那一半 ——
+        // WS_EX_TRANSPARENT 只对同线程的兄弟窗口生效，跨进程靠 WM_NCHITTEST 回 HTTRANSPARENT。）
+        var canvasRect = NativeWindowZOrder.WindowRect(overlay.Handle);
+        Check(canvasRect is not null, "画布窗口的屏幕矩形取得到");
+        if (canvasRect is not null)
+        {
+            var (left, top, right, bottom) = canvasRect.Value;
+            var hit = NativeWindowZOrder.WindowHitTest((left + right) / 2, (top + bottom) / 2);
+            Check(hit != overlay.Handle,
+                $"画布中心那一点的真实命中不是画布（点会落到下面的窗口，实际命中 {hit}）");
+        }
+
+        Check(!overlay.HasFrozenBackground, "穿透时底图必须让开 —— 否则用户看着冻结的旧屏、点到的却是真实窗口");
+
+        // 穿透下画布没离开过屏，但用户分明"去操作了电脑" —— 回到书写必须重截一张。
+        // 这一条挡的是"开关开着、画布却其实是透明的"：只看"画布在不在屏上"是判不出这件事的。
+        ToolbarTools.Select(pen.Id);
+        Check(!overlay.IsClickThrough, "切回书写必须取消穿透，否则落笔没反应");
+        Check(overlay.HasFrozenBackground, "而且重新截了一张（穿透期间看过真实桌面，回来就该冻住它）");
+        Check(toolbar.CanvasPresented, "书写时画布当然还在");
+
+        CanvasOptions.SetPassThrough(false);
+        ToolbarTools.Select(mouse.Id);
+        Check(!toolbar.CanvasPresented, "关掉穿透之后鼠标模式又收起画布");
+        Check(!overlay.IsClickThrough, "并且穿透位也被清掉");
+
+        // ---------------------------------------------------------- 设置页
+        var passThroughSwitch = (FluentToggleSwitch)settings.FindName("PassThroughSwitch")!;
+        var freezeSwitch = (FluentToggleSwitch)settings.FindName("FreezeSwitch")!;
+        var behaviorText = (TextBlock)settings.FindName("CanvasBehaviorText")!;
+
+        passThroughSwitch.IsChecked = true;
+        Check(CanvasOptions.PassThrough, "设置页的穿透开关真的改到了运行时状态");
+        Check(behaviorText.Text.Contains("穿到下面的窗口", StringComparison.Ordinal),
+            $"而且那句「现在的行为」跟着变了：{behaviorText.Text}");
+        freezeSwitch.IsChecked = true;
+        Check(CanvasOptions.Freeze, "设置页的冻结开关真的改到了运行时状态");
+
+        passThroughSwitch.IsChecked = false;
+        freezeSwitch.IsChecked = false;
+        ToolbarTools.Select(mouse.Id);
+        Check(!CanvasOptions.PassThrough && !CanvasOptions.Freeze, "收尾：两个开关都关回去");
     }
 
     private static void CheckPenMenu()
@@ -608,89 +893,64 @@ internal static class Program
     /// 而它是"重启之后笔锋还在不在"的唯一通道 —— 所以这里直接喂它几份快照来验，
     /// 而不是等 UiSmoke 真的重启一次（进程里只能 Initialize 一次偏好）。
     /// </summary>
+    /// <summary>
+    /// 读档那条路。现在有两条：<see cref="InkTipOptions.LoadState"/>（把某一支笔的形状推成当前）
+    /// 与 <see cref="InkTipOptions.LoadCustomPresets"/>（把「我的笔锋」装回库）。
+    /// 两者合起来才是"重启之后每支笔还是各自那套"。
+    /// </summary>
     private static void CheckTipReload()
     {
         var all = StrokeTipParameters.All;
         var entryIndex = all.ToList().FindIndex(parameter => parameter.Id == "entryTaperLength");
         var entry = all[entryIndex];
 
-        // 一项：总开关
-        var off = InkTipOptions.Enabled;
-        InkTipOptions.Load(new PreferenceSnapshot
-        {
-            TipPresetId = InkTipOptions.PresetId,
-            TipEnabled = !off,
-            TipValues = new TipValueVector { Values = InkTipOptions.CurrentValues },
-            TipCustomPresets = new TipPresetCollection { Items = [.. InkTipOptions.CustomPresetRecords] },
-        });
-        Check(InkTipOptions.Enabled == !off, "读档能改笔锋总开关");
-        InkTipOptions.SetEnabled(off);
-
-        // 二项：取值。档位标识认不得时必须自己重新认一次，而不是硬指一个不存在的名字。
+        // 一项：取值分支 —— 有显式取值就用它；档位标识认不得时按取值重新认一次，而不是硬指一个名字。
         var values = InkTipOptions.CurrentValues;
         values[entryIndex] = 77;
-        var extraId = "custom.9";
-        var records = new List<TipPresetRecord>(InkTipOptions.CustomPresetRecords)
-        {
-            new() { Id = extraId, Name = "旧档里的笔", Values = [.. StrokeTipParameters.PresetScoped.Select(p => p.DefaultValue)] },
-        };
-        var snapshot = new PreferenceSnapshot
-        {
-            TipPresetId = "已经删掉的一档",
-            TipEnabled = off,
-            TipValues = new TipValueVector { Values = values },
-            TipCustomPresets = new TipPresetCollection { Items = records },
-        };
+        InkTipOptions.LoadState("已经删掉的一档", InkTipOptions.Enabled, values);
+        Check(Math.Abs(entry.Get(InkTipOptions.Settings) - 77) < 1e-9, "LoadState 把一支笔存的取值推成当前");
+        Check(InkTipOptions.PresetId.Length == 0, "档位标识不存在时落到自定义");
 
-        InkTipOptions.Load(snapshot);
-        Check(Math.Abs(entry.Get(InkTipOptions.Settings) - 77) < 1e-9, "读档把取值写进当前设置");
-        Check(InkTipOptions.FindPreset(extraId) is not null, "读档把「我的笔锋」装回预设库");
-        Check(InkTipOptions.PresetId.Length == 0, "存档里的档位标识已经不存在时，落到自定义而不是硬指一个名字");
-
-        InkTipOptions.Load(snapshot);
-        Check(InkTipOptions.Presets.Count(preset => preset.Id == extraId) == 1,
-            "同一份存档读两遍不会把同一支笔装两遍");
-        Check(!InkTipOptions.DeleteCustomPreset("standard") && InkTipOptions.DeleteCustomPreset(extraId),
-            "读进来的自定义预设可以删掉，内置的仍然删不掉");
+        // 二项：档位分支 —— 没有显式取值就跟着档位走。
+        InkTipOptions.LoadState("brush", true, null);
+        Check(InkTipOptions.PresetId == "brush" && MatchesPreset(InkTipOptions.FindPreset("brush")!),
+            "没有显式取值时跟着档位走");
 
         // 三项：坏引用。JSON 里的 "values": null / "items": null 会让反序列化把它置空，
         // 读取那一侧必须把 null 当「没有这一项」，而不是让一个手改坏的存档把启动打崩。
-        // 先把自定义预设与取值存一份，测完装回去 —— 后面的存档往返还要靠它们。
         var keepRecords = InkTipOptions.CustomPresetRecords;
-        var keepValues = InkTipOptions.CurrentValues;
         var survived = true;
         try
         {
-            InkTipOptions.Load(new PreferenceSnapshot
-            {
-                TipPresetId = "standard",
-                TipEnabled = InkTipOptions.Enabled,
-                TipValues = new TipValueVector { Values = null },
-                TipCustomPresets = new TipPresetCollection { Items = null },
-            });
+            InkTipOptions.LoadState("standard", true, null);
+            InkTipOptions.LoadCustomPresets(new TipPresetCollection { Items = null });
         }
         catch (Exception ex) when (ex is NullReferenceException or ArgumentNullException)
         {
             survived = false;
         }
-        Check(survived, "存了空引用的快照被当成「没有这一项」，不打崩应用");
-        Check(Math.Abs(entry.Get(InkTipOptions.Settings) - 77) < 1e-9, "空取值不动已有的参数");
+        Check(survived, "空集合 / 空取值被当成「没有这一项」，不打崩应用");
+        InkTipOptions.LoadCustomPresets(new TipPresetCollection { Items = [.. keepRecords] });
+        Check(InkTipOptions.CustomPresets.Count == keepRecords.Count, "「我的笔锋」可以整批装回来");
 
-        // 四项：上限。存档会截断超限的自定义预设，应用侧必须用同一个数拦住 ——
-        // 否则用户会看到「存进去了、下次启动少了一支」。
+        // 四项：「我的笔锋」装回库里，且不重复。
+        var extraId = "custom.9";
+        var records = new List<TipPresetRecord>(InkTipOptions.CustomPresetRecords)
+        {
+            new() { Id = extraId, Name = "旧档里的笔", Values = [.. StrokeTipParameters.PresetScoped.Select(p => p.DefaultValue)] },
+        };
+        InkTipOptions.LoadCustomPresets(new TipPresetCollection { Items = records });
+        Check(InkTipOptions.FindPreset(extraId) is not null, "读档把「我的笔锋」装回预设库");
+        InkTipOptions.LoadCustomPresets(new TipPresetCollection { Items = records });
+        Check(InkTipOptions.Presets.Count(preset => preset.Id == extraId) == 1,
+            "同一份存档读两遍不会把同一支笔装两遍");
+        Check(!InkTipOptions.DeleteCustomPreset("standard") && InkTipOptions.DeleteCustomPreset(extraId),
+            "读进来的自定义预设可以删掉，内置的仍然删不掉");
+
+        // 五项：上限。
         Check(InkTipOptions.CanSaveCustomPreset, "没到上限时还能继续存「我的笔锋」");
 
-        // 五项：装回去，并顺带验证「恢复为所选档位」真的撤掉了微调。
-        InkTipOptions.Load(new PreferenceSnapshot
-        {
-            TipPresetId = "brush",
-            TipEnabled = InkTipOptions.Enabled,
-            TipValues = new TipValueVector { Values = keepValues },
-            TipCustomPresets = new TipPresetCollection { Items = [.. keepRecords] },
-        });
-        Check(InkTipOptions.CustomPresets.Count == keepRecords.Count, "自定义预设可以整批装回来");
-
-        InkTipOptions.ResetToPreset();
+        InkTipOptions.SelectPreset("brush");
         Check(InkTipOptions.PresetId == "brush" && MatchesPreset(InkTipOptions.FindPreset("brush")!),
             "「恢复为所选档位」把微调撤掉、回到该档的取值");
     }
@@ -701,29 +961,47 @@ internal static class Program
         void CountUpdate(PreferenceSnapshot _) => updates++;
         AppPreferences.Changed += CountUpdate;
         var pressure = !AppPreferences.Current.Pressure;
-        AppPreferences.Update(AppPreferences.Current with { Pressure = pressure, PenWidth = 11 });
+        AppPreferences.Update(AppPreferences.Current with { Pressure = pressure });
         AppPreferences.Changed -= CountUpdate;
-        Check(updates == 1 && InkRuntimeOptions.Current.EnablePressure == pressure &&
-            AppPreferences.Current.PenWidth == 11,
+        Check(updates == 1 && InkRuntimeOptions.Current.EnablePressure == pressure,
             "Preference batches synchronize ink runtime and notify UI exactly once");
-        AppPreferences.Update(AppPreferences.Current with { PenWidth = double.NaN });
-        Check(AppPreferences.Current.PenWidth == 4, "Preferences reject nonfinite values");
+
+        // 区间钳制现在落在"某一支笔的数据"上：NaN 粗细必须被洗成默认值，
+        // 而且洗完之后要能回到内存里那份活列表 —— 否则存档里是 4、界面上还挂着 NaN。
+        var pen = ToolbarTools.Selected is { Kind: ToolbarToolKind.Pen }
+            ? ToolbarTools.Selected!
+            : ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen);
+        ToolbarTools.Update(pen.Id, tool => tool with { Thickness = double.NaN });
+        Check(ToolbarTools.Find(pen.Id) is { Thickness: 4 },
+            "工具项里的非有限值被洗回默认值，并且回到了内存里那份活列表");
+
         Check(AppPreferences.IsSavePending, "Pending saves are visible to the settings footer");
         AppPreferences.Flush();
         Check(AppPreferences.SaveError is null, "Isolated preference save succeeds");
         Check(!AppPreferences.IsSavePending, "Successful flush clears pending-save state");
         Check(JsonSerializer.Deserialize<PreferenceSnapshot>(File.ReadAllText(path)) == AppPreferences.Current, "Preferences round-trip through JSON");
 
-        // 笔锋是"数组进存档"的第一处：它的取值与自定义预设必须一起过存档往返。
-        // 这一条同时守着 PreferenceSnapshot 的相等语义 —— 数组若按引用比，往返之后这里就是红的。
-        Check(AppPreferences.Current.TipValues is { Values.Length: 18 },
-            "笔锋的全量取值（含三个速度参数）随偏好落盘");
+        // 工具栏列表与"每项自带的数据"是这一轮进存档的新东西，往返必须覆盖它们。
+        // 这条同时守着 PreferenceSnapshot 的相等语义 —— 列表与数组若按引用比，往返之后这里就是红的。
+        var storedItems = AppPreferences.Current.ToolbarItems.Items ?? [];
+        Check(storedItems.Count == ToolbarTools.Items.Count && storedItems.Count > 0,
+            "工具栏列表（有几项、什么顺序）随偏好落盘");
+        Check(storedItems.Any(static tool => tool.Kind == ToolbarToolKind.Pen && tool.TipValues is { Values.Length: 18 }),
+            "笔锋的全量取值（含三个速度参数）挂在那一支笔上一起落盘");
+        Check(storedItems.Any(static tool => tool.Kind == ToolbarToolKind.Eraser),
+            "橡皮的擦法与半径也挂在那一把橡皮上");
         var storedPresets = AppPreferences.Current.TipCustomPresets.Items ?? [];
-        Check(storedPresets.Count == InkTipOptions.CustomPresetRecords.Count && storedPresets.Count > 0,
+        Check(storedPresets.Count == InkTipOptions.CustomPresetRecords.Count,
             "「我的笔锋」随偏好落盘");
-        Check(AppPreferences.Current.TipPresetId == InkTipOptions.PresetId
-            && AppPreferences.Current.TipEnabled == InkTipOptions.Enabled,
-            "当前档位与笔锋总开关随偏好落盘");
+        Check(AppPreferences.Current.ToolbarSelectedId == ToolbarTools.SelectedId,
+            "选中的是哪一支笔随偏好落盘");
+
+        // 画布的场景设置也在这份存档里（按场景各存一套）。
+        var storedScenes = AppPreferences.Current.CanvasScenes.Items ?? [];
+        Check(storedScenes.Count == Enum.GetValues<CanvasScene>().Length && storedScenes.Count > 0,
+            "画布场景设置随偏好落盘（每个场景一条）");
+        Check(storedScenes.Select(static scene => scene.Scene).Distinct().Count() == storedScenes.Count,
+            "同一场景不会存成两条");
     }
 
     private static void CheckFlyoutPlacement()
@@ -734,6 +1012,118 @@ internal static class Program
         point = FlyoutPlacement.Calculate(new Rect(100, 100, 300, 68), new Size(280, 260), new Rect(0, 0, 1920, 1040), 1);
         Check(point.X == 100 && point.Y == 160, "Flyout aligns below with a 4 DIP visible surface gap");
     }
+
+    /// <summary>
+    /// 批注栏出现在哪儿：工作区（不含任务栏）下方居中。三件事分开钉——
+    /// <b>算术</b>（拿一张合成工作区，不碰真屏幕）、<b>接线</b>（摆的是窗口自己量出来的宽高，
+    /// 不是标记里那个 300）、<b>单位</b>（框架那份 <c>WorkArea</c> 与 <c>Window.Left</c> 同一坐标系）。
+    /// 单位这条最要紧也最安静：换错了不报错，只是"在 150% 的屏上跑到屏幕外去"。
+    /// </summary>
+    private static void CheckToolbarPlacement()
+    {
+        // ------------------------------------------------------------------ 算术
+        var spot = ToolbarPlacement.Compute(new Rect(0, 0, 1920, 1040), new Size(300, 68));
+        Check(spot.X == 810 && Math.Abs(spot.Y - 966) < 1e-9,
+            $"1920x1040 工作区里 300x68 的栏落在 ({spot.X:0},{spot.Y:0})");
+        // 贴的是看得见那块的底边：透明宿主四周各有 6 DIP 留白，不该算进距离里
+        Check(Math.Abs(spot.Y + 68 - 6 - (1040 - ToolbarPlacement.BottomGap)) < 1e-9,
+            $"可见表面底边停在工作区下缘上方 {ToolbarPlacement.BottomGap} DIP（不是宿主底边）");
+        Check(ToolbarPlacement.Compute(new Rect(-1920, 0, 1920, 1080), new Size(3000, 68)).X == -1920,
+            "栏比工作区还宽时贴着左缘，不跑到屏外");
+
+        // ------------------------------------------------------------------ 接线
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        var selectedBefore = ToolbarTools.SelectedId;
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        // 工作区给一张远在屏幕外的（-16000 是这套验收一贯的停车点）：摆位照走，
+        // 但这一拍不会在用户的桌面上显形。比这更远的坐标会被外壳拉回虚拟屏之内，读数就没法看了。
+        var work = new Rect(-16000, 0, 1920, 1080);
+        ToolbarPlacement.Apply(toolbar, work);
+        var want = ToolbarPlacement.Compute(work, new Size(toolbar.Width, toolbar.Height));
+        Check(Math.Abs(toolbar.Left - want.X) < 2 && Math.Abs(toolbar.Top - want.Y) < 2,
+            $"摆的是实测尺寸 {toolbar.Width:0}x{toolbar.Height:0}（栏宽随按钮数走）：应落 ({want.X:0.##},{want.Y:0.##})，" +
+            $"实得 ({toolbar.Left:0.##},{toolbar.Top:0.##}) —— 差 2 DIP 以内算对，窗口坐标过一遍物理像素会有舍入");
+
+        // 加一颗钮 → 栏变宽 → 中心不许跑；删回去 → 中心还不许跑。
+        // 用户摆的是一条居中的栏，加第二支笔就整条往右挪半颗钮，"居中"当场失真。
+        var center = toolbar.Left + toolbar.Width / 2;
+        var widthBefore = toolbar.Width;
+        var added = ToolbarTools.Add(ToolbarToolKind.Pen);
+        var widthAfterAdd = toolbar.Width;
+        var widenedCenter = toolbar.Left + toolbar.Width / 2;
+        if (added is not null) ToolbarTools.Remove(added.Id);
+        var restoredCenter = toolbar.Left + toolbar.Width / 2;
+        Check(added is not null && widthAfterAdd > widthBefore
+                && Math.Abs(widenedCenter - center) < 2 && Math.Abs(restoredCenter - center) < 2,
+            $"加一颗钮宽度 {widthBefore:0}→{widthAfterAdd:0}，中心停在 {center - work.X:0.##}" +
+            $"（加完 {widenedCenter - work.X:0.##}、删回 {restoredCenter - work.X:0.##}，相对工作区左缘）" +
+            "—— 坐标读回来要过一遍物理像素，2 DIP 以内算同一个中心");
+        if (added is not null) ToolbarTools.Select(selectedBefore);
+
+        // ------------------------------------------------------------------ 单位
+        // 框架那份 WorkArea 必须是 DIP（与 Window.Left 同一坐标系）。判据独立取自 Win32：
+        // 主屏 rcWork（物理像素）÷ 该屏 DPI × 96。换错了不报错，只是"在 150% 的屏上跑到屏外"。
+        // 本机实测：SPI_GETWORKAREA 在这个运行时返回 false（框架因此走它的平台监视器那条路），
+        // 所以对照一律问 GetMonitorInfo —— 那也是 FlyoutPlacement 一直在用、且验过的一条。
+        if (OperatingSystem.IsWindows())
+        {
+            var desktop = GetDesktopWindow();
+            var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+            Check(GetMonitorInfo(MonitorFromWindow(desktop, 1 /* PRIMARY */), ref info), "GetMonitorInfo 问得到主屏");
+            var dpi = GetDpiForWindow(desktop);
+            var scale = 96.0 / dpi;
+            var screenWork = Jalium.UI.SystemParameters.WorkArea;
+            var physicalWidth = info.Work.Right - info.Work.Left;
+            var physicalHeight = info.Work.Bottom - info.Work.Top;
+            var placed = ToolbarPlacement.Compute(screenWork, new Size(toolbar.Width, toolbar.Height));
+            Console.WriteLine($"INFO: 主屏工作区物理 {physicalWidth}x{physicalHeight} px @ dpi {dpi}（scale {scale:0.###}）" +
+                $"→ 框架给的是 DIP {screenWork.Width:0.##}x{screenWork.Height:0.##} @{screenWork.X:0.##},{screenWork.Y:0.##}；" +
+                $"{toolbar.Width:0}x{toolbar.Height:0} 的栏落在 ({placed.X:0.##},{placed.Y:0.##})，" +
+                $"可见表面底边 {placed.Y + toolbar.Height - 6:0.##}（工作区下缘 {screenWork.Bottom:0}）");
+            Check(Math.Abs(screenWork.Width - physicalWidth * scale) < 2 && Math.Abs(screenWork.Height - physicalHeight * scale) < 2
+                    && Math.Abs(screenWork.X - info.Work.Left * scale) < 2 && Math.Abs(screenWork.Y - info.Work.Top * scale) < 2,
+                $"Jalium.UI.SystemParameters.WorkArea 是 DIP 而不是物理像素：应为 " +
+                $"{physicalWidth * scale:0.##}x{physicalHeight * scale:0.##}，实得 {screenWork.Width:0.##}x{screenWork.Height:0.##}");
+            // 落点真的在主屏工作区之内 —— 单位一旦换错，这条最先红（栏会跑到屏外的负坐标去）
+            Check(placed.X >= screenWork.X - 1 && placed.Y >= screenWork.Y - 1
+                    && placed.X + toolbar.Width <= screenWork.Right + 1 && placed.Y + toolbar.Height <= screenWork.Bottom + 1,
+                "按真工作区算出的落点在这块屏里");
+        }
+        else
+        {
+            Console.WriteLine("SKIP: 工作区单位对照只在 Windows 上问得到。");
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorInfo
+    {
+        public int Size;
+        public NativeRect Monitor, Work;
+        public uint Flags;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetDesktopWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+    [DllImport("user32.dll")]
+    private static extern int GetDpiForWindow(IntPtr window);
 
     // 批注板墨迹层已换成闭源 SDK（Dusk）。这里不测真笔输入，只钉住"应用的五个命令确实
     // 落到引擎属性上"，以及"设置页仅存的那一项墨迹偏好真的还在生效"——
@@ -853,6 +1243,104 @@ internal static class Program
     private static JaliumInkCanvas? _inkSurface;
     private static bool _inkPressureFlip;
     private static double _inkTipPresetBeforeSwitch;
+
+    /// <summary>
+    /// 窗口层级系统。这里<b>不验"属性设对了没有"</b>，而是回读真实桌面 Z 序：
+    /// 先把四个窗口按层级摆好、断言干净，再故意把顺序弄反、断言 Verify 报得出来、Reconcile 修得回去。
+    /// 只验属性的话，验的是我们自己的记忆 —— 而层级出错的现场永远在操作系统那一侧。
+    /// </summary>
+    private static void CheckWindowLayers()
+    {
+        // 画布在应用里是最大化全屏的；验收里把它缩成一个小格子并推到屏幕外 ——
+        // 测的是 Z 序而不是"铺满"，没有必要真的盖住整块桌面。
+        var overlay = new AnnotationOverlayWindow
+        {
+            WindowState = WindowState.Normal,
+            Left = -17000, Top = 0, Width = 320, Height = 240,
+            ShowActivated = false, ShowInTaskbar = false,
+        };
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        var menu = new PenSecondaryMenuWindow { Left = -15000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        var dialog = new SettingsWindow
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = -14000, Top = 0, ShowActivated = false, ShowInTaskbar = false,
+        };
+        Window[] stack = [toolbar, overlay, menu, dialog];
+        foreach (var window in stack) Windows.Add(window);
+
+        foreach (var window in stack) window.Show();
+        foreach (var window in stack) window.ForceRenderFrame();
+
+        WindowLayerManager.Reconcile();
+
+        // 画布在应用里是全屏铺开的，验收里被缩成 320×240 —— 那台墨迹面必须仍然被排到真实尺寸：
+        // AnnotationOverlayWindow 在 DEBUG 下有一条"格子塌成零尺寸时画面全空且不报错"的断言，
+        // 显示一个没被排开的画布会让那条断言误报。
+        var inkHost = (Grid)overlay.FindName("InkHost")!;
+        Check(inkHost.ActualWidth > 0 && inkHost.ActualHeight > 0,
+            $"验收里的画布被排到了真实尺寸（{inkHost.ActualWidth}×{inkHost.ActualHeight}）");
+
+        var described = WindowLayerManager.Describe();
+        Check(described.Contains("画布", StringComparison.Ordinal)
+            && described.Contains("批注栏", StringComparison.Ordinal)
+            && described.Contains("笔菜单", StringComparison.Ordinal)
+            && described.Contains("设置", StringComparison.Ordinal),
+            $"Show 之后四个窗口都算「在屏上」：{described}");
+
+        var canvasRank = WindowLayerManager.RankOf(overlay);
+        var toolbarRank = WindowLayerManager.RankOf(toolbar);
+        var menuRank = WindowLayerManager.RankOf(menu);
+        var dialogRank = WindowLayerManager.RankOf(dialog);
+        Check(canvasRank >= 0 && toolbarRank >= 0 && menuRank >= 0 && dialogRank >= 0,
+            $"四个窗口都在桌面 Z 序里找得到：画布={canvasRank} 批注栏={toolbarRank} 笔菜单={menuRank} 设置={dialogRank}");
+        Check(dialogRank < menuRank && menuRank < toolbarRank && toolbarRank < canvasRank,
+            $"层级顺序成立（排名越小越靠前）：设置 {dialogRank} < 笔菜单 {menuRank} < 批注栏 {toolbarRank} < 画布 {canvasRank}");
+        Check(WindowLayerManager.Verify() is { Count: 0 },
+            $"回读校验干净：{string.Join("；", WindowLayerManager.Verify())}");
+        Check(WindowLayerManager.IsAboveOtherApps(overlay) && WindowLayerManager.IsAboveOtherApps(toolbar)
+            && WindowLayerManager.IsAboveOtherApps(dialog),
+            "画布与压在它上面的窗口都带着 WS_EX_TOPMOST（这才压得住其他应用）");
+
+        // 故意弄反：把画布顶到整个桌面最前 —— 这正是"画布盖过工具栏"那类事故的形状。
+        var canvasHandle = overlay.Handle;
+        Check(canvasHandle != IntPtr.Zero && NativeWindowZOrder.PlaceAfter(canvasHandle, NativeWindowZOrder.Top),
+            "能把画布顶到最前（用它制造一次违规）");
+        var broken = WindowLayerManager.Verify();
+        Check(broken.Count > 0 && broken.Any(problem => problem.Contains("画布", StringComparison.Ordinal)),
+            $"顺序被弄反之后 Verify 报得出来：{string.Join("；", broken)}");
+
+        WindowLayerManager.Reconcile();
+        var repaired = WindowLayerManager.Verify();
+        Check(repaired.Count == 0 && WindowLayerManager.RankOf(toolbar) < WindowLayerManager.RankOf(overlay),
+            $"Reconcile 修得回去：{string.Join("；", repaired)}");
+
+        // 画布收起 + 对话框在场 → 整个应用退出置顶带。
+        // 这是"设置窗口应当是个普通窗口、能被压到别的应用后面"那条要求，写成了层级系统自己算出来的规则。
+        overlay.Hide();
+        WindowLayerManager.Reconcile();
+        Check(WindowLayerManager.DialogPresent
+            && !WindowLayerManager.IsAboveOtherApps(toolbar)
+            && !WindowLayerManager.IsAboveOtherApps(dialog),
+            "对话框在场且画布已收起时，应用退出置顶带");
+        Check(WindowLayerManager.Verify() is { Count: 0 },
+            $"退出置顶带之后层级仍然成立：{string.Join("；", WindowLayerManager.Verify())}");
+
+        // 画布回来 → 它必须置顶（要求：不被其他应用盖住），于是压在它上面的对话框只能跟着置顶 ——
+        // 否则"对话框在画布之上"根本不可能成立。这条是向上继承的直接后果，也是它的验收。
+        overlay.Show();
+        overlay.ForceRenderFrame();
+        WindowLayerManager.Reconcile();
+        Check(WindowLayerManager.IsAboveOtherApps(overlay) && WindowLayerManager.IsAboveOtherApps(dialog),
+            "画布在屏时对话框跟着进置顶带（不然它压不住置顶的画布）");
+        Check(WindowLayerManager.Verify() is { Count: 0 },
+            $"画布回来之后层级仍然成立：{string.Join("；", WindowLayerManager.Verify())}");
+
+        foreach (var window in stack) window.Close();
+        Check(stack.All(window => WindowLayerManager.RankOf(window) == -1),
+            "关掉之后这四个窗口都不再登记在层级系统里（别的检查留下的窗口还开着，那不算）");
+        Check(WindowLayerManager.Verify() is { Count: 0 }, "关掉之后层级依然干净");
+    }
 
     private static void CheckInkPreferenceLands()
     {

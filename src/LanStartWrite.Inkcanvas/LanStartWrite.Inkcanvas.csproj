@@ -7,10 +7,23 @@
     <OutputType>WinExe</OutputType>
     <LangVersion>preview</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!--
+      双目标：net10.0-windows 是主目标（发布安装器）；net10.0 是给 Linux 打包（AppImage）用的。
+      两端共用同一份源码 —— 应用不用 Windows 桌面框架（UI 全在 Jalium 上），
+      所以 net10.0 这一端能编过；仅有的平台差异（Win32 的 Z 序 / 截屏互操作）在代码里按 OS 收口。
+    -->
+    <TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>
+    <!-- 在 Linux 上还原 net10.0-windows 这一端需要它（要拉 WindowsDesktop 框架包）。 -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <InvariantGlobalization>true</InvariantGlobalization>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RestoreEnablePackagePruning>false</RestoreEnablePackagePruning>
+
+    <!--
+      FluentJalium 是兄弟仓库（源码直引），路径因机器而异 —— 本机默认是 C:\git\Jalium\FluentJalium，
+      CI 里用 -p:FluentJaliumProject=<签出路径> 指过去，不用改这份文件。
+    -->
+    <FluentJaliumProject Condition="'$(FluentJaliumProject)' == ''">..\..\..\..\Jalium\FluentJalium\src\FluentJalium\FluentJalium.csproj</FluentJaliumProject>
 
     <DebugType Condition="'$(Configuration)' == 'Debug'">portable</DebugType>
     <DebugSymbols Condition="'$(Configuration)' == 'Debug'">true</DebugSymbols>
@@ -24,11 +37,11 @@
     <PackageReference Include="Dusk" Version="1.0.1" />
     <!--
       Fluent 控件层：FluentJalium（Astra），源码直引。
-      它与本仓库同为 C:\git 下的兄弟目录；库自己只依赖 Jalium.UI.Controls + .Xaml，
-      桌面宿主（Jalium.UI.Desktop）由上面的 Jalium.UI 元包带进来。
+      库自己只依赖 Jalium.UI.Controls + .Xaml（都是 TFM 无关的 net10.0 程序集），
+      路径见上面的 FluentJaliumProject 属性。
       墨迹引擎 Dusk 才需要 feed 那套版本仪式（要混淆、要闭源），这里没有那个理由。
     -->
-    <ProjectReference Include="..\..\..\..\Jalium\FluentJalium\src\FluentJalium\FluentJalium.csproj" />
+    <ProjectReference Include="$(FluentJaliumProject)" />
   </ItemGroup>
 
   <ItemGroup>

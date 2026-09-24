@@ -59,4 +59,75 @@
   <Style x:Key="SectionTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
     <Setter Property="Margin" Value="0,24,0,8" />
   </Style>
+
+  <!--
+    图标工具钮（浮动批注栏那六颗）。库没有这一档：
+    AppBarButton / AppBarToggleButton 是"图标 + 下方标签"的 68x64 命令条按钮，
+    它的 compact 触发器只是把标签收起来，内层边框仍然留着 22 DIP 的标签带（实测
+    AppBarButtonInnerBorderCompactMargin = 2,6,2,22），于是选中实底只盖到上面一块、
+    整条又明显过长。批注栏要的是 40x40 图标居中、未选透明、选中整块铺 accent，
+    对应的是 Button / ToggleButton 这一族，所以这里只在库的键上做四件事：
+      1. 定 40x40 的方格并清掉内边距与 MinHeight（库给的是 32 高的文字按钮节奏）；
+      2. 动作钮直接继承 SubtleButtonStyle（未选透明 / hover SubtleSecondary / pressed SubtleTertiary）；
+      3. 切换钮继承 DefaultToggleButtonStyle 拿它的选中色阶 —— 库把它接到了
+         ToggleButtonBackgroundChecked = AccentFillColorDefaultBrush、
+         ToggleButtonForegroundChecked = TextOnAccentFillColorPrimaryBrush，正是旧版那套；
+      4. 再把切换钮未选那一半的色阶换成和动作钮同一条 Subtle 阶梯（库里 ToggleButton 的默认态是
+         带边框的实体按钮底，放在一排透明图标钮旁边会突出来一块）。
+    颜色一个都没新定义，全是引用库的 token；键盘焦点环由库的 ButtonLayoutStyle 带进来。
+  -->
+  <Style x:Key="ToolActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style x:Key="ToolToggleButtonStyle" TargetType="ToggleButton" BasedOn="{StaticResource DefaultToggleButtonStyle}">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <!-- 未选那一半换成 Subtle 阶梯；选中那一半留给库的 accent 色阶，不要碰。 -->
+    <Setter Property="Background" Value="{StaticResource SubtleFillColorTransparentBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorPrimaryBrush}" />
+    <Style.Triggers>
+      <MultiTrigger>
+        <MultiTrigger.Conditions>
+          <Condition Property="IsChecked" Value="False" />
+          <Condition Property="IsMouseOver" Value="True" />
+        </MultiTrigger.Conditions>
+        <Setter Property="Background" Value="{StaticResource SubtleFillColorSecondaryBrush}" />
+      </MultiTrigger>
+      <MultiTrigger>
+        <MultiTrigger.Conditions>
+          <Condition Property="IsChecked" Value="False" />
+          <Condition Property="IsPressed" Value="True" />
+        </MultiTrigger.Conditions>
+        <Setter Property="Background" Value="{StaticResource SubtleFillColorTertiaryBrush}" />
+      </MultiTrigger>
+    </Style.Triggers>
+  </Style>
+
+  <!--
+    「工具栏按钮」列表里那一排小按钮（用这支 / 上移 / 下移 / 删除）。
+    库没有这一档：它的默认按钮是 32 高的标准动作钮，一行里放四颗会把行撑得很高、
+    与旁边两行小字不对齐。这里只在库的 Subtle 阶梯上把节奏收小，颜色一个都不新定义。
+    收起节奏的收益不只是好看 —— 一屏能多放几项，而"按钮多了要能一眼看全"正是这个列表的用途。
+  -->
+  <Style x:Key="ToolRowButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+    <Setter Property="Height" Value="28" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
 </ResourceDictionary>

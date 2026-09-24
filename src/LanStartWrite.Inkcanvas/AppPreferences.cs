@@ -107,29 +107,37 @@ internal sealed record PreferenceSnapshot
     public AppTheme Theme { get; init; } = AppTheme.Light;
     public bool ReduceMotion { get; init; }
     public bool KeepToolbarOnTop { get; init; } = true;
-    public double PenWidth { get; init; } = 4;
-    public bool Pressure { get; init; }
-
-    /// <summary>当前笔锋档位的稳定标识；空串表示"自定义"（取值不来自任何一个预设）。</summary>
-    public string TipPresetId { get; init; } = "standard";
-
-    /// <summary>笔锋总开关。关掉之后塑形器原样透传压力。</summary>
-    public bool TipEnabled { get; init; } = true;
 
     /// <summary>
-    /// 当前笔锋的<b>全部</b>参数取值（含速度那三项），按 <c>StrokeTipParameters.All</c> 的顺序。
+    /// 压力感应。<b>它是设备能力开关，不是某一支笔的属性</b>，所以留在这里而不是进工具栏项。
+    /// </summary>
+    public bool Pressure { get; init; }
+
+    /// <summary>
+    /// 工具栏上有哪些按钮、按什么顺序、各自带什么数据。
     /// <para>
-    /// 存全量而不是只存档位标识：档位只覆盖形状参数，而被手动微调过的速度参数必须能活过重启。
-    /// <c>null</c> 表示这份存档里还没有笔锋取值（旧档），此时保持档位默认值。
+    /// <b>画笔粗细 / 橡皮擦法 / 橡皮半径 / 笔锋取值都在这里面</b> —— 它们曾经是这份快照上的全局字段，
+    /// 而"两个笔按钮各自一套数据"要求它们属于某一项。留一份全局的做镜像就是第二个真相，
+    /// 所以那些字段是<b>删掉</b>而不是留着兼容。
     /// </para>
     /// </summary>
-    public TipValueVector? TipValues { get; init; }
+    public ToolbarToolCollection ToolbarItems { get; init; } = new();
 
-    /// <summary>用户保存的笔锋预设。内置档位<b>不</b>在这里 —— 它们由引擎提供，不需要落盘。</summary>
+    /// <summary>当前选中的那一项（下次启动还停在这支笔上）。列表里查不到时落空串。</summary>
+    public string ToolbarSelectedId { get; init; } = "";
+
+    /// <summary>用户保存的笔锋预设。<b>它是全应用共享的色板，不是某一支笔的属性</b>，所以不进工具栏项。</summary>
     public TipPresetCollection TipCustomPresets { get; init; } = new();
 
-    public EraserMode EraseMode { get; init; } = EraserMode.Area;
-    public double EraserRadius { get; init; } = 14;
+    /// <summary>
+    /// 各场景的画布设置（穿透模式 / 冻结模式）。
+    /// <para>
+    /// <b>按场景存</b>而不是一份全局的：屏幕批注要的是"透出桌面"，将来白板要的正好相反，
+    /// 一套全局开关会让它们互相改。现在只有一个场景，但数据结构先按它该有的样子放好 ——
+    /// 加场景时只动枚举与设置页，不动存档。
+    /// </para>
+    /// </summary>
+    public CanvasSceneCollection CanvasScenes { get; init; } = new();
 }
 
 /// <summary>UI-thread-owned preferences. Slider changes are debounced; writes replace atomically.</summary>
@@ -165,15 +173,19 @@ internal static class AppPreferences
         }
         ApplyInkOptions(Current);
         ApplyTipOptions(Current);
-        // 两条桥都是"运行时状态 → 存档"的方向：开关在运行时被拨动，这里把它记下来。
+        // 三条桥都是"运行时状态 → 存档"的方向：状态在运行时被改，这里把它记下来。
         // 反方向（存档 → 运行时）只在 Initialize 与 Update 里走，且由 _applyingFromPreferences 挡住回环。
         InkRuntimeOptions.Changed += options =>
         {
             if (_applyingFromPreferences) return;
             Update(Current with { Pressure = options.EnablePressure });
         };
-        InkTipOptions.Changed += CaptureTipOptions;
-        InkTipOptions.PresetsChanged += CaptureTipOptions;
+        // 笔锋的<b>取值</b>不用在这里桥：它属于某一支笔，那支笔动了就是工具列表动了（见下一条）。
+        // 这里只桥"我的笔锋"那份预设库 —— 它是全应用共享的。
+        InkTipOptions.PresetsChanged += CaptureCustomPresets;
+        ToolbarTools.LayoutChanged += CaptureToolbar;
+        ToolbarTools.SelectionChanged += CaptureToolbar;
+        CanvasOptions.Changed += CaptureCanvasOptions;
     }
 
     internal static void Update(PreferenceSnapshot value)
@@ -227,37 +239,123 @@ internal static class AppPreferences
     private static PreferenceSnapshot Validate(PreferenceSnapshot value) => value with
     {
         Theme = Enum.IsDefined(value.Theme) ? value.Theme : AppTheme.Light,
-        EraseMode = Enum.IsDefined(value.EraseMode) ? value.EraseMode : EraserMode.Area,
-        PenWidth = double.IsFinite(value.PenWidth) ? Math.Clamp(Math.Round(value.PenWidth), 1, 24) : 4,
-        EraserRadius = double.IsFinite(value.EraserRadius) ? Math.Clamp(Math.Round(value.EraserRadius), 4, 48) : 14,
-        TipValues = ValidateTipValues(value.TipValues),
+        ToolbarItems = ValidateTools(value.ToolbarItems),
+        ToolbarSelectedId = ValidateSelectedTool(value.ToolbarItems, value.ToolbarSelectedId),
         TipCustomPresets = ValidateCustomPresets(value.TipCustomPresets),
+        CanvasScenes = ValidateCanvasScenes(value.CanvasScenes),
     };
 
     /// <summary>
-    /// 把笔锋取值拉回参数表的形状：长度按<b>本表</b>对齐（短了补默认、长了截掉），
-    /// 每一项钳到自己的区间，非有限值退回该参数的默认值。
+    /// 洗一遍场景设置：丢掉不认识的场景（枚举成员被删过的旧档）、同一场景只留第一个。
+    /// <para>漏掉的场景不补 —— 读取那一侧（<see cref="CanvasOptions.For"/>）查不到就按默认值走，
+    /// 而"没有这一项"与"两个开关都关着"本来就是同一件事。</para>
+    /// </summary>
+    private static CanvasSceneCollection ValidateCanvasScenes(CanvasSceneCollection collection)
+    {
+        var source = collection.Items ?? [];
+        var kept = new List<CanvasSceneSettings>(source.Count);
+        var seen = new HashSet<CanvasScene>();
+
+        foreach (var settings in source)
+        {
+            if (settings is null) continue;
+            if (!Enum.IsDefined(settings.Scene)) continue;
+            if (!seen.Add(settings.Scene)) continue;
+            kept.Add(settings);
+        }
+
+        return new CanvasSceneCollection { Items = kept };
+    }
+
+    /// <summary>
+    /// 当前选中的工具标识：列表里查不到就落空串，由 <see cref="ToolbarTools.Load"/> 自己挑一个。
     /// <para>
-    /// 这一步同时是"坏存档不许传进引擎"的那道闸：引擎的 <c>Set</c> 通道也钳，
-    /// 但它在应用之后才钳，而这里钳完的值会被写回存档 —— 于是坏值在被发现的那一次就被修正掉，
-    /// 不会每启动一次重算一遍。
+    /// 这里查的是<b>洗过的那份列表</b>而不是原始入参 —— 选中的那支笔可能刚好被上面一步删掉了
+    /// （重复标识、超上限、固定项重复），查原始列表会留下一个指向不存在项的选中态。
     /// </para>
     /// </summary>
-    private static TipValueVector? ValidateTipValues(TipValueVector? vector)
+    private static string ValidateSelectedTool(ToolbarToolCollection source, string selectedId)
     {
-        if (vector?.Values is not { Length: > 0 } stored) return null;
-
-        var parameters = StrokeTipParameters.All;
-        var values = new double[parameters.Count];
-        for (var i = 0; i < parameters.Count; i++)
+        if (string.IsNullOrEmpty(selectedId)) return string.Empty;
+        var items = source.Items ?? [];
+        foreach (var tool in items)
         {
-            var raw = i < stored.Length ? stored[i] : parameters[i].DefaultValue;
-            values[i] = double.IsFinite(raw)
-                ? Math.Clamp(raw, parameters[i].Minimum, parameters[i].Maximum)
-                : parameters[i].DefaultValue;
+            if (string.Equals(tool.Id, selectedId, StringComparison.Ordinal)) return selectedId;
         }
-        return new TipValueVector { Values = values };
+
+        return string.Empty;
     }
+
+    /// <summary>
+    /// 洗一遍工具栏项。四件事，每一件都对应一种"坏存档"：
+    /// <list type="number">
+    /// <item>丢坏项：标识为空 / 类型不认识 / 标识重复；</item>
+    /// <item>固定项去重：鼠标模式、撤销、重做、设置各只留第一个；</item>
+    /// <item>固定项补齐：缺了就补回一个 —— <b>少了鼠标模式用户出不去批注，少了设置就再也改不了工具栏</b>，
+    /// 所以这四个不是"用户数据"，是这套界面的门槛；</item>
+    /// <item>数据规范化：区间钳制、非有限值退回默认、与类型无关的字段一律清回默认值
+    /// （免得它们变成第二个真相）。</item>
+    /// </list>
+    /// </summary>
+    private static ToolbarToolCollection ValidateTools(ToolbarToolCollection collection)
+    {
+        // 列表整个是空的 = 第一次运行（或存档被清空）：给回默认那一条工具栏。
+        // 少了这一步，首启会得到一条"只有鼠标 / 撤销 / 重做 / 设置、一支笔都没有"的工具栏 ——
+        // 因为下面补的是四个门槛项，而笔与橡皮是用户数据，不会凭空长出来。
+        var source = collection.Items is { Count: > 0 } items ? items : ToolbarTools.DefaultItems();
+
+        var kept = new List<ToolbarTool>(source.Count);
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var fixedSeen = new HashSet<ToolbarToolKind>();
+
+        foreach (var tool in source)
+        {
+            if (kept.Count >= ToolbarTools.MaxItems) break;
+            if (tool is null) continue;
+            if (string.IsNullOrWhiteSpace(tool.Id)) continue;
+            if (!Enum.IsDefined(tool.Kind)) continue;
+            if (!ids.Add(tool.Id)) continue;
+
+            if (IsFixedKind(tool.Kind))
+            {
+                if (!fixedSeen.Add(tool.Kind)) continue;
+            }
+
+            kept.Add(ToolbarTools.Normalize(tool));
+        }
+
+        foreach (var kind in FixedKinds)
+        {
+            if (fixedSeen.Contains(kind)) continue;
+            if (kept.Count >= ToolbarTools.MaxItems) break;
+
+            var fallback = ToolbarTools.DefaultItems().Find(item => item.Kind == kind)!;
+            if (!ids.Add(fallback.Id)) continue; // 标识被别人占了：宁可不补，也不造一个重复标识
+            kept.Add(fallback);
+        }
+
+        return new ToolbarToolCollection { Items = kept };
+    }
+
+    /// <summary>
+    /// 四个"界面门槛"项：鼠标模式（退出批注）、撤销、重做、设置（唯一能改工具栏的入口）。
+    /// 它们各只允许有一个，而且不许缺失。
+    /// </summary>
+    private static readonly ToolbarToolKind[] FixedKinds =
+    [
+        ToolbarToolKind.Mouse, ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Settings,
+    ];
+
+    private static bool IsFixedKind(ToolbarToolKind kind)
+    {
+        foreach (var fixedKind in FixedKinds)
+        {
+            if (fixedKind == kind) return true;
+        }
+
+        return false;
+    }
+
 
     /// <summary>
     /// 过滤自定义预设：标识为空的、以及和内置档位撞标识的一律丢掉（撞内置的那条会让
@@ -317,17 +415,36 @@ internal static class AppPreferences
 
     private const int MaxPresetNameLength = 24;
 
-    /// <summary>把运行时的笔锋状态记进存档。空写入被 <see cref="Update"/> 的相等判断挡掉。</summary>
-    private static void CaptureTipOptions()
+    /// <summary>把「我的笔锋」记进存档。空写入被 <see cref="Update"/> 的相等判断挡掉。</summary>
+    private static void CaptureCustomPresets()
     {
         if (_applyingFromPreferences) return;
         Update(Current with
         {
-            TipPresetId = InkTipOptions.PresetId,
-            TipEnabled = InkTipOptions.Enabled,
-            TipValues = new TipValueVector { Values = InkTipOptions.CurrentValues },
             TipCustomPresets = new TipPresetCollection { Items = [.. InkTipOptions.CustomPresetRecords] },
         });
+    }
+
+    /// <summary>
+    /// 把工具栏记进存档：<b>有哪些按钮、什么顺序、各自什么数据、选中哪一个</b>。
+    /// 画笔粗细、橡皮擦法、笔锋取值都在这条路上 —— 它们现在属于某一项，不再有各自的桥。
+    /// </summary>
+    private static void CaptureToolbar()
+    {
+        if (_applyingFromPreferences) return;
+        Update(Current with
+        {
+            ToolbarItems = new ToolbarToolCollection { Items = [.. ToolbarTools.Snapshot()] },
+            ToolbarSelectedId = ToolbarTools.SelectedId,
+        });
+    }
+
+    /// <summary>把画布那两个开关记进存档。<b>按场景整份写回</b> —— 快照本来就是全场景的，
+    /// 只写当前场景会让别的场景的设置在下一次存盘时被抹掉。</summary>
+    private static void CaptureCanvasOptions()
+    {
+        if (_applyingFromPreferences) return;
+        Update(Current with { CanvasScenes = CanvasOptions.Snapshot() });
     }
 
     private static void ApplyInkOptions(PreferenceSnapshot value)
@@ -335,8 +452,16 @@ internal static class AppPreferences
         InkRuntimeOptions.SetEnablePressure(value.Pressure);
     }
 
+    /// <summary>
+    /// 把存档翻译成运行时状态。三条，顺序有讲究：
+    /// <b>先装「我的笔锋」这份预设库，再装工具栏</b> —— 某一支笔引用的档位标识要能在库里查到，
+    /// 否则它会在装载时被当成坏标识降级成"自定义"，用户会看到自己挂的档位莫名其妙没了。
+    /// 画布设置与这两者无依赖，放最后。
+    /// </summary>
     private static void ApplyTipOptions(PreferenceSnapshot value)
     {
-        InkTipOptions.Load(value);
+        InkTipOptions.LoadCustomPresets(value.TipCustomPresets);
+        ToolbarTools.Load(value.ToolbarItems.Items ?? [], value.ToolbarSelectedId);
+        CanvasOptions.Load(value.CanvasScenes);
     }
 }

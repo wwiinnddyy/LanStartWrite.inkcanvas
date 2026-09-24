@@ -1,0 +1,144 @@
+PASS: Only the selected page is attached
+PASS: Expanded navigation width
+PASS: Native/layout resize switches navigation to compact
+PASS: Compact state reaches the items and hides their labels
+PASS: Expanded navigation restored after widening
+PASS: Initial Light theme also initializes framework resource lookup
+PASS: Dark theme state
+PASS: Existing brush identity preserved when changing theme
+PASS: Existing text brush changes to dark-theme foreground
+PASS: Light theme restores existing brush
+PASS: App-owned toolbar surface is the light solid in Light
+PASS: App-owned toolbar surface flips dark in place on the same brush
+PASS: Native system colour slots resolve through the theme layer
+PASS: Switch hit target is 48 x 32 DIP
+PASS: Switch rendered track is 40 x 20 DIP
+PASS: Touch-down captures the originating contact
+PASS: Second contact cannot take over switch drag
+PASS: Captured touch moves knob to on position
+PASS: Touch release commits exactly one state change
+PASS: Touch release clears contact capture
+PASS: Touch drag commits Click and Command once, without double toggling
+PASS: Disabling during drag releases capture
+PASS: Disabled switch ignores touch-down
+PASS: Tap released outside switch cancels without a click
+PASS: Lost touch capture cancels pending switch interaction
+PASS: Narrow settings row stacks the action below a full-width description
+PASS: Responsive reflow repositions the same control instead of replacing it
+PASS: Wide settings row puts the action right-aligned beside the description
+PASS: Navigation exposes selection independently of focus
+PASS: Navigation activates exactly one live page
+PASS: Navigation item carries the theme's keyboard focus visual
+PASS: All six toolbar tools are 40 x 40 icon buttons, not 68 x 64 AppBar buttons
+PASS: Toolbar tools carry the library's keyboard focus visual through the style chain
+PASS: The checked tool fills its whole square with the accent brush
+PASS: The checked tool's icon inherits the on-accent ink
+PASS: An unchecked tool sits on a transparent surface
+PASS: Toolbar touch drag retains only the first contact
+PASS: Captured touch moves toolbar by the requested DIP delta
+PASS: Toolbar touch-up releases capture
+PASS: Toolbar stops following released touch
+PASS: Pen-menu state is clamped and synchronized
+PASS: Programmatic pen-menu synchronization does not emit user changes
+PASS: Pen thickness slider renders the FluentJalium Slider template
+PASS: Pen kind radio renders the FluentJalium RadioButton template
+PASS: Pen tip preset combo renders the FluentJalium ComboBox template
+PASS: Palette selection invokes one color change
+PASS: Menu slider updates selected thickness
+PASS: 笔菜单的笔锋下拉列出全部档位，末尾一项是「自定义」
+PASS: 笔菜单的笔锋下拉选中的就是当前档位
+PASS: 程序化同步笔锋档位不发用户变更
+PASS: 荧光笔下笔锋下拉灰掉
+PASS: 并且给了一句为什么用不了
+PASS: 换回书写笔之后笔锋下拉恢复可用
+PASS: 在下拉里选档位发一次用户变更，并带上档位标识
+PASS: 按当前状态刷新下拉不产生新的用户变更
+PASS: 引擎的七个内置笔锋档位在应用侧可见
+PASS: 默认停在标准档，档位可按稳定标识取到
+PASS: 坏档位标识返回 null 而不是抛
+PASS: 选档之后档位归属跟着走
+PASS: 选档把该档的全部形状参数一次写进当前设置
+PASS: 手动微调之后档位归属落到自定义
+PASS: 自定义状态下没有可恢复的档位，恢复按钮据此灰掉
+PASS: 重新选档即可回到预设取值
+PASS: 「存为我的笔锋」真的存下来了
+PASS: 存下来的是一支自定义档位，并且立刻被选中
+PASS: 自定义预设出现在「我的笔锋」里，且可按标识取回
+PASS: 自定义预设的名字带上是派生自哪一档
+PASS: 快速通道 ApplyTo 把总开关与全部取值一起推给目标设置
+PASS: 可以删掉一支「我的笔锋」
+PASS: 删掉之后预设库里也不再有它
+PASS: 内置档位删不掉
+PASS: 再存一支并留在库里，供存档往返覆盖
+PASS: 设置页的档位下拉跟着预设库一起长
+PASS: 参数表没有漂移：15 项属于预设作用域，18 项含三个速度参数
+PASS: 读档能改笔锋总开关
+PASS: 读档把取值写进当前设置
+PASS: 读档把「我的笔锋」装回预设库
+PASS: 存档里的档位标识已经不存在时，落到自定义而不是硬指一个名字
+PASS: 同一份存档读两遍不会把同一支笔装两遍
+PASS: 读进来的自定义预设可以删掉，内置的仍然删不掉
+PASS: 存了空引用的快照被当成「没有这一项」，不打崩应用
+PASS: 空取值不动已有的参数
+PASS: 没到上限时还能继续存「我的笔锋」
+PASS: 自定义预设可以整批装回来
+PASS: 「恢复为所选档位」把微调撤掉、回到该档的取值
+PASS: 笔锋参数面板给参数表里的每一项都生成了一个滑杆
+PASS: 参数面板按分栏组成了若干张卡片
+PASS: 滑杆带着参数自己的名字（键盘与读屏要它）
+PASS: 滑杆的区间就是参数自己的区间
+PASS: 滑杆初值就是当前取值
+PASS: 拖滑杆把值写进当前设置
+PASS: 拖滑杆之后档位归属落到自定义
+PASS: 换档位之后滑杆跟着动
+PASS: NaN 被描述符通道挡在外面，不写进设置
+PASS: 整数值参数的方向键步长至少是 1
+PASS: 没有哪条滑杆的可用位置少于二十格（否则它只是个开关）：
+PASS: Eraser-menu state is clamped and synchronized
+PASS: Programmatic eraser-menu synchronization does not emit user changes
+PASS: Stroke-erase hides the radius row rather than shipping a dead slider
+PASS: Area-erase shows the radius row again
+PASS: Choosing stroke erase emits one mode change
+PASS: Radius slider emits one radius change
+PASS: Clear-all arms on the first click instead of wiping the board
+PASS: The second click clears once and resets the label
+PASS: Flyout flips above and clamps on a negative-origin monitor
+PASS: Flyout aligns below with a 4 DIP visible surface gap
+PASS: Preference batches synchronize ink runtime and notify UI exactly once
+PASS: Preferences reject nonfinite values
+PASS: Pending saves are visible to the settings footer
+PASS: Isolated preference save succeeds
+PASS: Successful flush clears pending-save state
+PASS: Preferences round-trip through JSON
+PASS: 笔锋的全量取值（含三个速度参数）随偏好落盘
+PASS: 「我的笔锋」随偏好落盘
+PASS: 当前档位与笔锋总开关随偏好落盘
+PASS: Annotation overlay installs the Dusk ink surface into InkHost
+PASS: Default surface is variable-width and fully opaque
+PASS: A fresh board has nothing to undo or redo
+PASS: Highlighter maps to uniform geometry plus the shared highlighter alpha, keeping the picked rgb
+PASS: Laser re-applies its own alpha without losing the picked rgb
+PASS: Thickness writes both axes of the live attributes instance
+PASS: 默认橡皮是面积擦（引擎的点擦）
+PASS: 笔迹擦落到引擎的整笔擦模式
+PASS: SetEraseMode 保持已选的擦法，不把它顶回默认
+PASS: 擦除半径被夹到上限
+PASS: 非法半径退回默认值而不是传进引擎
+PASS: 清空确实作用于文档承载面
+PASS: Ink mode leaves erase
+PASS: 铅笔档的起笔锥形长度与当前取值不同，下一拍的断言才有意义
+PASS: The surviving ink preference reaches the engine one dispatcher turn later
+PASS: 换档位之后画布的笔锋设置晚一拍跟上
+PASS: 画布的笔锋设置与总开关和设置页的状态一致
+PASS: Navigation has one shared indicator outside item hit targets
+PASS: Initial indicator aligns with the selected item
+PASS: Selection starts a travelling indicator instead of teleporting to the destination
+PASS: A live intermediate frame shows sliding and stretch, with no opacity swap
+PASS: Rapid reversal starts a replacement animation instead of swapping the value
+PASS: Retargeted animation settles on the last selection and removes its clocks
+PASS: Footer selection lands the indicator on the footer item
+SKIP: 库的 FluentNavigationView 不在窗口高度变化时重算指示条（实测 cur=637.4285714285714 target=717.4285714285714）。
+PASS: Footer indicator lands on the resized layout, not a cached row offset
+PASS: Shared indicator remains aligned in compact navigation
+PASS: Enabling reduced motion settles the active indicator immediately
+PASS: 142 checks. Synthetic routed touch only; physical touch not tested.

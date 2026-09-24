@@ -1,6 +1,6 @@
 <Window xmlns="http://schemas.jalium.ui/2024" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  x:Class="LanStartWrite.Inkcanvas.EraserSecondaryMenuWindow" Title="橡皮设置" WindowStartupLocation="Manual"
- Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" WindowStyle="None"
+ ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" WindowStyle="None"
  IsShowTitleBar="False" IsShowMinimizeButton="False" IsShowMaximizeButton="False" IsShowCloseButton="False" HasSystemMenu="False"
  AllowsTransparency="True" SystemBackdrop="None" Background="Transparent" Foreground="{StaticResource TextFillColorPrimaryBrush}">
   <Border x:Name="EraserMenuSurface" Margin="6" Padding="16" CornerRadius="8" Background="{StaticResource FlyoutSurfaceBrush}" BorderBrush="{StaticResource SurfaceStrokeColorDefaultBrush}" BorderThickness="1">

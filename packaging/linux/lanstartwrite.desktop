@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=揽星书写
+Comment=全屏批注与书写工具
+# AppImage 里 AppRun 与程序集都在 usr/bin 下；linuxdeploy 会把 %/ 占位符换成相对路径。
+Exec=lanstartwrite
+Icon=lanstartwrite
+Terminal=false
+Categories=Graphics;Office;
+StartupNotify=true
+StartupWMClass=LanStartWrite.Inkcanvas

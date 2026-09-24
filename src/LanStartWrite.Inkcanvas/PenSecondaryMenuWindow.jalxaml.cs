@@ -11,19 +11,6 @@ public partial class PenSecondaryMenuWindow : Window
     private static readonly Brush TransparentBrush =
         new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
 
-    private static readonly Color[] PaletteColors =
-    [
-        Color.FromRgb(0x20, 0x20, 0x20), // 1
-        Color.FromRgb(0xD1, 0x34, 0x38), // 2
-        Color.FromRgb(0xF2, 0x6B, 0x1F), // 3
-        Color.FromRgb(0xF2, 0xC8, 0x11), // 4
-        Color.FromRgb(0x10, 0x7C, 0x10), // 5
-        Color.FromRgb(0x00, 0xB7, 0xC3), // 6
-        Color.FromRgb(0x00, 0x78, 0xD4), // 7
-        Color.FromRgb(0x87, 0x64, 0xB8), // 8
-        Color.FromRgb(0x73, 0x73, 0x73), // 9
-    ];
-
     private readonly RadioButton[] _colorRings;
 
     /// <summary>
@@ -58,7 +45,7 @@ public partial class PenSecondaryMenuWindow : Window
 
     public PenSecondaryMenuWindow()
     {
-        SelectedColor = PaletteColors[0];
+        SelectedColor = InkPalette.Colors[0];
 
         AllowsTransparency = true;
         ShowActivated = false;
@@ -66,6 +53,11 @@ public partial class PenSecondaryMenuWindow : Window
         SystemBackdrop = WindowBackdropType.None;
         Background = TransparentBrush;
         Opacity = 1;
+
+        // 层级登记：二级菜单层（在批注栏之上）。这里不写 Topmost ——
+        // 菜单只在书写/擦除时开得出来，那两个状态下画布在屏、工具栏置顶，
+        // 因此它要不要置顶是<b>从下面推出来的</b>，由 WindowLayerManager 算。
+        WindowLayerManager.Register(this, WindowLayer.Panel, "笔菜单");
 
         _colorRings =
         [
@@ -143,7 +135,7 @@ public partial class PenSecondaryMenuWindow : Window
             SelectedKind = kind;
             PenThickness.Value = SelectedThickness;
             UpdateThicknessText();
-            _selectedPaletteIndex = FindBestPaletteIndex(color);
+            _selectedPaletteIndex = InkPalette.NearestIndex(Argb.Pack(color));
             UpdateColorSelectionVisuals();
             PenKindPenRadio!.IsChecked = kind == PenKind.Pen;
             PenKindHighlighterRadio!.IsChecked = kind == PenKind.Highlighter;
@@ -225,35 +217,23 @@ public partial class PenSecondaryMenuWindow : Window
             : "荧光笔与激光笔是等宽的，不读压力，笔锋对它们不起作用。";
     }
 
-    private static int FindBestPaletteIndex(Color c)
-    {
-        var best = 0;
-        var bestDist = double.MaxValue;
-        for (var i = 0; i < PaletteColors.Length; i++)
-        {
-            var p = PaletteColors[i];
-            var dr = c.R - p.R;
-            var dg = c.G - p.G;
-            var db = c.B - p.B;
-            var d = (dr * dr) + (dg * dg) + (db * db);
-            if (d < bestDist)
-            {
-                bestDist = d;
-                best = i;
-            }
-        }
-
-        return best;
-    }
-
+    /// <summary>
+    /// 色板格子的颜色与名字<b>从 <see cref="InkPalette"/> 刷进来</b>，标记里不再写死十六进制。
+    /// <para>
+    /// 为什么不在标记里写：色板现在有三处消费者（这里、工具栏摘要的文字、批注栏按钮上的色标），
+    /// 颜色抄在标记里就等于抄了两份 —— 改色板时必然漏一处，而且漏了不会有任何东西报错。
+    /// </para>
+    /// </summary>
     private void WireColorRings()
     {
-        string[] names = ["黑色", "红色", "橙色", "黄色", "绿色", "青色", "蓝色", "紫色", "灰色"];
+        var names = InkPalette.Names;
         for (var i = 0; i < _colorRings.Length; i++)
         {
             var ring = _colorRings[i];
             var index = i;
-            AutomationProperties.SetName(ring, names[i]);
+            ring.Background = new SolidColorBrush(InkPalette.Colors[index]);
+            ring.ToolTip = names[index];
+            AutomationProperties.SetName(ring, names[index]);
             ring.Checked += (_, _) =>
             {
                 if (!_stateSync) SelectPaletteIndex(index);
@@ -313,11 +293,11 @@ public partial class PenSecondaryMenuWindow : Window
 
     private void SelectPaletteIndex(int index)
     {
-        if (index < 0 || index >= PaletteColors.Length)
+        if (index < 0 || index >= InkPalette.Colors.Length)
             return;
 
         _selectedPaletteIndex = index;
-        var c = PaletteColors[index];
+        var c = InkPalette.Colors[index];
         UpdateColorSelectionVisuals();
         SelectedColor = c;
         PenColorChanged?.Invoke(c);

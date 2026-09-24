@@ -1,0 +1,5 @@
+PASS: Only the selected page is attached
+System.InvalidOperationException: FAIL: Expanded navigation width
+   at Program.Check(Boolean condition, String description) in C:\git\ink\LanStartWrite.inkcanvas\tools\UiSmoke\Program.cs:line 924
+   at Program.<>c__DisplayClass3_0.<Main>b__0() in C:\git\ink\LanStartWrite.inkcanvas\tools\UiSmoke\Program.cs:line 61
+   at Program.<>c__DisplayClass3_0.<Main>b__3(Object _, EventArgs _) in C:\git\ink\LanStartWrite.inkcanvas\tools\UiSmoke\Program.cs:line 106

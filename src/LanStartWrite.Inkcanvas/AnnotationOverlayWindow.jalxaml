@@ -12,7 +12,6 @@
         HasSystemMenu="False"
         ShowInTaskbar="False"
         ShowActivated="False"
-        Topmost="False"
         AllowsTransparency="True"
         SystemBackdrop="None"
         ResizeMode="NoResize">
