@@ -184,8 +184,13 @@ jobs:
           & $makensis "/DVERSION=$env:VERSION" `
                        "/DVERSION4=$version4" `
                        "/DBINDIR=$env:GITHUB_WORKSPACE\publish" `
-                       installer.nsi
+                       installer.nsi 2>&1 | Tee-Object -FilePath makensis.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # 有一类警告不是噪音，是"装/卸的动作其实没接上"：
+          # "Uninstall page instfiles not used, no sections will be executed!" 意味着卸载器一节都不跑
+          # （退出码照样是 0，安装包照样产出，只有真去卸载才发现什么都没删）—— 当场红掉。
+          $fatal = Select-String -Path makensis.log -Pattern "no sections will be executed" -SimpleMatch
+          if ($fatal) { Write-Error "NSIS 警告：$($fatal[0].Line)"; exit 1 }
           Get-ChildItem ../dist | Format-Table Name, Length
 
       - name: Linux · AppImage

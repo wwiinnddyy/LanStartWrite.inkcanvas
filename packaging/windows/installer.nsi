@@ -50,10 +50,12 @@ VIAddVersionKey /LANG=2052 "LegalCopyright" "GPL-3.0"
 
 Page Directory
 Page InstFiles
-; 卸载侧只有这一条：UninstPage 的关键字是 uninstConfirm（不是 Confirm），
-; 而"正在卸载"那一页是卸载器自带的、没有 UninstPage instfiles 这种写法 —— 写了会在
-; 脚本解析阶段就红（实测：Usage: UninstPage ... / Error in script on line 53）。
+; 卸载侧两条都要。关键字是 uninstConfirm（不是 Confirm —— 写错在解析阶段就红：
+; Usage: UninstPage ... / Error in script on line 53）；而 instfiles 那一页**必须留着**，
+; 删掉的后果不是报错而是警告 —— "Uninstall page instfiles not used, no sections will be executed!"，
+; 于是 Uninstall 段（真正删文件与注册表的那一节）根本不跑，卸载点了等于什么都没删。
 UninstPage UninstConfirm
+UninstPage InstFiles
 
 !macro Files
   ; /r 整个目录：publish 产物里 dll/exe/资源一大把，逐个列举只会与发布清单脱节。
