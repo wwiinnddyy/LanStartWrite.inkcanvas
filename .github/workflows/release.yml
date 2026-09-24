@@ -295,28 +295,27 @@ jobs:
       - name: 构建并打离线包
         shell: bash
         env:
-          APPID_FILE: packaging/linux/appid
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set +e
-          appid=$(cat "$APPID_FILE")
+          appid=$(cat packaging/linux/appid)
           manifest="packaging/linux/$appid.json"
-          # 清单里的 source 路径是相对清单文件算的，所以发布目录得搬到它旁边。
+          # 清单里 source 的 path 按清单文件所在目录算，所以发布目录要搬到它旁边。
           cp -a publish "$(dirname "$manifest")/files"
-          time flatpak-builder --user --assumeyes --force-clean \
-            --repo=/tmp/repo --state-dir=/tmp/fbstate /tmp/bc "$manifest"
+          # 一趟做完：build + 装进 --install + 导出进 --repo。分两趟会红在
+          # "App dir '/tmp/bc' is not empty"（第一趟失败留下的状态），还白花一倍时间。
+          time flatpak-builder --user --assumeyes --force-clean             --repo=/tmp/repo --state-dir=/tmp/fbstate --install=/tmp/inst /tmp/bc "$manifest"
           echo "builder rc=$?"
-          echo "== 装进用户实例，验一下里面到底有什么 =="
-          flatpak-builder --user --install=/tmp/inst /tmp/bc "$manifest"
-          echo "install rc=$?"
-          flatpak info "$appid" 2>&1 | head -12
-          ls -la "/tmp/inst/files/$appid" 2>&1 | head -5
+          echo "== 造出来的 flatpak 树里到底有什么 =="
+          ls -la /tmp/bc/files/app/bin /tmp/bc/files/app/lib/lanstartwrite 2>&1 | head -12
           echo "== 打单文件 .flatpak =="
-          flatpak build-bundle /tmp/repo "$appid.flatpak" "$appid" 2>&1 | tail -3
-          mkdir -p dist && mv "$appid.flatpak" "dist/LanStartWrite.Inkcanvas-${{ needs.resolve.outputs.version }}-linux-x64.flatpak" 2>/dev/null
+          flatpak build-bundle /tmp/repo "/tmp/$appid.flatpak" "$appid" 2>&1 | tail -3
+          out="dist/LanStartWrite.Inkcanvas-$VERSION-linux-x64.flatpak"
+          mkdir -p dist && mv "/tmp/$appid.flatpak" "$out" 2>/dev/null
           ls -la dist
-          if [ ! -s "dist/LanStartWrite.Inkcanvas-${{ needs.resolve.outputs.version }}-linux-x64.flatpak" ]; then
-            echo "::error 没有产出 .flatpak"
-            echo "环境硬约束：userns=$(cat /proc/sys/user/max_user_namespaces 2>&1) unprivileged_userns=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>&1)"
+          if [ ! -s "$out" ]; then
+            echo "::error 没有产出 .flatpak —— 下面是环境硬约束"
+            echo "userns=$(cat /proc/sys/user/max_user_namespaces 2>&1) unprivileged_userns=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>&1)"
             echo "bwrap 自检：$(bwrap --ro-bind / / --dev /dev --unshare-all echo ok 2>&1 | tail -1)"
             exit 1
           fi
@@ -345,18 +344,20 @@ jobs:
           name: linux-publish-${{ needs.resolve.outputs.version }}
           path: publish
 
-      - name: 装 linglong-bin 与 linglong-builder
+      - name: 装 linglong-bin、linglong-box 与 linglong-builder
         shell: bash
         run: |
           set -e
-          # 官方一键脚本用的就是这个 OBS（docs/pages/en/guide/start/install.md 里那份
-          # ci.deepin.com 的 xUbuntu_24.04 已经 404 了，实际目录名是 Ubuntu_24.04，且是 flat repo）。
-          echo "deb [trusted=yes] https://ppa.linyaps.org.cn/release/Ubuntu_24.04/ ./" \
-            | sudo tee /etc/apt/sources.list.d/linyaps.list
+          # 官方一键脚本用的就是这个 OBS（docs 里那份 ci.deepin.com 的 xUbuntu_24.04 已经 404，
+          # 实际目录名是 Ubuntu_24.04，而且是 flat repo —— Packages 直接躺在目录里）。
+          echo "deb [trusted=yes] https://ppa.linyaps.org.cn/release/Ubuntu_24.04/ ./"             | sudo tee /etc/apt/sources.list.d/linyaps.list
           sudo apt-get update -qq
-          apt-cache policy linglong-bin linglong-builder | grep -aE "linglong|Candidate"
-          sudo apt-get install -y -qq linglong-bin linglong-builder
-          ll-builder --version; ll-cli --version
+          apt-cache policy linglong-bin linglong-box linglong-builder | grep -aE "linglong|Candidate"
+          # linglong-box 必须点名装：builder 的 Depends 写的是 `linglong-box | crun`，
+          # runner 上已经有 crun，apt 就满足依赖不装 box —— 而 ll-builder 起容器找的是
+          # ll-box 这个可执行文件，缺了一句 "ll-box not found" 退出码 255（实测）。
+          sudo apt-get install -y -qq linglong-bin linglong-box linglong-builder
+          ll-builder --version; ll-cli --version; command -v ll-box
 
       - name: 造 deb、填模板、构建并导出
         shell: bash
@@ -364,20 +365,24 @@ jobs:
           VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set +e
-          chmod +x packaging/linux/build-deb.sh
+          repo="$GITHUB_WORKSPACE"
           appid=$(cat packaging/linux/appid)
+          chmod +x packaging/linux/build-deb.sh
           packaging/linux/build-deb.sh publish "$VERSION" amd64 dist
-          deb=$(ls dist/*.deb)
+          deb=$(readlink -f dist/*.deb)
+          sha=$(sha256sum "$deb" | cut -d' ' -f1)
+          # 玲珑的版本号参与更新比较，官方例子用四段：三位补一段 .0。
           llversion=$(echo "$VERSION" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1.0/')
-          proj="/tmp/ll/$appid"; mkdir -p "$proj"
+          proj="/tmp/ll/$appid"; rm -rf "$proj"; mkdir -p "$proj"
           cp "$deb" "$proj/"
-          # url 先试 file:// 绝对路径；不行再试相对 ./ —— 文档只给了 https 的例子，本地写法没实测过。
+
+          # url 先试 file:// 绝对路径，不行再试相对 ./ —— 官方文档只给过 https 的例子，
+          # 本地写法没实测过。两种都在同一趟里试，红也要红出是哪种不行。
+          # 路径一律取绝对：cd 进 proj 之后再用相对路径读模板，就是第二次失败的假错误。
           fill() {
-            sed -e "s#@APPID@#$appid#g" -e "s#@LLVERSION@#$llversion#" \
-                -e "s#@DEBNAME@#$(basename "$deb")#" -e "s#@DEBSHA256@#$(sha256sum "$deb" | cut -d' ' -f1)#" \
-                -e "s#@DEBURL@#$1#" packaging/linux/linglong.yaml.in > "$proj/linglong.yaml"
+            sed -e "s#@APPID@#$appid#g" -e "s#@LLVERSION@#$llversion#"                 -e "s#@DEBNAME@#$(basename "$deb")#" -e "s#@DEBSHA256@#$sha#"                 -e "s#@DEBURL@#$1#" "$repo/packaging/linux/linglong.yaml.in" > "$proj/linglong.yaml"
           }
-          fill "file://$(readlink -f "$deb")"
+          fill "file://$deb"
           echo "== 填好的 linglong.yaml =="; cat "$proj/linglong.yaml"
           cd "$proj"
           time timeout 1500 ll-builder build; rc=$?
@@ -388,18 +393,16 @@ jobs:
             time timeout 1500 ll-builder build; rc=$?
             echo "build(relative) rc=$rc"
           fi
-          echo "== export =="
+          echo "== export（先把它认的参数打出来，不猜 flag：--uab 就不是）=="
+          ll-builder export --help-all 2>&1 | head -24
           timeout 900 ll-builder export; echo "export rc=$?"
-          timeout 900 ll-builder export --uab 2>&1 | tail -3; echo "uab rc=$?"
-          find "$proj" -name "*.lca" -o -name "*.uab" | head
-          mkdir -p "$GITHUB_WORKSPACE/out"
-          find "$proj" -name "*.lca" -o -name "*.uab" -exec cp {} "$GITHUB_WORKSPACE/out/" \; -print
-          if [ -z "$(ls -A "$GITHUB_WORKSPACE/out" 2>/dev/null)" ]; then
+          mkdir -p "$repo/out"
+          find "$proj" -name "*.lca" -o -name "*.uab" -exec cp {} "$repo/out/" \; -print
+          if [ -z "$(ls -A "$repo/out" 2>/dev/null)" ]; then
             echo "::error 玲珑没产出 .lca / .uab —— 下面是环境硬约束"
             echo "userns max=$(cat /proc/sys/user/max_user_namespaces 2>&1) unprivileged=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>&1)"
-            echo "fuse: $(ls -l /dev/fuse 2>&1 | tail -1)  crun: $(command -v crun || echo 缺)  uidmap: $(dpkg -l uidmap 2>/dev/null | tail -1)"
-            echo "repo list: $(ll-cli repo list 2>&1 | head -5)"
-            echo "base 能不能搜到: $(timeout 180 ll-cli search org.deepin.base 2>&1 | head -6)"
+            echo "fuse: $(ls -l /dev/fuse 2>&1 | tail -1)  crun: $(command -v crun || echo 缺)  box: $(command -v ll-box || echo 缺)"
+            echo "ll-cli 认的子命令（--help 前 12 行）："; ll-cli --help 2>&1 | head -12
             exit 1
           fi
 

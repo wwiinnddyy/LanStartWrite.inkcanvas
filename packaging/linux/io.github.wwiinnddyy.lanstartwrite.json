@@ -18,9 +18,9 @@
     {
       "name": "lanstartwrite",
       "buildsystem": "simple",
-      "//build-commands": "payload/ 与 meta/ 由下面 sources 的 dest 钉死，不靠 flatpak-builder 的落位习惯猜。装到 /app/lib/<短名> 再留一层 /app/bin 薄壳，是因为 .NET 的 apphost 要与它的全部 dll/native 同目录，而 .desktop 的 Exec 只写了短名。",
+      "//build-commands": "payload/ 与 meta/ 由下面 sources 的 dest 钉死，不靠 flatpak-builder 的落位习惯猜。装到 /app/lib/<短名> 再留一层 /app/bin 薄壳，是因为 .NET 的 apphost 要与它的全部 dll/native 同目录，而 .desktop 的 Exec 只写了短名。/app/bin 要先 mkdir —— 实测过红：重定向进一个不存在的目录只给 'No such file or directory'。",
       "build-commands": [
-        "mkdir -p /app/lib/lanstartwrite",
+        "mkdir -p /app/bin /app/lib/lanstartwrite",
         "cp -a payload/. /app/lib/lanstartwrite/",
         "chmod +x /app/lib/lanstartwrite/LanStartWrite.Inkcanvas",
         "printf '#!/bin/sh\\nexec /app/lib/lanstartwrite/LanStartWrite.Inkcanvas \"$@\"\\n' > /app/bin/lanstartwrite",
