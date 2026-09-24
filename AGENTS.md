@@ -14,7 +14,7 @@ This project uses **Jalium.UI** framework. All UI code, markup, and patterns mus
 
 | 事实 | 位置 |
 |---|---|
-| 唯一墨迹承载面 | `AnnotationOverlayWindow` 的 code-behind 里 `new JaliumInkCanvas()`，塞进 `AnnotationOverlayWindow.jalxaml` 的 `InkHost` |
+| 唯一墨迹承载面 | `CanvasSurface`（应用侧一个类）**里面** `new JaliumInkCanvas()`；两块画布（屏幕批注与白板）各持一份 `CanvasSurface`，塞进各自 `.jalxaml` 的 `InkHost` |
 | 包从哪来 | `C:\git\ink\Dusk\sdk\build-sdk.ps1` → 单程序集 `Dusk.dll` → `C:\git\ink\dusk-feed\` |
 | 源从哪读 | `NuGet.config` 里的 `dusk-sdk` 源；**本仓库里没有 Dusk 源码，也不许加 ProjectReference** |
 | 引擎文档 | `C:\git\ink\Dusk\docs\`（仅本地保留，未入库）；公开 GPL 源码仓见 Dusk 的 `PackageProjectUrl` |
@@ -23,7 +23,7 @@ This project uses **Jalium.UI** framework. All UI code, markup, and patterns mus
 
 1. **不要在 `.jalxaml` 里写 Dusk 的类型名**。引擎类型只出现在 code-behind。这样万一日后把混淆保留面从"全 public"收窄成"契约闭包"，应用侧零 diff。
 2. **不要再往墨迹层加反射补丁**。本项目原先有 ~600 行围着 `Jalium.UI.Controls.InkCanvas` 打的补丁（反射取 protected `DynamicRenderer`、反射改私有 `MinPointDistance`、等距加密补点、探测喂点入口、DispatcherTimer 手搓激光淡出）——全部已删，Dusk 内核对这些都有原生对应物（`InkInputProfile` 按设备档位、`StrokeKind.Laser` + 覆盖层淡出、`GetIntermediatePoints` 直连湿墨、`Metrics` 埋点）。加回来就是重新制造上游版本依赖。
-3. **`JaliumInkCanvas.Dispose()` 必须显式调**。Jalium 不代调、类型无终结器；漏掉且 Document 被外部持有会留住整棵墨迹视觉树。现有做法：`AnnotationOverlayWindow` 的 `Closed` 里调一次。
+3. **`JaliumInkCanvas.Dispose()` 必须显式调**。Jalium 不代调、类型无终结器；漏掉且 Document 被外部持有会留住整棵墨迹视觉树。现有做法：两个窗口的 `Closed` 里各调一次 `CanvasSurface.Dispose()`（它内部再调引擎的 `Dispose`）。
 
 行为以 Dusk 语义为准，不还原旧手感（用户明确要求"应用侧是墨迹系统重构，不追求完全还原功能"）。当前与旧版的已知差异与当前事实：
 
@@ -88,11 +88,14 @@ This project uses **Jalium.UI** framework. All UI code, markup, and patterns mus
    附带一条：库的 AppBar 那一族不写 `FocusVisualStyle`（对 `Button` / 导航项都写了）。本应用现在不走它了，焦点环由 `ButtonLayoutStyle` 直接带进来；但谁要用 `AppBarButton` 做命令条，得自己补。
 4. **库的指示条走的是 WinUI 曲线**：`MoveTo` 会先把新目标写进**基值**再用动画盖上去，且 `top` 一路先伸到目标那一头、高度再跨住整段距离收回到 16。于是旧那条"选中瞬间读到的还该是起点"的判据不成立了 —— 时钟走过第一格之前读到的就是基值。现在钉的是"两条动画时钟都挂着"（库在不动画那条分支上是直接落值、不挂时钟的，所以这就是"没传送"的充分证据）。**"续起的起点取的是当前显示值"这一条本套 320ms 步进量不出来，没有当成已经验过**（试过按高度采样，三轮里红过一次，已撤）。
 5. **库的 `FluentNavigationView` 不在窗口高度变化时重算指示条**（实测：停在 637.43，页脚项已在 717.43）。宽度变化会走它自己的 `AdaptPane → InvalidateMeasure` 因而跟着走，高度变化没有那条路。UiSmoke 现在如实打一条 SKIP 并改验"落点来自当前布局、不是缓存行高"。**这条也该往库里提。**
-6. **图标走 `FontIcon` + 显式 `FontFamily="Segoe Fluent Icons"`。** `SymbolIcon` 在这个运行时不暴露 FontFamily，被框架钉死在 `Segoe MDL2 Assets`（Win10 形状），且 764 格里 120 格画不出墨。码点一律取自库的实测表 `FluentJalium/spike/GlyphInkProbe/glyph-ink-symbol.csv`，不许凭记忆写。当前六个：`E7C9` 鼠标 / `E76D` 笔 / `E75C` 橡皮 / `E7A7` 撤销 / `E7A6` 重做 / `E713` 设置，`ink` 均 > 0。**不要给图标设本地 `Foreground`** —— 一设就压住库 `IconInk` 那条活绑定，选中态"白字在 accent 上"当场失效。
+6. **图标走 `FontIcon` + 显式 `FontFamily="Segoe Fluent Icons"`。** `SymbolIcon` 在这个运行时不暴露 FontFamily，被框架钉死在 `Segoe MDL2 Assets`（Win10 形状），且 764 格里 120 格画不出墨。码点一律取自库的实测表 `FluentJalium/spike/GlyphInkProbe/glyph-ink-symbol.csv`，不许凭记忆写。当前七个：`E7C9` 鼠标 / `E76D` 笔 / `E75C` 橡皮 / `E7A7` 撤销 / `E7A6` 重做 / `E713` 设置 / `E786` 白板，`ink` 均 > 0；
+   另有 `E8B3` 选择（白板里那颗鼠标钮的替代形状，ink=401）。`EF20` Marquee 与 `EDA4` Touchscreen **ink=0**，看着对却画不出墨，禁用。**不要给图标设本地 `Foreground`** —— 一设就压住库 `IconInk` 那条活绑定，选中态"白字在 accent 上"当场失效。
 7. **量导航面板宽度要先关掉动画。** `PART_PaneRoot` 的宽度带 0.2 秒过渡（读 `SplitViewPaneAnimationOpenDuration`），"下一拍就该读到 48"是道时序题 —— 实测三轮里红过一次。现在那三步在 `ReduceMotion=true` 下量，两态真的换了与否由 `IsCompact` 与 `PART_Label` 折叠那两条管。
 8. **库没有的就继续自实现**（用户定的范围）：九色画笔色板 `PenColorSwatchStyle`、两个实体浮层表面 token（`ToolbarSurfaceBrush` 白 / `#2C2C2C`，`FlyoutSurfaceBrush` `#F9F9F9` / `#2C2C2C`；WinUI 的对应物 `FlyoutPresenterBackground` 是亚克力，本应用刻意不用，所以也不能借那个键名）、`FlyoutPlacement` 的原生坐标定位、`RadioToolToggleButton.Reactivated`、四个窗口的分工（Design.MD §1）。应用侧的 `HelperTextStyle` / `SectionTextStyle` / `SettingsCardStyle` 是**基于库的键往上加**的三行扩展（库按 WinUI 原样发布尺度，不替宿主定辅助文字颜色与卡片行距），不是第二套尺度。
 
-UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj -c Debug -p:OutputPath=bin/Verify/` 后直接跑 `tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe`）。注意本应用的 `.exe` 若在运行中会锁住 `bin/Debug`，构建一律带 `-p:OutputPath` 绕开。**跑之前先看 exe 的时间戳** —— 跑一份旧 exe 会安静地验一套旧检查，数字看着还挺像样（踩过一次：46 条全绿其实是几个月前的产物）。另外 Main 一进来就把 `ReduceMotion` 设成 true：第一拍就要量导航面板宽度，而面板打开带 0.2 秒过渡 —— 320ms 的第一拍实测仍会抖（6 个导航项那次就是它红的）；导航动画那组需要动的时候自己会再打开。
+UiSmoke 现状：**305 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/UiSmoke.csproj -c Debug -p:OutputPath=bin/Verify/` 后直接跑 `tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe`）。
+导航动画那组里 `Retargeted animation settles...` / `A live intermediate frame...` 两条会**自己红**（2026-09-25 实测：改动前后都会 3 次里红 1 次，量的是库的动画时钟，不是白板的账），
+而 `Check()` 一红就中断整条队列 —— 所以**基线要复跑两三次再取数**，单看一次的红绿不可信。注意本应用的 `.exe` 若在运行中会锁住 `bin/Debug`，构建一律带 `-p:OutputPath` 绕开。**跑之前先看 exe 的时间戳** —— 跑一份旧 exe 会安静地验一套旧检查，数字看着还挺像样（踩过一次：46 条全绿其实是几个月前的产物）。另外 Main 一进来就把 `ReduceMotion` 设成 true：第一拍就要量导航面板宽度，而面板打开带 0.2 秒过渡 —— 320ms 的第一拍实测仍会抖（6 个导航项那次就是它红的）；导航动画那组需要动的时候自己会再打开。
 
 另有一处会骗人的陈旧产物：`src/LanStartWrite.Inkcanvas/obj/Debug/net10.0-windows/generated/Jalium.UI.Xaml.SourceGenerator/` 里那份 `*.g.cs` 停在 2026-09-17 没再更新过（**当前管线真正用的是 `obj/<cfg>/net10.0-windows/Jalxaml/Razor/*.jalxaml`** —— 想确认"标记改动进了构建没有"就 `grep` 那里，别 `grep` 那份 `.g.cs`）。
 
@@ -112,7 +115,7 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
 
 | 层 | 谁 | 要求 |
 |---|---|---|
-| `Canvas` | 批注画布（全屏透明） | **只要在屏就必须压过其他应用**；在本应用内部最低 |
+| `Canvas` | 批注画布（全屏透明）与白板（全屏有底） | **只要在屏就必须压过其他应用**；在本应用内部最低。同层允许并存，但两块画布不会同时在屏 |
 | `Toolbar` | 批注栏 | 在画布之上 |
 | `Panel` | 笔 / 橡皮二级菜单 | 在批注栏之上 |
 | `Dialog` | 设置 | 全应用最高，**画布也不许盖住它** |
@@ -163,7 +166,7 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
 
 | 文件 | 职责 |
 |---|---|
-| `ToolbarToolKind.cs` | 七种用途：鼠标 / 笔 / 橡皮 / 撤销 / 重做 / 设置 / 分隔线 |
+| `ToolbarToolKind.cs` | 八种用途：鼠标 / 笔 / 橡皮 / 撤销 / 重做 / 设置 / 分隔线 / 白板 |
 | `ToolbarTool.cs` | 一项的数据（扁平的，按 `Kind` 决定哪几个字段有意义）+ 按值比较的集合 |
 | `ToolbarTools.cs` | 模型：有哪些项、什么顺序、选中谁、增删改序、与笔锋的来回同步 |
 | `ToolbarToolVisuals.cs` | 外观：图标码点、色标、"40×40 一格长什么样"（批注栏与设置页共用） |
@@ -181,10 +184,12 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
 3. **写回要压住"读"那一趟**：`ApplySelectedTipToEngine` 里的 `_loading` 开关压的是**写回**，
    而引擎那边的通知照发（画布靠它更新 `TipSettings`）。不压的话，每选一次笔都会把"跟着档位走"
    的那支物化成一份显式拷贝，而通知还会白跑一趟。
-4. **固定项不可删**：鼠标模式（退出批注的唯一入口）、设置（改工具栏的唯一入口）、撤销、重做 ——
+4. **固定项不可删**：鼠标模式（退出这块画布）、白板（进那块画布的唯一入口）、设置（改工具栏的唯一入口）、撤销、重做 ——
+   补齐时落在它该在的那一格（白板紧跟鼠标），不是一律追加到尾巴 —— 否则"首启"与"从旧档升级"看到的顺序不一样，
+   而这只会以"我的按钮顺序怎么变了"的形式被用户看见。
    各只允许一个、不许缺失，`ValidateTools` 会把缺的补回来。
    **而"列表整个是空的"必须落回 `DefaultItems()`**：否则首启会得到一条一支笔都没有的工具栏
-   （补的是四个门槛项，笔和橡皮是用户数据，不会凭空长出来）。
+   （补的是五个门槛项，笔和橡皮是用户数据，不会凭空长出来）。
 5. **与类型无关的字段一律洗回默认值**：分隔线身上不该留着颜色 —— 否则存档会被后人误读成"这个按钮也有颜色"。
 6. **新项复制当前选中那一项的数据、并插在它后面**：用户说的"再放一个"几乎总是"再放一个跟这个差不多的"，
    空白的第二支笔只会让人再调一遍。加完顺手选中它，因为接下来几乎一定要调它的颜色。
@@ -225,10 +230,10 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
 
 ### 验收
 
-`UiSmoke.CheckToolbarTools` 起一条真工具栏，钉的是：默认七项与顺序、加一支笔（复制了当前那支、插在它后面）、
+`UiSmoke.CheckToolbarTools` 起一条真工具栏，钉的是：默认八项与顺序、加一支笔（复制了当前那支、插在它后面）、
 **两支笔的颜色 / 粗细 / 笔锋互不影响**（含"手调之后切走再切回，那一支的形状还在"）、两把橡皮同理、
 固定项删不掉、删掉选中项之后选中态落回一个能用的工具、以及设置页那份列表的**行数必须等于数据项数**。
-`CheckToolbarTouch` 另外钉住六颗钮仍是 40×40、焦点环仍在、"选中铺 accent / 未选透明 / 图标继承 on-accent 墨色"。
+`CheckToolbarTouch` 另外钉住七颗钮仍是 40×40、焦点环仍在、"选中铺 accent / 未选透明 / 图标继承 on-accent 墨色"。
 `CheckToolbarPlacement` 钉摆位：算术（合成工作区，不碰真屏幕）、接线（摆的是实测宽高、加一颗钮之后中心不跑）、
 单位（框架那份 `WorkArea` 与 `GetMonitorInfo` 的物理矩形 ÷ 该屏 DPI 对得上）。本机 2560×1516 @175% 实测：
 工作区 1462.86×866.29 DIP，395×68 的栏落在 (534, 792)，可见表面底边 854 —— 离任务栏 12 DIP。
@@ -236,10 +241,11 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
 
 ## Critical: 画布按场景配（穿透模式 / 冻结模式）
 
-画布的行为**按场景存**：`CanvasScene`（现在只有 `ScreenAnnotation` 屏幕批注）+ `CanvasSceneSettings`
-（`PassThrough` / `Freeze`，进存档的 `PreferenceSnapshot.CanvasScenes`）+ `CanvasOptions`（应用侧状态所有者，
-"当前场景"的视图）。加一个场景 = 加枚举成员 + 设置页给它一节，**数据模型不用动**。
-设置页因此多了一页「画布」，导航五项：外观 / 墨迹 / 画布 / 窗口与交互 / 关于。
+画布的行为**按场景存**：`CanvasScene`（`ScreenAnnotation` 屏幕批注 + `Whiteboard` 白板）+ `CanvasSceneSettings`
+（`PassThrough` / `Freeze` / `BackgroundArgb`，进存档的 `PreferenceSnapshot.CanvasScenes`）+ `CanvasOptions`（按场景存取的**唯一**入口，
+`For(scene)` / `Set*(scene, value)`，`Changed` 带着"是哪个场景变了"）。加一个场景 = 加枚举成员 + 设置页给它一节，**数据模型不用动**。
+"此刻哪块画布在眼前"不在这里 —— 它是 `CanvasSceneState.Active`，**不落盘**（见下一节）。
+设置页因此有一页「画布」，导航六项：外观 / 墨迹 / 画布 / 工具栏 / 窗口与交互 / 关于。
 
 两个开关都不是"点一下立刻改画面"，而是"下次进画布时按这个来"，所以它们的分支都挂在
 `AnnotationToolbarWindow.SyncAnnotationOverlay` 这条必经之路上（鼠标模式干什么 / 进入画布那一刻干什么），
@@ -295,6 +301,84 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
    而这里只影响观感）。
 7. 截不到（句柄没建出来、矩形为空、DIB 分配失败）就**没有底图**：画布回到透明，功能降级但不崩。
 
+
+## Critical: 白板是第二块画布（选择 / 变换 / 漫游）
+
+自 2026-09-25 起，本应用有**两块**画布。形状一样（全屏、由批注栏操作、在 `WindowLayer.Canvas`），
+区别只在"有没有底"，而这一件把两边的行为分开得很彻底。
+
+| 事实 | 位置 |
+|---|---|
+| 入口 | 工具栏固定项「白板」（`ToolbarToolKind.Whiteboard = 7`，图标 `E786` Slideshow，实测 ink=389）；点一次进、再点一次回屏幕批注 |
+| 窗口 | `WhiteboardWindow`：`AllowsTransparency=false`、登记名「白板」、类与 `.jalxaml` 里一行 `Topmost` 都没有 |
+| 墨迹面 | `CanvasSurface`（**两个窗口共用这一个类**）：引擎控件 + `InkHistory` + 属性/笔锋/压力下发 + 钳位 + 显式 `Dispose` |
+| 底色 | `CanvasSceneSettings.BackgroundArgb` + `CanvasBackgroundPalette`（白 / 米灰 / 浅绿三档，**全是浅底**），在设置页「画布 › 白板」选，**当场生效** |
+| 眼前是哪块 | `CanvasSceneState.Active`（不落盘）；`CanvasOptions` 退成纯按场景存取，`Changed` 如实报哪个场景变了 |
+| 「选择」那颗 | 白板里 `Mouse` 这一项**换呈现不换身份**：图标 `E8B3`、念作「选择」、存档里 `Id="mouse"`/`Name` 一字不动 |
+| 选择与变换 | 引擎半边：`SelectAt/SelectRect/SelectLasso` + `InkSelection.Translate/Scale/Rotate`（天生可撤销）；视觉半边在应用侧：`SelectionFrame` + `SelectionAdorner` |
+| 漫游 | 引擎半边：`InkViewport` + `JaliumInkCanvas.PanByScreen/ZoomAt`；手势半边：`TouchGestureTracker`（框架自带的 Manipulation 只到单指平移） |
+
+### 十二条判断（都是实测换来的）
+
+1. **两块画布互斥为"在眼前"，但都不销毁**：藏起来不等于拆掉，各自的墨迹与撤销账会话内留着。
+   以后"白板文件"就挂在 `CanvasSurface.Document` 上（引擎有 `Strokes` / `Replace` / `Clear` 这一对读写口），
+   读档之后必须 `History.Clear()`（引擎注释：换文档不清历史，撤销会跨到另一份文档上）。
+2. **共享靠组合，不靠基类窗口也不靠抄一份**：`AllowsTransparency` 必须在 `InitializeComponent` 之前定，
+   所以"一个窗口两种形态"迟早变成满地 `if (_whiteboard)`；而抄两份引擎接线的代价是
+   "橡皮钳位只在一块画布上修好"。`AnnotationOverlayWindow` 上那批**纯转发的成员已删**
+   —— 白板那一块没有那层转发，留着就是静默断口的形状。
+3. **所有"写到画布去"的动作一律经 `ActiveSurface`**（撤销 / 重做 / 清空 / 把选中项的数据下发）。
+   不这么改的症状很具体：白板在眼前时按撤销，会安静地撤掉**另一块**画布的历史。
+4. **不许给 `JaliumInkCanvas` 加 `RenderTransform` / `LayoutTransform`**：引擎已经把自己的视口矩阵写在
+   内部层载体上，并且每个输入点在进内核前就按视口换算过。宿主再包一层 = 画面双份变换 + 落点错位。
+   漫游只有 `ZoomAt` / `PanByScreen` 一条门。验收钉的是"控件 `RenderTransform` 为 null 而层载体矩阵等于 `Viewport.Scale`"。
+5. **选框是一份独立状态（`SelectionFrame`：中心 + 两半轴 + 转角），不每帧从 `InkSelection.Bounds` 反推**：
+   那是"选中墨迹的正立外包盒"，转过 45° 再读它会随转角越算越大；拖完再从它反推一次会把转角清零
+   （用户看见选框"啪"地回正）。只在"选择集换了"的那一刻取一次。
+6. **引擎没有 `SelectionChanged`，也不反向清理选择集**（被擦掉的编号一直留在 `Selection` 里），
+   所以"选择还新不新"只有宿主管得着：订阅 `Document.Changed` 一律作废，
+   唯独自己正在做的那批变换例外（判据是 `IsTransforming`，**挪 / 缩 / 转三种都算** ——
+   只放过"挪"会让缩放第一帧就把选择自己清掉，报出来是"对角漂了 300 DIP"）。
+7. **一次手势 = 一步撤销**：宿主在手势边界 `BeginBatch/EndBatch`，`InkSelection.Apply` 尊重批所有权。
+   但 **`EndBatch` 在零变更时不产生一步历史** —— 所以"作废这次手势"必须先读 `OpenBatchChangeCount` 再决定撤不撤，
+   无条件 `Undo()` 弹掉的是**上一步真操作**（症状："捏一下合少一笔"，长得极像引擎历史回放有毛病；
+   先在干净板上跑最小复现 3→3 才确认是自己的账，没有误报上游）。
+8. **手指按在空处不当场清选择**：它可能只是一次还没捏起来的手势起点；拖出框（或抬手确认是点）才清。
+   鼠标与笔不延迟 —— 它们不会变成双指，当场清才是"点空处取消"该有的手感。
+9. **`EraserRadius` 是世界单位**（引擎文档明写"这一步四个适配端目前都没做"）：模型与滑块仍说像素，
+   进引擎前除以 `Viewport.Scale`，并在 `Viewport.Changed` 上重下发。漏了后者的症状是
+   "缩放之后橡皮忽然变笨 / 变肥"，不报错。
+10. **屏幕批注的视口钉死 1:1**：滚轮缩放与中键漫游是引擎壳里硬开、无公开开关，而批注的墨迹讲的是
+    "屏幕上这一块"，一漫游字就与它标的那句话错位、按屏幕空间铺的冻结底图也对不上。
+    修法是在窗口根上截 `PreviewMouseWheel` 与中键的 `PreviewMouseDown`；**左键不许截**
+    （框架是"鼠标事件未被处理才提升成指针事件"，截了就等于关掉鼠标书写）。
+11. **算角度要拿上一拍的点**：`_lastScreen` 在 switch 之前就被覆盖成当前点，于是 `before == after`、
+    旋转增量恒为 0 —— 症状是"拖旋转柄完全没反应"，而"中心没跑""半径不变"两条断言对"什么都没发生"照样绿。
+    抓手柄类断言必须有一条量**转角本身变了多少**。
+12. **画出来那颗与点得中那颗必须同一张表**：手柄编号 0..7 顺时针 + 8 旋转柄只有一份
+    （`SelectionFrame` 里），命中在**屏幕空间**比（世界空间比的话，缩小之后手柄间距近到点不准），
+    且容差比画出来的半径宽 4 DIP。
+
+### 白板特有的输入规矩
+
+选择态把引擎模式设成 `InkEditingMode.None`（注释里写明的宿主槽："不接收墨迹输入，宿主自己在处理"），
+白板窗口用 `AddHandler(PointerDown/Move/Up/Cancel, …, handledEventsToo: true)` 收 ——
+必须带 `handledEventsToo`：引擎在选择态仍会把指针事件标成已处理，不带就**永远收不到落点**，
+而"收不到"没有任何症状，只是选择不动。
+
+手指分工是 owner 定的规则：**选择态**下单指点选 / 拖框、双指缩放与平移；**笔或橡皮态**下单指写、
+多指各写各的（不做手势）。参与手势的只有手指，笔与鼠标左键永不截。
+
+### 验收
+
+`CheckWhiteboardCanvas`（换画布、共用工具参数、不透明的底、橡皮单位换算、批注视口钉死）、
+`CheckWhiteboardUndoLands`（撤销接的是眼前这块的账，下一拍才落地）、
+`CheckWhiteboardSelect`（点选 / 框选 / 套索 / 整块挪 / 一步撤销 / 选择集过期两条方向 / 删除所选）、
+`CheckWhiteboardTransforms`（九颗手柄、对角为锚的缩放、真的转了多少、双指捏合与漫游、缩放后橡皮重下发）。
+**变换与漫游那组刻意用一块干净的板**：长流程里堆了多轮撤销之后，一条断言红了说不清是谁的账。
+
+仍需真手确认（写进 `tools/UiSmoke/README.md`，不假装验过）：物理双指的识别时序与手感、
+大选择集逐帧实墨跟随时是否掉帧、笔在白板上的落笔手感、白板压得住真正常驻置顶的应用吗。
 
 ## Critical: 安装包走 CI（Windows 1 件 + Linux 4 件），细节看 `packaging/README.md`
 

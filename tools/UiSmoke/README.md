@@ -116,6 +116,41 @@ Note that this group **really does capture the full screen and show it on the ca
 (the canvas is maximised and resizing a maximised window does not take effect). That is the feature
 behaving, not a test artifact — but it does mean the acceptance run flashes the screen briefly.
 
+### Whiteboard (second canvas)
+
+`CheckWhiteboardCanvas`, `CheckWhiteboardUndoLands`, `CheckWhiteboardSelect` and
+`CheckWhiteboardTransforms` cover the second canvas. What they insist on, in the same
+"ask the observable thing" spirit:
+
+- clicking 白板 swaps **which canvas is live** and hides the other one, while both keep their own
+  document and undo ledger — the assertion that carries the weight is *"pressing undo takes the
+  stroke off the board you are looking at, and leaves the other one's ledger untouched"*;
+- tool data is one shared set, read off the live surface **in the same beat** (measured: R=209, 7 px);
+  switching scenes refreshes visuals without rebuilding the controls (`ReferenceEquals` on the button,
+  because rebuilding would drop keyboard focus);
+- the whiteboard ground really is an opaque brush equal to the persisted choice (`FFFFFFFF` →
+  `FFDDEEE1` on a swatch change, no re-entry needed);
+- selection is driven through **synthetic routed pointer events** raised at the window, and asserted
+  as coordinates: a drag inside the frame moves every stroke by exactly the finger delta
+  (Δ=(90,45) for a (90,45) drag), **one** undo restores both strokes, a corner drag leaves the
+  opposite corner at 0.00 DIP of drift, and a rotate handle moves a corner 0.5 rad around a centre
+  that does not move (radius 760 → 760);
+- pinch: two contacts 200 px apart pulled to 400 px give `Scale = 2` while the world point under the
+  midpoint does not move (600,400 → 600,400 to 1e-6), sliding both fingers 50 px translates the
+  content by exactly 50 px without touching the scale, and after 2 → 1 the surviving finger does
+  nothing until it lifts. `Document.Count` and the selection are unchanged across the whole gesture;
+- eraser radius is converted to world units and **re-applied when the viewport moves**
+  (20 px → 10 world at 2×, back to 20 when pinched back to 1:1);
+- the annotation canvas stays pinned to 1:1: the wheel and the middle button are taken at the window
+  level and the viewport never moves, while a left button press is deliberately **not** handled
+  (mouse writing flows through that promotion).
+
+Two assertions in the rotate group were green for the wrong reason before being rewritten —
+"the centre does not move" and "the radius is unchanged" also hold when nothing happened at all —
+so a rotate check must measure *how far it turned*. The same lesson killed a false report upstream:
+"a stroke vanishes after pinching" looked like an engine history-replay defect, and only a clean-board
+minimal repro (3 → 3) showed it was this code calling `Undo()` after a zero-change batch.
+
 Nothing here drives a real stroke: the engine's input path is exercised by Dusk's own
 windowless probes, and what is left — 落笔手感、点擦边界、漫游时的 Z 序 — needs a pen on
 the target machine. For 笔锋 specifically, what still needs a real hand is whether each
@@ -123,7 +158,7 @@ built-in preset *feels* right at the target machine's sampling rate, and whether
 试写区 in the settings page keeps up while a parameter is dragged. For 窗口层级, what still
 needs a real hand is the interaction the suite cannot reach: whether the canvas actually
 stays above a *real* always-on-top application on the target machine, and whether the
-self-heal pass is ever visibly noticeable when it fires. For 工具栏, it is whether two pens
+self-heal pass is ever visibly noticeable when it fires. For 白板, what still needs a real hand is two-finger recognition timing and feel at the target device's sampling rate, whether a large selection follows the finger without dropped frames, pen feel on a solid ground, and whether the whiteboard really stays above a real always-on-top application. For 工具栏, it is whether two pens
 of similar colour are told apart at a glance on the real bar (the colour chip is only
 22×3 px) and whether four buttons per row still fit at the narrowest supported window width.
 
