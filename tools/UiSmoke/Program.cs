@@ -1045,6 +1045,82 @@ internal static class Program
         Check(board.Surface.Document.Count == 3,
             "而这一次删除是一步撤销（不是一笔一次）");
 
+        // ---------------------------------------------------------- 手柄：缩放与旋转
+        // 上面那次撤销已经把选择清了（撤销动了文档），所以这里从头框选一次再动手柄。
+        Point Centroid(IReadOnlyList<Point> corners) => new(
+            corners.Average(point => point.X), corners.Average(point => point.Y));
+        double Distance(Point a, Point b) => System.Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+        SendPointer(board, UIElement.PointerDownEvent, 19, new Point(60, 60), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerMoveEvent, 19, new Point(1500, 1400), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerUpEvent, 19, new Point(1500, 1400), PointerDeviceType.Mouse);
+        Check(board.SelectedStrokeCount == 3, "重选全部：三笔又在框里（下面都按这一框动手柄）");
+
+        var handlesAtSelect = board.AdornerHandles;
+        Check(handlesAtSelect is { Count: 9 },
+            $"选中之外交出九颗手柄（八向 + 旋转柄，实测 {handlesAtSelect?.Count} 颗）");
+
+        // 拖右下角：对角（左上）必须钉在原地，而右下角正好走到手指那里 —— 这两条就是"以对角为锚"的
+        // 可测定义，不需要读任何内部状态。
+        // 量的是离锚点最远那一笔：stroke 0 的第一点几乎正好就是对角锚点，
+        // 拿它判"墨迹有没有被缩放"会得到一个恒等的 0 —— 第一版就是这么假绿了一次。
+        var preScale = FirstPointOf(board.Surface, 2);
+        var cornerBefore = board.AdornerHandles![4];
+        var anchorBefore = board.AdornerFrameCorners![0];
+        var dragged = new Point(cornerBefore.X + 60, cornerBefore.Y + 40);
+        SendPointer(board, UIElement.PointerDownEvent, 20, cornerBefore, PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerMoveEvent, 20, dragged, PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerUpEvent, 20, dragged, PointerDeviceType.Mouse);
+        var postScale = FirstPointOf(board.Surface, 2);
+        var cornersAfterScale = board.AdornerFrameCorners;
+        var handlesAfterScale = board.AdornerHandles;
+        Check(cornersAfterScale is { Count: 4 } && handlesAfterScale is { Count: 9 },
+            "拖完选框与九颗手柄都还在（几何跟着走）");
+        Check(cornersAfterScale![0] is { } stillAnchor
+                && Distance(stillAnchor, anchorBefore) < 0.5,
+            $"拖右下角：对角那一角钉住不动（漂了 {Distance(stillAnchor, anchorBefore):0.00} DIP）");
+        Check(System.Math.Abs(handlesAfterScale![4].X - dragged.X) < 0.5
+                && System.Math.Abs(handlesAfterScale[4].Y - dragged.Y) < 0.5,
+            $"右下角走到手指那儿（实测 ({handlesAfterScale[4].X:0}, {handlesAfterScale[4].Y:0})，目标是 ({dragged.X:0}, {dragged.Y:0})）");
+
+        board.Surface.Undo();
+        var undoneScale = FirstPointOf(board.Surface, 2);
+        Check(Distance(new Point(postScale.X, postScale.Y), new Point(preScale.X, preScale.Y)) > 1,
+            $"缩放改的是墨迹本身，不只是选框（最远那笔的第一点从 ({preScale.X:0}, {preScale.Y:0}) 走到 ({postScale.X:0}, {postScale.Y:0})）");
+        Check(Distance(new Point(undoneScale.X, undoneScale.Y), new Point(preScale.X, preScale.Y)) < 0.6,
+            $"整次缩放是一步撤销（撤完回到 ({undoneScale.X:0}, {undoneScale.Y:0})，原来在 ({preScale.X:0}, {preScale.Y:0})）");
+
+        // 旋转：中心不动、角到中心的距离不变（刚体的定义）。
+        SendPointer(board, UIElement.PointerDownEvent, 21, new Point(60, 60), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerMoveEvent, 21, new Point(1500, 1400), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerUpEvent, 21, new Point(1500, 1400), PointerDeviceType.Mouse);
+        Check(board.SelectedStrokeCount == 3 && board.AdornerHandles is { Count: 9 }, "重选全部：三笔又在框里");
+
+        var preRotate = FirstPointOf(board.Surface, 0);
+        var center0 = Centroid(board.AdornerFrameCorners!);
+        var radius0 = Distance(board.AdornerFrameCorners![0], center0);
+        var handle0 = board.AdornerHandles![8];
+        const double turn = 0.5;
+        var cos = System.Math.Cos(turn);
+        var sin = System.Math.Sin(turn);
+        var turned = new Point(
+            center0.X + (handle0.X - center0.X) * cos - (handle0.Y - center0.Y) * sin,
+            center0.Y + (handle0.X - center0.X) * sin + (handle0.Y - center0.Y) * cos);
+        SendPointer(board, UIElement.PointerDownEvent, 22, handle0, PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerMoveEvent, 22, turned, PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerUpEvent, 22, turned, PointerDeviceType.Mouse);
+        var center1 = Centroid(board.AdornerFrameCorners!);
+        Check(Distance(center1, center0) < 1.5,
+            $"转了 {turn:0.0} 弧度而中心没跑（偏移 {Distance(center1, center0):0.00} DIP）");
+        Check(System.Math.Abs(Distance(board.AdornerFrameCorners![0], center1) - radius0) < 1.5,
+            $"角到中心的距离不变（{radius0:0} → {Distance(board.AdornerFrameCorners![0], center1):0}，刚体）");
+        board.Surface.Undo();
+        var afterUndo = FirstPointOf(board.Surface, 0);
+        Check(Distance(new Point(afterUndo.X, afterUndo.Y), new Point(preRotate.X, preRotate.Y)) < 0.6,
+            $"旋转也是一步撤销（撤完第一笔回到 ({afterUndo.X:0}, {afterUndo.Y:0})，转之前在 ({preRotate.X:0}, {preRotate.Y:0})）");
+        Check(board.AdornerFrameCorners is null && board.SelectedStrokeCount == 0,
+            "撤销动了文档 → 选择与选框一起作废（不会留下「框还在、内容已经回去」那种状态）");
+
         // 收尾：回到屏幕批注 + 两块画布都收起（下一步还有检查，别留全屏窗口）
         ToolbarTools.Select(mouseId);
         ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

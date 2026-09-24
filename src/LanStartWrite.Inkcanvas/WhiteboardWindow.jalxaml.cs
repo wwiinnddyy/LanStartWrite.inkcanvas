@@ -35,6 +35,9 @@ public partial class WhiteboardWindow : Window
     /// <summary>按下与抬起差多少算"点了一下"而不是"拖了一个框"（屏幕 DIP）。</summary>
     private const double ClickSlopScreen = 4;
 
+    /// <summary>手柄命中比"画出来的那一颗"宽出来的容差（屏幕 DIP）：手指点手柄不能要求点得准。</summary>
+    private const double HandleSlopScreen = 4;
+
     private readonly CanvasSurface _surface;
     private readonly SelectionAdorner _adorner = new();
 
@@ -50,29 +53,45 @@ public partial class WhiteboardWindow : Window
 
         /// <summary>在空处画一条闭合轨迹（笔）。</summary>
         Lasso,
+
+        /// <summary>拖某个缩放手柄（编号在 <see cref="_dragHandle"/>）。</summary>
+        Scale,
+
+        /// <summary>拖旋转柄。</summary>
+        Rotate,
     }
 
     private Drag _drag;
+    private int _dragHandle = -1;
     private int _dragPointerId = -1;
     private Point _pressScreen;
     private Point _lastScreen;
     private readonly List<Point2D> _lassoWorld = [];
 
     /// <summary>
-    /// 选框：<b>选择那一刻</b>算出来的世界系包围盒。
+    /// 选框：<b>选择那一刻</b>从包围盒取一次，之后跟着用户的拖动走。
     /// <para>
     /// 不每帧从 <c>InkSelection.Bounds</c> 反推 —— 那个是"当前墨迹的正立外包盒"，
-    /// 一旦允许旋转，它会随转角越算越大（框住旋转后的形状而不是原来那块）。
+    /// 一旦允许旋转，它会随转角越算越大（框住的是旋转后的形状，而不是用户圈住的那一块），
+    /// 于是第二次拖同一个角就已经不是它了。<see cref="SelectionFrame"/> 的注释里有这段账。
     /// </para>
     /// </summary>
-    private Rect2D _frameWorld;
+    private SelectionFrame _frame = new(new Point2D(0, 0), 0, 0, 0);
 
-    /// <summary>验收读的三块几何：选框、框选矩形、当前是不是选择态。</summary>
+    /// <summary>
+    /// 正在做一次<b>会重写点数据</b>的拖动（挪 / 缩 / 转）。
+    /// 文档变更处理器靠它分清"自己改的"与"别人改的"：前者只重推几何，后者要让选择作废。
+    /// </summary>
+    private bool IsTransforming => _drag is Drag.Move or Drag.Scale or Drag.Rotate;
+
+    /// <summary>验收读的几块几何：选框四角、手柄、框选矩形、当前是不是选择态。</summary>
     internal bool IsSelecting => _surface.IsSelectMode;
 
     internal Rect? AdornerMarquee => _adorner.Marquee;
 
     internal IReadOnlyList<Point>? AdornerFrameCorners => _adorner.FrameCorners;
+
+    internal IReadOnlyList<Point>? AdornerHandles => _adorner.Handles;
 
     public WhiteboardWindow()
     {
@@ -153,10 +172,12 @@ public partial class WhiteboardWindow : Window
     /// </summary>
     private void OnDocumentChanged(object? sender, Dusk.Ink.Document.InkDocumentChangedEventArgs e)
     {
-        if (_drag == Drag.Move)
+        if (IsTransforming)
         {
-            // 挪动本身就是一串 Modified 变更：这一路只重画，不清选择。
-            _adorner.InvalidateVisual();
+            // 挪 / 缩 / 转本身就是引擎重写点数据的一串 Modified 变更：
+            // 这一路只重推几何，不清选择 —— 认错 kinds 的症状很隐蔽：拖第一帧选择就被自己清掉，
+            // 于是选框塌回原点，用户看到框"啪"地跳走（这条是实测 300 DIP 漂移抓出来的）。
+            PushFrameGeometry();
             return;
         }
 
@@ -169,7 +190,7 @@ public partial class WhiteboardWindow : Window
     internal void ClearSelection()
     {
         if (!_surface.Document.Selection.IsEmpty) _surface.Document.Selection.Clear();
-        _frameWorld = Rect2D.Empty;
+        _frame = new SelectionFrame(new Point2D(0, 0), 0, 0, 0);
         _adorner.FrameCorners = null;
         _adorner.Handles = null;
         _adorner.Marquee = null;
@@ -247,15 +268,32 @@ public partial class WhiteboardWindow : Window
         var world = ToWorld(screen);
         var selection = _surface.Document.Selection;
 
-        // 1) 已经有选择，而且按在选框里 → 整块挪。不要求正好点在墨上：
+        // 1) 手柄优先：画出来的那一颗必须就是点得中的那一颗（同一张表、同一个容差）。
+        if (!selection.IsEmpty && HandleAt(screen) is { } hit)
+        {
+            if (hit == SelectionFrame.RotateHandle)
+            {
+                _drag = Drag.Rotate;
+            }
+            else
+            {
+                _drag = Drag.Scale;
+                _dragHandle = hit;
+            }
+
+            _surface.History.BeginBatch();
+            return;
+        }
+
+        // 2) 已经有选择，而且按在选框里 → 整块挪。不要求正好点在墨上：
         //    板书里挑的常常是一小片密字，逐笔点中再拖不现实。
-        if (!selection.IsEmpty && _frameWorld.Contains(world))
+        if (!selection.IsEmpty && _frame.IsEmpty == false && ContainsWorld(world))
         {
             BeginMove();
             return;
         }
 
-        // 2) 点在墨迹上 → 换成这一笔，然后按住就能挪。
+        // 3) 点在墨迹上 → 换成这一笔，然后按住就能挪。
         var picked = _surface.Document.SelectAt(world, _surface.View.ScreenLengthToWorld(PickToleranceScreen));
         UpdateSelectionGeometry();
         if (!picked.IsEmpty)
@@ -304,11 +342,35 @@ public partial class WhiteboardWindow : Window
             case Drag.Move:
                 var delta = ToWorldDelta(dx, dy);
                 _surface.Document.Selection.Translate(delta.X, delta.Y);
-                // 选框跟着走：它存的是世界系，挪了就整体平移。
-                _frameWorld = new Rect2D(
-                    _frameWorld.Left + delta.X, _frameWorld.Top + delta.Y,
-                    _frameWorld.Right + delta.X, _frameWorld.Bottom + delta.Y);
-                _adorner.InvalidateVisual();
+                _frame.Translate(delta.X, delta.Y);
+                PushFrameGeometry();
+                break;
+
+            case Drag.Scale:
+                // 位移沿<b>选框自己的两根轴</b>折算：转过 90° 之后"往右拖"其实是选框的"往下"。
+                var worldDelta = ToWorldDelta(dx, dy);
+                var localDelta = _frame.WorldVectorToLocal(worldDelta.X, worldDelta.Y);
+                if (_frame.TryScale(_dragHandle, localDelta, RotateOffsetWorld, out var request))
+                {
+                    ApplyScaleToSelection(request);
+                    _frame.ApplyScale(request);
+                    PushFrameGeometry();
+                }
+
+                break;
+
+            case Drag.Rotate:
+                var center = ToScreen(_frame.Center);
+                var before = System.Math.Atan2(_lastScreen.Y - center.Y, _lastScreen.X - center.X);
+                var after = System.Math.Atan2(screen.Y - center.Y, screen.X - center.X);
+                var deltaAngle = after - before;
+                if (double.IsFinite(deltaAngle) && System.Math.Abs(deltaAngle) > 1e-9)
+                {
+                    _surface.Document.Selection.Rotate(_frame.Center.X, _frame.Center.Y, deltaAngle);
+                    _frame.ApplyRotation(deltaAngle);
+                    PushFrameGeometry();
+                }
+
                 break;
 
             case Drag.Marquee:
@@ -346,8 +408,13 @@ public partial class WhiteboardWindow : Window
         switch (drag)
         {
             case Drag.Move:
+            case Drag.Scale:
+            case Drag.Rotate:
                 _surface.History.EndBatch();
-                UpdateSelectionGeometry();
+
+                // 这里<b>不</b>重算选框：选框已经跟着每帧的意图走完了（挪也平移了、缩也缩了、
+                // 转也转了）。从 Bounds 反推会把转角清零 —— 拖完旋转选框就"回正"，
+                // 那是用户看得见的错，而 Bounds 本身没算错，只是它表达的是"正立外包盒"。
                 break;
 
             case Drag.Marquee:
@@ -391,8 +458,9 @@ public partial class WhiteboardWindow : Window
     {
         if (_drag == Drag.None || (int)e.Pointer.PointerId != _dragPointerId) return;
 
-        if (_drag == Drag.Move) _surface.History.EndBatch();
+        if (_drag is Drag.Move or Drag.Scale or Drag.Rotate) _surface.History.EndBatch();
         _drag = Drag.None;
+        _dragHandle = -1;
         _dragPointerId = -1;
         _adorner.Marquee = null;
         _adorner.LassoPoints = null;
@@ -401,42 +469,112 @@ public partial class WhiteboardWindow : Window
 
     /// <summary>
     /// 按<b>当前选择集</b>重算选框（世界系）并刷给选择层。
-    /// <para>放在选择变化之后而不是每帧算：<c>InkSelection.Bounds</c> 是 O(选中条数)，
-    /// 引擎文档明确警告过别把它当每帧能读的东西。</para>
+    /// <para>只在"选择集换了"的那一刻调（点选 / 框选 / 套索 / 取消）：<c>InkSelection.Bounds</c>
+    /// 是 O(选中条数)，引擎文档明确警告过别把它当每帧能读的东西；而且拖完之后再用它会把手柄
+    /// 位置按"正立外包盒"重置一遍 —— 旋转过的选框会当场回正。</para>
     /// </summary>
     private void UpdateSelectionGeometry()
     {
         var selection = _surface.Document.Selection;
         if (selection.IsEmpty)
         {
-            _frameWorld = Rect2D.Empty;
+            _frame = new SelectionFrame(new Point2D(0, 0), 0, 0, 0);
             _adorner.FrameCorners = null;
             _adorner.Handles = null;
             return;
         }
 
-        _frameWorld = selection.Bounds;
-        _adorner.FrameCorners = ScreenFrameCorners(_frameWorld);
-        _adorner.Handles = null;   // 八向手柄与旋转柄：下一步
+        _frame = SelectionFrame.FromWorldBounds(selection.Bounds);
+        PushFrameGeometry();
     }
 
-    /// <summary>世界系选框 → 屏幕四角（左上、右上、右下、左下）。旋转那一步会把这一直角换成转过的直角。</summary>
-    private IReadOnlyList<Point> ScreenFrameCorners(Rect2D world)
+    /// <summary>把选框与九个手柄的屏幕位置推给选择层（拖动过程中只重画，不重算选框）。</summary>
+    private void PushFrameGeometry()
     {
-        var view = _surface.View;
-        Point Screen(double x, double y)
+        // 四条边连成框用的是四个<b>角</b>（0/2/4/6）；另外四颗（边中点）只是手柄。
+        var corners = new List<Point>(4)
         {
-            var p = view.WorldToScreen(new Point2D(x, y));
-            return new Point(p.X, p.Y);
+            ToScreen(_frame.HandleWorld(0, RotateOffsetWorld)),
+            ToScreen(_frame.HandleWorld(2, RotateOffsetWorld)),
+            ToScreen(_frame.HandleWorld(4, RotateOffsetWorld)),
+            ToScreen(_frame.HandleWorld(6, RotateOffsetWorld)),
+        };
+        _adorner.FrameCorners = corners;
+
+        var handles = new List<Point>(SelectionFrame.HandleCount + 1);
+        for (var handle = 0; handle < SelectionFrame.HandleCount; handle++)
+        {
+            handles.Add(ToScreen(_frame.HandleWorld(handle, RotateOffsetWorld)));
         }
 
-        return
-        [
-            Screen(world.Left, world.Top),
-            Screen(world.Right, world.Top),
-            Screen(world.Right, world.Bottom),
-            Screen(world.Left, world.Bottom),
-        ];
+        handles.Add(ToScreen(_frame.HandleWorld(SelectionFrame.RotateHandle, RotateOffsetWorld)));
+        _adorner.Handles = handles;
+    }
+
+    /// <summary>旋转柄超出顶边那一段：<b>屏幕恒定</b>换算成世界单位（放大之后它不会离选框越来越远）。</summary>
+    private double RotateOffsetWorld =>
+        SelectionAdorner.RotateHandleOffset / _surface.View.Viewport.Scale;
+
+    /// <summary>世界点 → 这块面上的屏幕点。</summary>
+    private Point ToScreen(Point2D world)
+    {
+        var p = _surface.View.WorldToScreen(world);
+        return new Point(p.X, p.Y);
+    }
+
+    /// <summary>按在选框里面吗（沿选框自己的两根轴判 —— 转过的选框不能按正立矩形判）。</summary>
+    private bool ContainsWorld(Point2D world)
+    {
+        var local = _frame.WorldToLocal(world);
+        return System.Math.Abs(local.X) <= _frame.HalfWidth && System.Math.Abs(local.Y) <= _frame.HalfHeight;
+    }
+
+    /// <summary>
+    /// 这一落点命中哪颗手柄（编号同 <see cref="SelectionFrame"/> 的那张表），没命中返回 <c>null</c>。
+    /// <para>容差取"手柄画出来的半径 + 一截"，且<b>在屏幕空间比</b>：世界空间比的话，
+    /// 缩小之后手柄之间的屏幕距离会近到点不准。</para>
+    /// </summary>
+    private int? HandleAt(Point screen)
+    {
+        var limit = SelectionAdorner.HandleRadius + HandleSlopScreen;
+        var best = -1;
+        var bestDistance = double.MaxValue;
+
+        for (var handle = 0; handle <= SelectionFrame.RotateHandle; handle++)
+        {
+            var center = ToScreen(_frame.HandleWorld(handle, RotateOffsetWorld));
+            var distance = System.Math.Max(System.Math.Abs(screen.X - center.X), System.Math.Abs(screen.Y - center.Y));
+            if (distance > limit || distance >= bestDistance) continue;
+            bestDistance = distance;
+            best = handle;
+        }
+
+        return best < 0 ? null : best;
+    }
+
+    /// <summary>
+    /// 把一次缩放意图落到墨迹上。
+    /// <para>
+    /// 引擎的 <c>Selection.Scale</c> 只认<b>世界轴</b>，而"拖右上角"要的是沿选框自己那两根轴。
+    /// 所以非零转角下必须三步：<b>绕中心转平 → 在世界轴上按对角锚点缩放 → 转回去</b>。
+    /// 转平之后锚点的世界坐标恰好是 <c>中心 + 对角的局部偏移</c>（推演见 <see cref="SelectionFrame.ScaleRequest"/>）。
+    /// 转角为零时这三步退化成中间那一步，不白花两次重写。
+    /// </para>
+    /// <para>三步都在宿主开的那一批里，所以一次拖拽仍然是一步撤销。</para>
+    /// </summary>
+    private void ApplyScaleToSelection(SelectionFrame.ScaleRequest request)
+    {
+        var selection = _surface.Document.Selection;
+        var center = _frame.Center;
+        var angle = _frame.Angle;
+        var tilted = System.Math.Abs(angle) > 1e-9;
+
+        if (tilted) selection.Rotate(center.X, center.Y, -angle);
+
+        var anchor = new Point2D(center.X + request.OppositeLocal.X, center.Y + request.OppositeLocal.Y);
+        selection.Scale(anchor.X, anchor.Y, request.ScaleX, request.ScaleY);
+
+        if (tilted) selection.Rotate(center.X, center.Y, angle);
     }
 
     /// <summary>
