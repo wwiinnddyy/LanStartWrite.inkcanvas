@@ -138,7 +138,7 @@
                             </StackPanel>
                             <StackPanel x:Name="CanvasSectionPanel">
                                 <TextBlock Text="画布" Style="{StaticResource TitleTextBlockStyle}" />
-                                <TextBlock Text="画布是「盖在当前屏幕之上的那一层」，它的行为按场景分开配。现在只有「屏幕批注」一个场景。" Style="{StaticResource HelperTextStyle}" Margin="0,8,0,0" />
+                                <TextBlock Text="画布是「盖在当前屏幕之上的那一层」，它的行为按场景分开配：屏幕批注与白板各有各的一套，改一个不动另一个。" Style="{StaticResource HelperTextStyle}" Margin="0,8,0,0" />
                                 <TextBlock Text="屏幕批注" Style="{StaticResource SectionTextStyle}" />
                                 <Border Style="{StaticResource SettingsCardStyle}">
                                     <fluent:FluentSettingsRow StackAtWidth="380">

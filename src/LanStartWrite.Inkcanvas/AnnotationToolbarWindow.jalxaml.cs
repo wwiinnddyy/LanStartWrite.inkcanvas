@@ -115,7 +115,7 @@ public partial class AnnotationToolbarWindow : Window
 
         ToolbarTools.LayoutChanged += SyncToolControls;
         ToolbarTools.SelectionChanged += OnToolSelectionChanged;
-        CanvasOptions.Changed += SyncAnnotationOverlay;
+        CanvasOptions.Changed += OnCanvasOptionsChanged;
         AppPreferences.Changed += OnPreferencesChanged;
         LocationChanged += (_, _) =>
         {
@@ -138,7 +138,7 @@ public partial class AnnotationToolbarWindow : Window
             EndTouchDrag(DragHandle);
             ToolbarTools.LayoutChanged -= SyncToolControls;
             ToolbarTools.SelectionChanged -= OnToolSelectionChanged;
-            CanvasOptions.Changed -= SyncAnnotationOverlay;
+            CanvasOptions.Changed -= OnCanvasOptionsChanged;
             AppPreferences.Changed -= OnPreferencesChanged;
             _penMenuWindow?.Close();
             _penMenuWindow = null;
@@ -551,6 +551,19 @@ public partial class AnnotationToolbarWindow : Window
     }
 
     /// <summary>
+    /// 画布设置变了。<b>只认屏幕批注那一套</b>：穿透与冻结这两个开关本来就是批注特有的
+    /// （白板是一块盖住桌面的底，没有"透出去"与"冻住"这两种状态），
+    /// 别的场景改了开关不该让这块画布重排一次。
+    /// <para>这道闸原先藏在 <see cref="CanvasOptions.Update"/> 里（"只有当前场景才发通知"），
+    /// 现在 <c>Changed</c> 如实报场景，闸就挪到消费这一侧。</para>
+    /// </summary>
+    private void OnCanvasOptionsChanged(CanvasScene scene)
+    {
+        if (scene != CanvasScene.ScreenAnnotation) return;
+        SyncAnnotationOverlay();
+    }
+
+    /// <summary>
     /// 鼠标模式下这块画布怎么办：<b>默认收起来；开了穿透模式就留着</b>，但让它接不住输入，
     /// 于是鼠标与触摸直接落到下面的窗口上 —— 批注留着不动，人继续操作电脑。
     /// <para>
@@ -562,7 +575,7 @@ public partial class AnnotationToolbarWindow : Window
     {
         if (_annotationOverlay is null) return;
 
-        if (!CanvasOptions.PassThrough)
+        if (!CanvasOptions.For(CanvasScene.ScreenAnnotation).PassThrough)
         {
             _annotationOverlay.SetClickThrough(false);
             ConcealCanvas();
@@ -596,7 +609,7 @@ public partial class AnnotationToolbarWindow : Window
 
         _annotationOverlay.SetClickThrough(false);
 
-        if (!CanvasOptions.Freeze)
+        if (!CanvasOptions.For(CanvasScene.ScreenAnnotation).Freeze)
         {
             // 关掉冻结就把底图撤掉（回到透明看得见真实桌面）；
             // 不撤的话它会一直留着上一张截图，而用户以为自己关掉了。

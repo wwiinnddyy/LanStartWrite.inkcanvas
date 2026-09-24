@@ -9,14 +9,24 @@ namespace LanStartWrite.Inkcanvas;
 /// 每个场景一套自己的开关，改一个不会动另一个。
 /// </para>
 /// <para>
-/// 现在只有屏幕批注一个场景。再加一个场景 = 往这里加一个成员 + 在设置页给它一节 ——
+/// 两个场景<b>各有各的一套开关</b>，加一个场景 = 往这里加一个成员 + 在设置页给它一节 ——
 /// 数据模型不用动（<see cref="CanvasSceneSettings"/> 是按场景存的）。
+/// </para>
+/// <para>
+/// 注意这里说的是"这块画布该怎么表现"，不是"此刻哪块画布在眼前" —— 后者是运行时形态，
+/// 在 <see cref="CanvasSceneState"/>，不落盘。
 /// </para>
 /// </summary>
 internal enum CanvasScene
 {
     /// <summary>屏幕批注：全屏透明画布盖在当前桌面上，边看边写。</summary>
     ScreenAnnotation = 0,
+
+    /// <summary>
+    /// 白板：全屏<b>不透明</b>的一块底（颜色在 <see cref="CanvasSceneSettings.BackgroundArgb"/>），
+    /// 「鼠标」这一档在这里的意思是"选择墨迹"，并且允许双指漫游。
+    /// </summary>
+    Whiteboard = 1,
 }
 
 /// <summary>
@@ -47,8 +57,22 @@ internal sealed record CanvasSceneSettings
     /// <para>
     /// 截的是"这次进入画布之前"的那一屏：所以每次重新进入都会重截一张，不是一直用第一张。
     /// </para>
+    /// <para>这一项只对屏幕批注有意义：白板本来就要盖住桌面，没有"透出去"与"冻住"这两种状态。</para>
     /// </summary>
     public bool Freeze { get; init; }
+
+    /// <summary>
+    /// 白板那一块底色（打包成整数的 ABGR 字节序，见 <see cref="Argb"/>）。
+    /// <para>
+    /// 存整数而不是 <c>Color</c>：框架类型的序列化格式由框架定，而这份格式要长期读写。
+    /// 它是<b>按场景</b>的 —— 白板的干净底与批注的透出桌面是两件事，共用一个值就互相改。
+    /// </para>
+    /// <para>
+    /// 与上面两个开关不同，这一项<b>当场生效</b>：白板在屏时改它，那块底立刻换颜色。
+    /// 三档取值在 <see cref="CanvasBackgroundPalette"/>，都是浅底（深色底会把默认的黑色墨迹吃掉）。
+    /// </para>
+    /// </summary>
+    public uint BackgroundArgb { get; init; } = CanvasBackgroundPalette.DefaultArgb;
 }
 
 /// <summary>

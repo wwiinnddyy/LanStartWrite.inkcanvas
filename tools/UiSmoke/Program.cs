@@ -572,9 +572,13 @@ internal static class Program
         var pen = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen);
         var eraser = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Eraser);
 
+        // 画布设置是<b>按场景存</b>的，这里全程点屏幕批注那一个名字：
+        // 这两块画布的开关互相不该牵动（白板改了底色不能让批注重排一次）。
+        var annotation = CanvasScene.ScreenAnnotation;
+
         // 从确定的状态出发：两个开关都关着。
-        CanvasOptions.SetPassThrough(false);
-        CanvasOptions.SetFreeze(false);
+        CanvasOptions.SetPassThrough(annotation, false);
+        CanvasOptions.SetFreeze(annotation, false);
         ToolbarTools.Select(mouse.Id);
         Check(!toolbar.CanvasPresented, "鼠标模式下默认收起画布");
 
@@ -589,7 +593,7 @@ internal static class Program
         // 所以下面一发完断言就立刻退回鼠标模式把画布收起来。
 
         // ---------------------------------------------------------- 冻结模式
-        CanvasOptions.SetFreeze(true);
+        CanvasOptions.SetFreeze(annotation, true);
         ToolbarTools.Select(mouse.Id);
         Check(!toolbar.CanvasPresented, "开冻结不影响鼠标模式：画布照样收起");
         Check(!overlay.HasFrozenBackground, "收起期间底图被撤掉 —— 否则用户关了画布还能看见一张冻结的屏");
@@ -610,15 +614,15 @@ internal static class Program
         ToolbarTools.Select(pen.Id);
         Check(overlay.FrozenBackgroundSize == frozenBefore, "同一轮画布里换工具不会重截");
 
-        CanvasOptions.SetFreeze(false);
+        CanvasOptions.SetFreeze(annotation, false);
         ToolbarTools.Select(mouse.Id);
         ToolbarTools.Select(pen.Id);
         Check(!overlay.HasFrozenBackground, "关掉冻结之后底图被撤掉（回到透明，看得见真桌面）");
 
         // ---------------------------------------------------------- 穿透模式
         // 与冻结一起开着用 —— 这两个是最容易打架的一对：穿透要让开底图，冻结要铺上底图。
-        CanvasOptions.SetFreeze(true);
-        CanvasOptions.SetPassThrough(true);
+        CanvasOptions.SetFreeze(annotation, true);
+        CanvasOptions.SetPassThrough(annotation, true);
         ToolbarTools.Select(mouse.Id);
         Check(toolbar.CanvasPresented, "开了穿透之后，鼠标模式下画布仍然留在屏上");
 
@@ -649,7 +653,7 @@ internal static class Program
         Check(overlay.HasFrozenBackground, "而且重新截了一张（穿透期间看过真实桌面，回来就该冻住它）");
         Check(toolbar.CanvasPresented, "书写时画布当然还在");
 
-        CanvasOptions.SetPassThrough(false);
+        CanvasOptions.SetPassThrough(annotation, false);
         ToolbarTools.Select(mouse.Id);
         Check(!toolbar.CanvasPresented, "关掉穿透之后鼠标模式又收起画布");
         Check(!overlay.IsClickThrough, "并且穿透位也被清掉");
@@ -660,16 +664,17 @@ internal static class Program
         var behaviorText = (TextBlock)settings.FindName("CanvasBehaviorText")!;
 
         passThroughSwitch.IsChecked = true;
-        Check(CanvasOptions.PassThrough, "设置页的穿透开关真的改到了运行时状态");
+        Check(CanvasOptions.For(annotation).PassThrough, "设置页的穿透开关真的改到了运行时状态");
         Check(behaviorText.Text.Contains("穿到下面的窗口", StringComparison.Ordinal),
             $"而且那句「现在的行为」跟着变了：{behaviorText.Text}");
         freezeSwitch.IsChecked = true;
-        Check(CanvasOptions.Freeze, "设置页的冻结开关真的改到了运行时状态");
+        Check(CanvasOptions.For(annotation).Freeze, "设置页的冻结开关真的改到了运行时状态");
 
         passThroughSwitch.IsChecked = false;
         freezeSwitch.IsChecked = false;
         ToolbarTools.Select(mouse.Id);
-        Check(!CanvasOptions.PassThrough && !CanvasOptions.Freeze, "收尾：两个开关都关回去");
+        var settled = CanvasOptions.For(annotation);
+        Check(!settled.PassThrough && !settled.Freeze, "收尾：两个开关都关回去");
     }
 
     private static void CheckPenMenu()
@@ -999,9 +1004,18 @@ internal static class Program
         // 画布的场景设置也在这份存档里（按场景各存一套）。
         var storedScenes = AppPreferences.Current.CanvasScenes.Items ?? [];
         Check(storedScenes.Count == Enum.GetValues<CanvasScene>().Length && storedScenes.Count > 0,
-            "画布场景设置随偏好落盘（每个场景一条）");
+            $"画布场景设置随偏好落盘（每个场景一条，当前 {storedScenes.Count} 个场景）");
         Check(storedScenes.Select(static scene => scene.Scene).Distinct().Count() == storedScenes.Count,
             "同一场景不会存成两条");
+        Check(storedScenes.Any(static scene => scene.Scene == CanvasScene.Whiteboard),
+            "白板这一个场景也在存档里（它不再只是注释里那个「将来」）");
+
+        // 底色是从文件里来的任意 uint，洗过之后必须落在某一档上、而且不透明。
+        // 这条挡的是"alpha 为 0 的存档把白板这块底变成屏幕上的一个洞"：那不报错，
+        // 只是字飘在桌面上，而用户会以为是墨迹层坏了。
+        var washed = CanvasBackgroundPalette.Normalize(0x00FF8080);
+        Check((washed >> 24 & 0xFF) == 0xFF && washed == CanvasBackgroundPalette.Normalize(washed),
+            $"档外的底色被归到最近的一档并补成不透明（{washed:X8}，{CanvasBackgroundPalette.NearestName(washed)}）");
     }
 
     private static void CheckFlyoutPlacement()

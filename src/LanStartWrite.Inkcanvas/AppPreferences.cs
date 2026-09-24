@@ -130,11 +130,11 @@ internal sealed record PreferenceSnapshot
     public TipPresetCollection TipCustomPresets { get; init; } = new();
 
     /// <summary>
-    /// 各场景的画布设置（穿透模式 / 冻结模式）。
+    /// 各场景的画布设置（穿透模式 / 冻结模式 / 白板底色）。
     /// <para>
-    /// <b>按场景存</b>而不是一份全局的：屏幕批注要的是"透出桌面"，将来白板要的正好相反，
-    /// 一套全局开关会让它们互相改。现在只有一个场景，但数据结构先按它该有的样子放好 ——
-    /// 加场景时只动枚举与设置页，不动存档。
+    /// <b>按场景存</b>而不是一份全局的：屏幕批注要的是"透出桌面"，白板要的正好相反，
+    /// 一套全局开关会让它们互相改。两个场景都已经真的存在了（<see cref="CanvasScene"/>），
+    /// 再加一个场景仍然只动枚举与设置页，不动这里。
     /// </para>
     /// </summary>
     public CanvasSceneCollection CanvasScenes { get; init; } = new();
@@ -246,9 +246,12 @@ internal static class AppPreferences
     };
 
     /// <summary>
-    /// 洗一遍场景设置：丢掉不认识的场景（枚举成员被删过的旧档）、同一场景只留第一个。
+    /// 洗一遍场景设置：丢掉不认识的场景（枚举成员被删过的旧档）、同一场景只留第一个，
+    /// 并把底色归到某一档上。
     /// <para>漏掉的场景不补 —— 读取那一侧（<see cref="CanvasOptions.For"/>）查不到就按默认值走，
-    /// 而"没有这一项"与"两个开关都关着"本来就是同一件事。</para>
+    /// 而"没有这一项"与"开关全关、底色白纸"本来就是同一件事。</para>
+    /// <para>底色要洗：<c>uint</c> 是从文件里来的任意值，一个带透明或落在档外的值
+    /// 会让白板这块"盖住桌面的底"变成屏幕上一个洞，而且不报错。</para>
     /// </summary>
     private static CanvasSceneCollection ValidateCanvasScenes(CanvasSceneCollection collection)
     {
@@ -261,7 +264,10 @@ internal static class AppPreferences
             if (settings is null) continue;
             if (!Enum.IsDefined(settings.Scene)) continue;
             if (!seen.Add(settings.Scene)) continue;
-            kept.Add(settings);
+            kept.Add(settings with
+            {
+                BackgroundArgb = CanvasBackgroundPalette.Normalize(settings.BackgroundArgb),
+            });
         }
 
         return new CanvasSceneCollection { Items = kept };
@@ -439,9 +445,10 @@ internal static class AppPreferences
         });
     }
 
-    /// <summary>把画布那两个开关记进存档。<b>按场景整份写回</b> —— 快照本来就是全场景的，
-    /// 只写当前场景会让别的场景的设置在下一次存盘时被抹掉。</summary>
-    private static void CaptureCanvasOptions()
+    /// <summary>把画布的设置记进存档。<b>按场景整份写回</b> —— 快照本来就是全场景的，
+    /// 只写变了的那个场景会让别的场景的设置在下一次存盘时被抹掉。
+    /// 参数因此只用来在日志里说清是谁变了，不参与挑选要写什么。</summary>
+    private static void CaptureCanvasOptions(CanvasScene changedScene)
     {
         if (_applyingFromPreferences) return;
         Update(Current with { CanvasScenes = CanvasOptions.Snapshot() });

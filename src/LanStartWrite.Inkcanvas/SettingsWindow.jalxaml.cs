@@ -158,40 +158,50 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>
-    /// 「画布」页的接线。两个开关都是"下次进画布才看得出来"的那种，所以除了绑开关本身，
+    /// 「画布」页的接线。<b>逐场景点名</b>：这一页同时摆着两块画布的行，
+    /// 所以不存在"当前场景"这个隐式游标（<see cref="CanvasOptions"/> 那边也没有了）。
+    /// <para>
+    /// 穿透与冻结都是"下次进画布才看得出来"的那种开关，所以除了绑开关本身，
     /// 还<b>用一句话把当前行为念出来</b>（见 <see cref="CanvasBehaviorSummary"/>）——
     /// 拨完开关没有任何即时反馈时，这句话是用户唯一能确认"它记住了"的地方。
+    /// </para>
     /// </summary>
     private void WireCanvasControls()
     {
-        BindSwitch((FluentToggleSwitch)PassThroughSwitch!, "穿透模式", CanvasOptions.SetPassThrough);
-        BindSwitch((FluentToggleSwitch)FreezeSwitch!, "冻结模式", CanvasOptions.SetFreeze);
+        BindSwitch((FluentToggleSwitch)PassThroughSwitch!, "穿透模式", value =>
+            CanvasOptions.SetPassThrough(CanvasScene.ScreenAnnotation, value));
+        BindSwitch((FluentToggleSwitch)FreezeSwitch!, "冻结模式", value =>
+            CanvasOptions.SetFreeze(CanvasScene.ScreenAnnotation, value));
 
         CanvasOptions.Changed += SyncCanvasSection;
         SyncCanvasSection();
     }
 
+    private void SyncCanvasSection(CanvasScene scene) => SyncCanvasSection();
+
     private void SyncCanvasSection()
     {
+        var annotation = CanvasOptions.For(CanvasScene.ScreenAnnotation);
+
         _sync = true;
         try
         {
-            ((FluentToggleSwitch)PassThroughSwitch!).IsChecked = CanvasOptions.PassThrough;
-            ((FluentToggleSwitch)FreezeSwitch!).IsChecked = CanvasOptions.Freeze;
+            ((FluentToggleSwitch)PassThroughSwitch!).IsChecked = annotation.PassThrough;
+            ((FluentToggleSwitch)FreezeSwitch!).IsChecked = annotation.Freeze;
         }
         finally { _sync = false; }
 
-        ((TextBlock)CanvasBehaviorText!).Text = CanvasBehaviorSummary();
+        ((TextBlock)CanvasBehaviorText!).Text = CanvasBehaviorSummary(annotation);
     }
 
     /// <summary>把两个开关翻译成人话。<b>不是装饰</b>：这两个开关生效的时机在别处
     /// （一个在鼠标模式、一个在进入画布的瞬间），念一遍是为了不用去猜。</summary>
-    private static string CanvasBehaviorSummary()
+    private static string CanvasBehaviorSummary(CanvasSceneSettings annotation)
     {
-        var mouse = CanvasOptions.PassThrough
+        var mouse = annotation.PassThrough
             ? "鼠标模式下画布留着，但鼠标与触摸穿到下面的窗口上"
             : "鼠标模式下画布收起来";
-        var entering = CanvasOptions.Freeze
+        var entering = annotation.Freeze
             ? "进入书写 / 擦除时先截一张屏铺在底下"
             : "进入书写 / 擦除时直接写在实时画面上";
         return $"现在的行为：{mouse}；{entering}。";
