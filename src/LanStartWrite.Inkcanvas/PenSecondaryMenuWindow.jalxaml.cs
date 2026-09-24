@@ -25,17 +25,32 @@ public partial class PenSecondaryMenuWindow : Window
     ];
 
     private readonly RadioButton[] _colorRings;
+
+    /// <summary>
+    /// 笔锋档位下拉里每一项对应的档位标识（下标即 <c>ComboBox.Items</c> 的下标，末尾空串＝自定义）。
+    /// <para>
+    /// 档位<b>不</b>像颜色 / 粗细那样在这里缓存一份：它是全应用唯一的一份状态
+    /// （<see cref="InkTipOptions"/>），设置页也在改它 —— 缓存就会出现两个真相。
+    /// 本窗口只读它来显示、把用户的选择发出去。
+    /// </para>
+    /// </summary>
+    private readonly List<string> _tipPresetIds = [];
+
     private bool _stateSync;
     private bool _penKindSync;
+    private bool _tipSync;
     private int _selectedPaletteIndex;
 
     private Slider PenThickness => (Slider)PenThicknessSlider!;
     private TextBlock PenThicknessText => (TextBlock)PenThicknessValueText!;
+    private ComboBox TipPreset => (ComboBox)PenTipPresetComboBox!;
 
     public Color SelectedColor { get; private set; }
     public double SelectedThickness { get; private set; } = 4;
     public PenKind SelectedKind { get; private set; } = PenKind.Pen;
 
+    /// <summary>用户在下拉里换了一支笔锋。宿主据此改 <see cref="InkTipOptions"/>；本窗口不自己改。</summary>
+    public event Action<string>? TipPresetChanged;
     public event Action<Color>? PenColorChanged;
     public event Action<double>? PenThicknessChanged;
     public event Action<PenKind>? PenKindChanged;
@@ -74,13 +89,28 @@ public partial class PenSecondaryMenuWindow : Window
         WirePenKindRadios();
         PenThickness.ValueChanged += PenThicknessSlider_OnValueChanged;
         AutomationProperties.SetName(PenThickness, "画笔粗细");
+        AutomationProperties.SetName(TipPreset, "笔锋档位");
+        TipPreset.SelectionChanged += (_, _) => OnTipPresetSelectionChanged();
+
+        // 档位列表与当前档位都可能被设置页改掉，订阅要在本窗口活着的时候一直挂着。
+        InkTipOptions.Changed += OnTipOptionsChanged;
+        InkTipOptions.PresetsChanged += OnTipOptionsChanged;
+        Closed += (_, _) =>
+        {
+            InkTipOptions.Changed -= OnTipOptionsChanged;
+            InkTipOptions.PresetsChanged -= OnTipOptionsChanged;
+        };
+
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key != Key.Escape) return;
             DismissRequested?.Invoke();
             e.Handled = true;
         };
-        Loaded += (_, _) => FluentTheme.ApplyMotionPolicy(this);
+
+        // 必须在 FitSizeToContent 之前把档位灌进去：空的下拉与有 8 项的下拉量出来不一样高。
+        SyncTipPresets();
+        ApplyTipPresentation();
 
         FitSizeToContent();
     }
@@ -124,6 +154,75 @@ public partial class PenSecondaryMenuWindow : Window
             _penKindSync = false;
             _stateSync = false;
         }
+
+        SyncTipPresets();
+        ApplyTipPresentation();
+    }
+
+    // ------------------------------------------------------------------ 笔锋
+
+    private void OnTipOptionsChanged() => SyncTipPresets();
+
+    /// <summary>
+    /// 把档位下拉刷成当前的预设库与当前档位。<b>已经建好的项不重建</b>——
+    /// 这个方法会被"每一次参数变动"调到（拖滑杆也是），重建项会顺手清掉选中态与展开状态。
+    /// <para>
+    /// 项数变化不会改变窗口尺寸：下拉是单行、固定 236 宽，多几项只是弹出层更长。
+    /// 所以这里不需要重新 <c>FitSizeToContent</c>，也就不会在窗口已显示时跳大小。
+    /// </para>
+    /// </summary>
+    internal void SyncTipPresets()
+    {
+        _tipSync = true;
+        try
+        {
+            var presets = InkTipOptions.Presets;
+            var ids = presets.Select(preset => preset.Id).ToList();
+            ids.Add(string.Empty); // 末尾的「自定义」
+
+            if (!ids.SequenceEqual(_tipPresetIds))
+            {
+                _tipPresetIds.Clear();
+                _tipPresetIds.AddRange(ids);
+                TipPreset.Items.Clear();
+                foreach (var preset in presets)
+                    TipPreset.Items.Add(new ComboBoxItem { Content = preset.DisplayName });
+                TipPreset.Items.Add(new ComboBoxItem { Content = "自定义" });
+            }
+
+            var index = _tipPresetIds.IndexOf(InkTipOptions.PresetId);
+            if (index < 0) index = _tipPresetIds.Count - 1;
+            if (TipPreset.SelectedIndex != index) TipPreset.SelectedIndex = index;
+        }
+        finally { _tipSync = false; }
+    }
+
+    private void OnTipPresetSelectionChanged()
+    {
+        if (_tipSync || _stateSync) return;
+
+        var index = TipPreset.SelectedIndex;
+        if (index < 0 || index >= _tipPresetIds.Count) return;
+
+        TipPresetChanged?.Invoke(_tipPresetIds[index]);
+    }
+
+    /// <summary>
+    /// 荧光笔与激光笔是<b>等宽</b>几何，压根不读压力，笔锋对它们毫无作用 ——
+    /// 所以这里把下拉灰掉并说明原因，而不是留一个拨了没反应的控件。
+    /// <para>
+    /// 与橡皮菜单"把用不到的那一行藏起来"的做法不同：那是一个整行的滑块，收起来不留痕；
+    /// 这里藏掉会让整个浮窗的高度变一次，而浮窗的位置是按旧高度算好的 ——
+    /// 灰掉 + 一句解释因此是这一处更合适的形态。
+    /// </para>
+    /// </summary>
+    private void ApplyTipPresentation()
+    {
+        var applies = SelectedKind == PenKind.Pen;
+        TipPreset.IsEnabled = applies;
+        ((TextBlock)PenTipHintText!).Text = applies
+            ? "起笔与收笔的形状。更多设置见「设置 · 墨迹」。"
+            : "荧光笔与激光笔是等宽的，不读压力，笔锋对它们不起作用。";
     }
 
     private static int FindBestPaletteIndex(Color c)
@@ -208,6 +307,7 @@ public partial class PenSecondaryMenuWindow : Window
             return;
 
         SelectedKind = kind;
+        ApplyTipPresentation();
         PenKindChanged?.Invoke(kind);
     }
 

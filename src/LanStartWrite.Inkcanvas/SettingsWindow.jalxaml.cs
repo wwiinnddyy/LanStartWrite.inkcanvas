@@ -1,8 +1,10 @@
 using System.Reflection;
+using Dusk.Adapter.Jalium;
+using FluentJalium.Controls;
+using FluentJalium.Themes;
 using Jalium.UI;
 using Jalium.UI.Automation;
 using Jalium.UI.Controls;
-using Jalium.UI.Input;
 using Jalium.UI.Media;
 
 namespace LanStartWrite.Inkcanvas;
@@ -10,22 +12,28 @@ namespace LanStartWrite.Inkcanvas;
 public partial class SettingsWindow : Window
 {
     private readonly Dictionary<SettingsNavPage, FrameworkElement> _pages;
-    private readonly Dictionary<SettingsNavPage, (FluentNavigationItem Button, TextBlock Label)> _navigation;
-    private readonly NavigationIndicatorAnimator _navigationIndicator;
+    private readonly Dictionary<SettingsNavPage, FluentNavigationItem> _navigation;
+    private readonly StrokeTipEditor _tipEditor;
+    private readonly JaliumInkCanvas _tipPreview;
+
+    /// <summary>
+    /// 笔锋档位下拉里每一项对应的档位标识（下标即 <c>ComboBox.Items</c> 的下标）。
+    /// <para>
+    /// 为什么不用 <c>Tag</c> 挂在 <see cref="ComboBoxItem"/> 上：这个下拉的项是<b>重建</b>出来的，
+    /// 一个平行的标识表比"往控件上挂数据"更直白，也让 UiSmoke 能直接对着它断言。
+    /// 末尾那一项是空串，代表「自定义」。
+    /// </para>
+    /// </summary>
+    private readonly List<string> _tipPresetIds = [];
+
     private bool _sync;
     private bool _loaded;
-    private bool? _manualCompact;
-    private bool _compact;
-    private bool _lastNarrow;
-    private double _layoutWidth = 960;
     private SettingsNavPage _page;
 
     private Grid PageHost => (Grid)SettingsContentHost!;
-    private Border Pane => (Border)NavigationPaneRoot!;
     private Slider PenWidth => (Slider)PenWidthSlider!;
-    private Slider PointDistance => (Slider)MinPointDistanceSlider!;
     private ComboBox ThemeChoice => (ComboBox)ThemeComboBox!;
-    private ComboBox SmoothingChoice => (ComboBox)SmoothingLevelComboBox!;
+    private ComboBox TipPreset => (ComboBox)TipPresetComboBox!;
 
     public SettingsWindow()
     {
@@ -39,13 +47,21 @@ public partial class SettingsWindow : Window
         };
         _navigation = new()
         {
-            [SettingsNavPage.Appearance] = ((FluentNavigationItem)AppearanceNavButton!, (TextBlock)AppearanceNavLabel!),
-            [SettingsNavPage.Ink] = ((FluentNavigationItem)InkNavButton!, (TextBlock)InkNavLabel!),
-            [SettingsNavPage.Interaction] = ((FluentNavigationItem)InteractionNavButton!, (TextBlock)InteractionNavLabel!),
-            [SettingsNavPage.About] = ((FluentNavigationItem)AboutNavButton!, (TextBlock)AboutNavLabel!),
+            [SettingsNavPage.Appearance] = (FluentNavigationItem)AppearanceNavButton!,
+            [SettingsNavPage.Ink] = (FluentNavigationItem)InkNavButton!,
+            [SettingsNavPage.Interaction] = (FluentNavigationItem)InteractionNavButton!,
+            [SettingsNavPage.About] = (FluentNavigationItem)AboutNavButton!,
         };
-        _navigationIndicator = new NavigationIndicatorAnimator((Border)NavigationSelectionIndicator!);
-        NavigationPaneLayout!.LayoutUpdated += NavigationPane_OnLayoutUpdated;
+
+        // 笔锋面板是"照引擎的参数表生成"的，标记里只有一个空容器 —— 见 StrokeTipEditor。
+        _tipEditor = new StrokeTipEditor(InkTipOptions.Settings);
+        _tipEditor.Build((StackPanel)TipParameterSections!);
+
+        // 试写区：一台真正的墨迹控件，读的是同一份笔锋设置，因此改参数当场看得见。
+        _tipPreview = new JaliumInkCanvas();
+        ((Grid)TipPreviewHost!).Children.Add(_tipPreview);
+        InkTipOptions.ApplyTo(_tipPreview.TipSettings);
+
         // Only the current page belongs to the live tree: no hidden controls in Tab/UIA.
         PageHost.Children.Clear();
         NavigateTo(SettingsNavPage.Appearance, force: true);
@@ -55,109 +71,167 @@ public partial class SettingsWindow : Window
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         ((TextBlock)AboutVersionText!).Text = $"版本 {version?.Major}.{version?.Minor}.{version?.Build} · Jalium.UI 26.10.9";
         UpdateSaveStatus();
-        UpdatePane();
 
         AppPreferences.Changed += Synchronize;
         AppPreferences.SaveStatusChanged += UpdateSaveStatus;
-        FluentTheme.Changed += OnThemeChanged;
-        SystemSettingsChanged += (_, _) => FluentTheme.ApplyPreferences();
+        FluentThemeManager.Changed += OnThemeChanged;
+        SystemSettingsChanged += (_, _) => FluentThemeManager.RefreshSystemTheme();
         Loaded += (_, _) =>
         {
             _loaded = true;
-            if (Content is FrameworkElement layout && layout.RenderSize.Width > 0)
-                _layoutWidth = layout.RenderSize.Width;
-            UpdatePane();
             OnThemeChanged();
-            FluentTheme.ApplyMotionPolicy(this);
         };
         // The content root, unlike the Window's declared Width, follows native client resizing.
         ((FrameworkElement)Content!).SizeChanged += (_, e) =>
-        {
-            _layoutWidth = e.NewSize.Width;
-            var narrow = _layoutWidth < 800;
-            if (narrow != _lastNarrow) _manualCompact = null;
-            _lastNarrow = narrow;
-            UpdatePane();
-        };
+            PageHost.Margin = new Thickness(e.NewSize.Width < 640 ? 16 : 24);
         Closed += (_, _) =>
         {
-            NavigationPaneLayout!.LayoutUpdated -= NavigationPane_OnLayoutUpdated;
-            _navigationIndicator.Complete();
             AppPreferences.Changed -= Synchronize;
             AppPreferences.SaveStatusChanged -= UpdateSaveStatus;
-            FluentTheme.Changed -= OnThemeChanged;
+            FluentThemeManager.Changed -= OnThemeChanged;
+            InkTipOptions.Changed -= OnTipOptionsChanged;
+            InkTipOptions.PresetsChanged -= OnTipPresetsChanged;
+
+            // 墨迹控件必须显式拆：Jalium 不代调，而它挂着整棵墨迹视觉树（见 AGENTS）。
+            _tipPreview.Dispose();
             AppPreferences.Flush();
         };
     }
 
     private void WireControls()
     {
-        foreach (var item in _navigation.Values)
-        {
-            AutomationProperties.SetName(item.Button, item.Label.Text);
-            item.Button.PreviewKeyDown += Navigation_OnPreviewKeyDown;
-        }
-        AutomationProperties.SetName((Button)HamburgerButton!, "展开或折叠导航");
+        foreach (var (page, item) in _navigation)
+            AutomationProperties.SetName(item, (string?)item.Content ?? page.ToString());
+        NavigationRoot!.SelectionChanged += OnNavigationSelectionChanged;
         BindSwitch((FluentToggleSwitch)ReduceMotionSwitch!, "减少动画", value =>
             AppPreferences.Update(AppPreferences.Current with { ReduceMotion = value }));
         BindSwitch((FluentToggleSwitch)KeepToolbarOnTopSwitch!, "始终置顶工具栏", value =>
             AppPreferences.Update(AppPreferences.Current with { KeepToolbarOnTop = value }));
         BindSwitch((FluentToggleSwitch)PressureSwitch!, "压力感应", InkRuntimeOptions.SetEnablePressure);
-        BindSwitch((FluentToggleSwitch)RealtimeSamplingSwitch!, "实时采样通道", InkRuntimeOptions.SetRealtimeSampling);
-        BindSwitch((FluentToggleSwitch)TiltSwitch!, "倾斜数据采集", InkRuntimeOptions.SetEnableTilt);
         AutomationProperties.SetName(ThemeChoice, "应用主题");
-        AutomationProperties.SetName(SmoothingChoice, "平滑等级");
         AutomationProperties.SetName(PenWidth, "画笔粗细");
-        AutomationProperties.SetName(PointDistance, "最小采样点距");
         ThemeChoice.SelectionChanged += (_, _) =>
         {
             if (_sync) return;
             var index = SelectedIndex(ThemeChoice);
             if (index >= 0) AppPreferences.Update(AppPreferences.Current with { Theme = (AppTheme)index });
         };
-        SmoothingChoice.SelectionChanged += (_, _) =>
-        {
-            if (_sync) return;
-            var index = SelectedIndex(SmoothingChoice);
-            if (index >= 0) InkRuntimeOptions.SetSmoothingLevel((InkSmoothingLevel)index);
-        };
         PenWidth.ValueChanged += (_, _) =>
         {
             ((TextBlock)PenWidthValueText!).Text = $"{Math.Round(PenWidth.Value):0} px";
             if (!_sync) AppPreferences.Update(AppPreferences.Current with { PenWidth = PenWidth.Value });
         };
-        PointDistance.ValueChanged += (_, _) =>
-        {
-            ((TextBlock)MinPointDistanceValueText!).Text = $"{PointDistance.Value:F2} px";
-            if (!_sync) InkRuntimeOptions.SetMinPointDistance(PointDistance.Value);
-        };
         ((Button)ResetInkButton!).Click += (_, _) =>
         {
-            AppPreferences.Update(AppPreferences.Current with
-            {
-                PenWidth = 4, Pressure = false, Tilt = false, RealtimeSampling = true,
-                Smoothing = InkSmoothingLevel.Balanced, MinPointDistance = 0.75,
-            });
+            // 笔锋的落点是确定的「标准」档：这个按钮叫"重置书写参数"，
+            // 不该因为当前是不是自定义而有时生效、有时不生效。
+            InkTipOptions.ResetToDefault();
+            AppPreferences.Update(AppPreferences.Current with { PenWidth = 4, Pressure = false });
         };
+        WireTipControls();
     }
 
-    private void Navigation_OnPreviewKeyDown(object sender, KeyEventArgs e)
+    /// <summary>
+    /// 笔锋那一块的接线。三条来源都收在 <see cref="SyncTipState"/> 一个刷新点上：
+    /// 档位下拉、试写区、18 个参数滑杆读的是同一份状态，因此不会出现"档位显示 A、参数是 B"。
+    /// </summary>
+    private void WireTipControls()
     {
-        if (e.KeyboardModifiers != ModifierKeys.None) return;
-        var buttons = _navigation.Values.Select(item => item.Button).ToArray();
-        var current = Array.FindIndex(buttons, button => ReferenceEquals(button, sender));
-        if (current < 0) return;
-        var target = e.Key switch
+        BindSwitch((FluentToggleSwitch)TipEnabledSwitch!, "启用笔锋", InkTipOptions.SetEnabled);
+        AutomationProperties.SetName(TipPreset, "笔锋档位");
+        AutomationProperties.SetName((Button)ResetTipPresetButton!, "恢复为所选档位");
+        AutomationProperties.SetName((Button)SaveTipPresetButton!, "存为我的笔锋");
+        AutomationProperties.SetName((Button)DeleteTipPresetButton!, "删除我的笔锋");
+        AutomationProperties.SetName((Button)ClearTipPreviewButton!, "清空试写");
+
+        TipPreset.SelectionChanged += (_, _) =>
         {
-            Key.Down => (current + 1) % buttons.Length,
-            Key.Up => (current + buttons.Length - 1) % buttons.Length,
-            Key.Home => 0,
-            Key.End => buttons.Length - 1,
-            _ => -1,
+            if (_sync) return;
+            var id = SelectedTipPresetId();
+            if (id is not null) InkTipOptions.SelectPreset(id);
         };
-        if (target < 0) return;
-        buttons[target].Focus();
-        e.Handled = true;
+        ((Button)ResetTipPresetButton!).Click += (_, _) => InkTipOptions.ResetToPreset();
+        ((Button)SaveTipPresetButton!).Click += (_, _) => InkTipOptions.SaveCustomPreset();
+        ((Button)DeleteTipPresetButton!).Click += (_, _) =>
+        {
+            var id = SelectedTipPresetId();
+            if (id is not null) InkTipOptions.DeleteCustomPreset(id);
+        };
+        ((Button)ClearTipPreviewButton!).Click += (_, _) => _tipPreview.Clear();
+
+        InkTipOptions.Changed += OnTipOptionsChanged;
+        InkTipOptions.PresetsChanged += OnTipPresetsChanged;
+        SyncTipState();
+    }
+
+    private string? SelectedTipPresetId()
+    {
+        var index = TipPreset.SelectedIndex;
+        return index >= 0 && index < _tipPresetIds.Count ? _tipPresetIds[index] : null;
+    }
+
+    private void OnTipOptionsChanged()
+    {
+        SyncTipState();
+        InkTipOptions.ApplyTo(_tipPreview.TipSettings);
+    }
+
+    private void OnTipPresetsChanged() => SyncTipState();
+
+    private void SyncTipState()
+    {
+        var previousSync = _sync;
+        _sync = true;
+        try
+        {
+            var presets = InkTipOptions.Presets;
+            var ids = presets.Select(preset => preset.Id).ToList();
+            ids.Add(string.Empty); // 末尾的「自定义」
+
+            // 只有列表真的变了才重建项：拖滑杆时这个方法每一步都会被调到，
+            // 重建 ComboBox 的项会顺手把选中态和下拉状态一起清掉。
+            if (!ids.SequenceEqual(_tipPresetIds))
+            {
+                _tipPresetIds.Clear();
+                _tipPresetIds.AddRange(ids);
+                TipPreset.Items.Clear();
+                foreach (var preset in presets)
+                    TipPreset.Items.Add(new ComboBoxItem { Content = preset.DisplayName });
+                TipPreset.Items.Add(new ComboBoxItem { Content = "自定义" });
+            }
+
+            // 认不出档位（自定义）就选到最后那一项，而不是硬选一个名字对不上的档。
+            var index = _tipPresetIds.IndexOf(InkTipOptions.PresetId);
+            if (index < 0) index = _tipPresetIds.Count - 1;
+            if (TipPreset.SelectedIndex != index) TipPreset.SelectedIndex = index;
+
+            var selected = InkTipOptions.FindPreset(InkTipOptions.PresetId);
+            ((TextBlock)TipPresetDescriptionText!).Text = selected is null
+                ? "当前参数不来自任何档位。改滑杆会保持在这个状态，选一个档位即可回到预设。"
+                : selected.Description;
+
+            ((FluentToggleSwitch)TipEnabledSwitch!).IsChecked = InkTipOptions.Enabled;
+            ((Button)ResetTipPresetButton!).IsEnabled = InkTipOptions.CanReset;
+            ((Button)SaveTipPresetButton!).IsEnabled = InkTipOptions.CanSaveCustomPreset;
+            ((Button)DeleteTipPresetButton!).IsEnabled = selected is { IsBuiltIn: false };
+        }
+        finally { _sync = previousSync; }
+
+        _tipEditor.Sync();
+    }
+
+    /// <summary>
+    /// 方向键走焦点、回车/空格选中 —— 这两条都在 <see cref="FluentNavigationView"/> 里面，
+    /// 应用侧不再自己拦一遍。
+    /// </summary>
+    private void OnNavigationSelectionChanged(object? sender, FluentNavigationSelectionChangedEventArgs e)
+    {
+        foreach (var (page, item) in _navigation)
+            if (ReferenceEquals(item, e.SelectedItem))
+            {
+                NavigateTo(page);
+                return;
+            }
     }
 
     private void BindSwitch(FluentToggleSwitch control, string name, Action<bool> change)
@@ -177,18 +251,18 @@ public partial class SettingsWindow : Window
         try
         {
             ThemeChoice.SelectedItem = ThemeChoice.Items[(int)value.Theme];
-            SmoothingChoice.SelectedItem = SmoothingChoice.Items[(int)value.Smoothing];
             ((FluentToggleSwitch)ReduceMotionSwitch!).IsChecked = value.ReduceMotion;
             ((FluentToggleSwitch)KeepToolbarOnTopSwitch!).IsChecked = value.KeepToolbarOnTop;
             ((FluentToggleSwitch)PressureSwitch!).IsChecked = value.Pressure;
-            ((FluentToggleSwitch)RealtimeSamplingSwitch!).IsChecked = value.RealtimeSampling;
-            ((FluentToggleSwitch)TiltSwitch!).IsChecked = value.Tilt;
             PenWidth.Value = value.PenWidth;
-            PointDistance.Value = value.MinPointDistance;
             ((TextBlock)PenWidthValueText!).Text = $"{value.PenWidth:0} px";
-            ((TextBlock)MinPointDistanceValueText!).Text = $"{value.MinPointDistance:F2} px";
         }
         finally { _sync = false; }
+
+        // 试写区跟着画笔粗细走：它要说的是"这一档写出来什么样"，粗细对不上会让人误判笔锋。
+        _tipPreview.InkAttributes.Width = value.PenWidth;
+        _tipPreview.InkAttributes.Height = value.PenWidth;
+        SyncTipState();
     }
 
     private static int SelectedIndex(ComboBox combo)
@@ -203,71 +277,31 @@ public partial class SettingsWindow : Window
 
     private void OnThemeChanged()
     {
-        Background = FluentTheme.Brush("SolidBackgroundFillColorBaseBrush");
-        Foreground = FluentTheme.Brush("TextFillColorPrimaryBrush");
         if (TitleBar is { } titleBar)
         {
-            titleBar.Background = Background;
-            titleBar.Foreground = Foreground;
+            // 标题栏取的是同一批画笔对象：Astra 换深浅时改的是实例的颜色，不换实例，
+            // 所以这里赋一次就长期跟着走，不需要每次主题变化再赋一遍。
+            titleBar.Background = FluentThemeManager.GetBrush("SolidBackgroundFillColorBaseBrush");
+            titleBar.Foreground = FluentThemeManager.GetBrush("TextFillColorPrimaryBrush");
         }
-        UpdateNavigation();
-        if (!FluentTheme.AnimationsEnabled) _navigationIndicator.Complete();
+
+        // 试写区的底色是主题表面，墨色必须跟着反相，否则深色主题下写出来是"黑底黑字"。
+        // 已经写上去的那几笔不动 —— 它们的颜色在落笔时就烘进点数据了，擦掉重写才有新色。
+        _tipPreview.InkAttributes.Color = FluentThemeManager.IsDark
+            ? new Dusk.Ink.Primitives.InkColor(0xE8, 0xE8, 0xE8, 0xFF)
+            : new Dusk.Ink.Primitives.InkColor(0x1A, 0x1A, 0x1A, 0xFF);
     }
 
     private void NavigateTo(SettingsNavPage page, bool force = false)
     {
         if (!force && page == _page) return;
         ThemeChoice.IsDropDownOpen = false;
-        SmoothingChoice.IsDropDownOpen = false;
         _page = page;
-        UpdateNavigation(animateIndicator: _loaded);
+        NavigationRoot!.SelectedItem = _navigation[page];
         PageHost.Children.Clear();
         var panel = _pages[page];
         PageHost.Children.Add(panel);
         ((ScrollViewer)SettingsScrollViewer!).ScrollToVerticalOffset(0);
-        if (_loaded)
-        {
-            FluentTheme.ApplyMotionPolicy(panel);
-            FluentTheme.Enter(panel);
-        }
+        if (_loaded) FluentThemeManager.Enter(panel);
     }
-
-    private void UpdateNavigation(bool animateIndicator = false)
-    {
-        foreach (var (page, parts) in _navigation)
-            parts.Button.IsSelected = page == _page;
-        UpdateSelectionIndicator(animateIndicator);
-    }
-
-    private void NavigationPane_OnLayoutUpdated(object? sender, EventArgs e) => UpdateSelectionIndicator(false);
-
-    private void UpdateSelectionIndicator(bool animate)
-    {
-        var item = _navigation[_page].Button;
-        var layer = (Canvas)NavigationIndicatorLayer!;
-        if (item.ActualHeight <= 0 || layer.ActualHeight <= 0) return;
-        var transform = item.TransformToVisual(layer);
-        if (transform is null) return;
-        var position = transform.Transform(new Point(0,
-            (item.ActualHeight - NavigationIndicatorAnimator.RestingHeight) / 2));
-        // Use laid-out item positions: compact mode, DPI changes and the footer item
-        // must not depend on a hard-coded row index or cached window height.
-        _navigationIndicator.MoveTo(position.X, position.Y,
-            animate && _loaded && FluentTheme.AnimationsEnabled);
-    }
-
-    private void UpdatePane()
-    {
-        _compact = _manualCompact ?? (_layoutWidth < 800);
-        Pane.Width = _compact ? 48 : 220;
-        PageHost.Margin = new Thickness(_layoutWidth < 640 ? 16 : 24);
-        foreach (var parts in _navigation.Values)
-            parts.Label.Visibility = _compact ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private void HamburgerButton_OnClick(object sender, RoutedEventArgs e) { _manualCompact = !_compact; UpdatePane(); }
-    private void AppearanceNav_OnClick(object sender, RoutedEventArgs e) => NavigateTo(SettingsNavPage.Appearance);
-    private void InkNav_OnClick(object sender, RoutedEventArgs e) => NavigateTo(SettingsNavPage.Ink);
-    private void InteractionNav_OnClick(object sender, RoutedEventArgs e) => NavigateTo(SettingsNavPage.Interaction);
-    private void AboutNav_OnClick(object sender, RoutedEventArgs e) => NavigateTo(SettingsNavPage.About);
 }

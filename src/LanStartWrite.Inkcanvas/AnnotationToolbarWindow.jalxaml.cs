@@ -1,3 +1,4 @@
+using FluentJalium.Themes;
 using Jalium.UI;
 using Jalium.UI.Automation;
 using Jalium.UI.Controls;
@@ -10,8 +11,26 @@ public partial class AnnotationToolbarWindow : Window
 {
     private static readonly Brush TransparentBrush =
         new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
-    private static Brush ToolbarIconBrush => FluentTheme.Brush("TextFillColorPrimaryBrush");
-    private static Brush ToolbarIconOnAccentBrush => FluentTheme.Brush("TextOnAccentFillColorPrimaryBrush");
+
+    /// <summary>
+    /// 图标一律走 <see cref="FontIcon"/> + 显式 <c>Segoe Fluent Icons</c>。
+    /// <para>
+    /// 为什么不用 <see cref="SymbolIcon"/>：这个运行时里 SymbolIcon 不暴露 FontFamily，
+    /// 被框架钉死在 'Segoe MDL2 Assets'（Win10 那套形状），而且 764 格里有 120 格画不出墨。
+    /// 只有 FontIcon 的显式 FontFamily 能落到 Windows 11 的字形上 —— 这条是 FluentJalium
+    /// 的图标族实测（docs/astra/audits/icon-family.md §9.2）给的结论。
+    /// 下面每个码点都取自它的实测表 glyph-ink-symbol.csv，且 ink 均 &gt; 0（不是那 120 格空白）。
+    /// </para>
+    /// </summary>
+    private static readonly FontFamily FluentIconFont = new("Segoe Fluent Icons");
+
+    private static FontIcon Glyph(ushort codepoint) => new()
+    {
+        Glyph = char.ConvertFromUtf32(codepoint),
+        FontFamily = FluentIconFont,
+        FontSize = 16,
+        IsHitTestVisible = false,
+    };
     private static readonly Color PenBlack = Color.FromRgb(0x20, 0x20, 0x20);
     private static readonly Color PenRed = Color.FromRgb(0xD1, 0x34, 0x38);
     private static readonly Color PenBlue = Color.FromRgb(0x00, 0x78, 0xD4);
@@ -23,6 +42,8 @@ public partial class AnnotationToolbarWindow : Window
     private SettingsWindow? _settingsWindow;
     private PenSecondaryMenuWindow? _penMenuWindow;
     private bool _penMenuVisible;
+    private EraserSecondaryMenuWindow? _eraserMenuWindow;
+    private bool _eraserMenuVisible;
     private TouchDevice? _touchDragDevice;
     private Point _touchDragStartScreenPoint;
     private double _touchDragStartWindowLeft;
@@ -30,11 +51,15 @@ public partial class AnnotationToolbarWindow : Window
     private Color _currentPenColor = PenBlack;
     private double _currentPenThickness = 4;
     private PenKind _currentPenKind = PenKind.Pen;
+    private EraserMode _currentEraserMode = EraserMode.Area;
+    private double _currentEraserRadius = 14;
 
     /// <summary>由 .g.cs 装入的 <c>x:Name</c> 为 <see cref="Jalium.UI.FrameworkElement"/>，此处转为具体控件类型。</summary>
     private RadioToolToggleButton MouseTool => (RadioToolToggleButton)MouseToolToggle!;
     private RadioToolToggleButton PenTool => (RadioToolToggleButton)PenToolToggle!;
     private RadioToolToggleButton EraseTool => (RadioToolToggleButton)EraseToolToggle!;
+    private AppBarButton UndoTool => (AppBarButton)UndoToolbarButton!;
+    private AppBarButton RedoTool => (AppBarButton)RedoToolbarButton!;
     private AppBarButton SettingsTool => (AppBarButton)SettingsToolbarButton!;
     private Border DragHandle => (Border)DragHandleChrome!;
 
@@ -52,15 +77,21 @@ public partial class AnnotationToolbarWindow : Window
         WireSecondaryToolTriggers();
         FitSizeToContent();
         _currentPenThickness = AppPreferences.Current.PenWidth;
+        _currentEraserMode = AppPreferences.Current.EraseMode;
+        _currentEraserRadius = AppPreferences.Current.EraserRadius;
         AppPreferences.Changed += OnPreferencesChanged;
-        FluentTheme.Changed += SyncToolbarIconForegrounds;
-        LocationChanged += (_, _) => { if (_penMenuVisible) PositionPenSecondaryMenu(); };
+        LocationChanged += (_, _) =>
+        {
+            if (_penMenuVisible) PositionPenSecondaryMenu();
+            if (_eraserMenuVisible) PositionEraserSecondaryMenu();
+        };
         Hiding += (_, _) => EndTouchDrag(DragHandle);
-        SystemSettingsChanged += (_, _) => FluentTheme.ApplyPreferences();
+        SystemSettingsChanged += (_, _) => FluentThemeManager.RefreshSystemTheme();
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key != Key.Escape) return;
             if (_penMenuVisible) HidePenSecondaryMenu();
+            else if (_eraserMenuVisible) HideEraserSecondaryMenu();
             else MouseTool.IsChecked = true;
             e.Handled = true;
         };
@@ -69,10 +100,12 @@ public partial class AnnotationToolbarWindow : Window
             _isClosing = true;
             EndTouchDrag(DragHandle);
             AppPreferences.Changed -= OnPreferencesChanged;
-            FluentTheme.Changed -= SyncToolbarIconForegrounds;
             _penMenuWindow?.Close();
             _penMenuWindow = null;
             _penMenuVisible = false;
+            _eraserMenuWindow?.Close();
+            _eraserMenuWindow = null;
+            _eraserMenuVisible = false;
             _settingsWindow?.Close();
             _settingsWindow = null;
             DisposeAnnotationOverlay();
@@ -80,7 +113,6 @@ public partial class AnnotationToolbarWindow : Window
         Loaded += (_, _) =>
         {
             ApplyTopmostPolicy();
-            FluentTheme.ApplyMotionPolicy(this);
         };
 
         _toolSync = true;
@@ -88,7 +120,6 @@ public partial class AnnotationToolbarWindow : Window
         PenTool.IsChecked = false;
         EraseTool.IsChecked = false;
         _toolSync = false;
-        SyncToolbarIconForegrounds();
         SyncAnnotationOverlay();
     }
 
@@ -113,8 +144,22 @@ public partial class AnnotationToolbarWindow : Window
         MouseTool.Checked += OnToolToggleChecked;
         PenTool.Checked += OnToolToggleChecked;
         EraseTool.Checked += OnToolToggleChecked;
-        foreach (var control in new Control[] { MouseTool, PenTool, EraseTool, SettingsTool })
+        UndoTool.Click += (_, _) => { _annotationOverlay?.Undo(); };
+        RedoTool.Click += (_, _) => { _annotationOverlay?.Redo(); };
+        foreach (var control in new Control[] { MouseTool, PenTool, EraseTool, UndoTool, RedoTool, SettingsTool })
             control.PreviewKeyDown += Tool_OnPreviewKeyDown;
+
+        SyncUndoRedoState();
+    }
+
+    /// <summary>
+    /// 撤销/重做的可用性只读引擎的账（<c>InkHistory.CanUndo/CanRedo</c>），本端不再自己数笔数。
+    /// 画布还没建起来时没有历史可谈，两个按钮都 disabled。
+    /// </summary>
+    private void SyncUndoRedoState()
+    {
+        UndoTool.IsEnabled = _annotationOverlay?.CanUndo == true;
+        RedoTool.IsEnabled = _annotationOverlay?.CanRedo == true;
     }
 
     private void Tool_OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -127,8 +172,16 @@ public partial class AnnotationToolbarWindow : Window
             e.Handled = true;
             return;
         }
+        if (ReferenceEquals(sender, EraseTool) && e.Key == Key.Down &&
+            (e.KeyboardModifiers == ModifierKeys.None || e.KeyboardModifiers == ModifierKeys.Alt))
+        {
+            EraseTool.IsChecked = true;
+            ShowEraserSecondaryMenu(focus: true);
+            e.Handled = true;
+            return;
+        }
         if (e.KeyboardModifiers != ModifierKeys.None) return;
-        Control[] tools = [MouseTool, PenTool, EraseTool, SettingsTool];
+        Control[] tools = [MouseTool, PenTool, EraseTool, UndoTool, RedoTool, SettingsTool];
         var current = Array.FindIndex(tools, control => ReferenceEquals(control, sender));
         if (current < 0) return;
         var next = e.Key switch
@@ -160,35 +213,30 @@ public partial class AnnotationToolbarWindow : Window
             _toolSync = false;
         }
 
-        SyncToolbarIconForegrounds();
         SyncAnnotationOverlay();
     }
 
-    private void SyncToolbarIconForegrounds()
-    {
-        if (MouseTool.Icon is SymbolIcon mouseIcon)
-            mouseIcon.Foreground = MouseTool.IsChecked == true ? ToolbarIconOnAccentBrush : ToolbarIconBrush;
-        if (PenTool.Icon is SymbolIcon penIcon)
-            penIcon.Foreground = PenTool.IsChecked == true ? ToolbarIconOnAccentBrush : ToolbarIconBrush;
-        if (EraseTool.Icon is SymbolIcon eraseIcon)
-            eraseIcon.Foreground = EraseTool.IsChecked == true ? ToolbarIconOnAccentBrush : ToolbarIconBrush;
-        if (SettingsTool.Icon is SymbolIcon settingsIcon)
-            settingsIcon.Foreground = ToolbarIconBrush;
-    }
 
     private void EnsureAnnotationOverlay()
     {
         if (_annotationOverlay is not null) return;
         _annotationOverlay = new AnnotationOverlayWindow();
-        _annotationOverlay.PreviewPointerDown += (_, _) => HidePenSecondaryMenu();
+        _annotationOverlay.PreviewPointerDown += (_, _) =>
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+        };
+        _annotationOverlay.HistoryStateChanged += SyncUndoRedoState;
     }
 
     private void DisposeAnnotationOverlay()
     {
         if (_annotationOverlay is null)
             return;
+        _annotationOverlay.HistoryStateChanged -= SyncUndoRedoState;
         _annotationOverlay.Close();
         _annotationOverlay = null;
+        SyncUndoRedoState();
     }
 
     /// <summary>鼠标模式隐藏画布；笔与橡皮显示同一画布并切换编辑模式。</summary>
@@ -199,24 +247,29 @@ public partial class AnnotationToolbarWindow : Window
         {
             _annotationOverlay?.Hide();
             HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
             return;
         }
         if (MouseTool.IsChecked == true)
         {
             _annotationOverlay?.Hide();
             HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
             ApplyTopmostPolicy();
+            SyncUndoRedoState();
             return;
         }
 
         if (PenTool.IsChecked == true)
         {
+            HideEraserSecondaryMenu();
             EnsureAnnotationOverlay();
             _annotationOverlay!.SetInkMode();
             _annotationOverlay.SetPenKind(_currentPenKind);
             _annotationOverlay.SetPenColor(_currentPenColor);
             _annotationOverlay.SetPenThickness(_currentPenThickness);
             _annotationOverlay.Show();
+            SyncUndoRedoState();
             RaiseToolbarAboveAnnotationOverlay();
             return;
         }
@@ -226,7 +279,10 @@ public partial class AnnotationToolbarWindow : Window
             HidePenSecondaryMenu();
             EnsureAnnotationOverlay();
             _annotationOverlay!.SetEraseMode();
+            _annotationOverlay.SetEraserMode(_currentEraserMode);
+            _annotationOverlay.SetEraserRadius(_currentEraserRadius);
             _annotationOverlay.Show();
+            SyncUndoRedoState();
             RaiseToolbarAboveAnnotationOverlay();
         }
     }
@@ -257,6 +313,8 @@ public partial class AnnotationToolbarWindow : Window
             Activate();
             if (_penMenuWindow is not null)
                 _penMenuWindow.Topmost = true;
+            if (_eraserMenuWindow is not null)
+                _eraserMenuWindow.Topmost = true;
         });
     }
 
@@ -267,21 +325,30 @@ public partial class AnnotationToolbarWindow : Window
         yield return EraseTool;
     }
 
-    /// <summary>使用 Jalium 自带的 <see cref="SymbolIcon"/> + <see cref="Symbol"/>（Segoe Fluent Icons 码位由框架维护）。</summary>
+    /// <summary>
+    /// 图标只有码点是应用决定的；颜色全部交给 <c>AppBarToggleButtonForegroundChecked</c> 那一族状态触发器，
+    /// 由库的 <c>IconInk</c> 把控件前景 handed 给图标 —— 所以这里<b>不能</b>给图标设本地 Foreground，
+    /// 设了就等于压住那条活绑定，选中态的"白字在accent上"就没了。
+    /// </summary>
     private void ApplyToolbarIcons()
     {
-        // 前景色交由 AppBar 样式按 Checked/Hover 状态控制，这里不设硬编码画刷。
-        MouseTool.Icon = new SymbolIcon(Symbol.TouchPointer) { IsHitTestVisible = false, Width = 16, Height = 16 };
-        PenTool.Icon = new SymbolIcon(Symbol.InkingTool) { IsHitTestVisible = false, Width = 16, Height = 16 };
-        EraseTool.Icon = new SymbolIcon(Symbol.EraseTool) { IsHitTestVisible = false, Width = 16, Height = 16 };
-        SettingsTool.Icon = new SymbolIcon(Symbol.Settings) { IsHitTestVisible = false, Width = 16, Height = 16 };
+        MouseTool.Icon = Glyph(0xE7C9); // TouchPointer
+        PenTool.Icon = Glyph(0xE76D);   // InkingTool
+        EraseTool.Icon = Glyph(0xE75C); // EraseTool
+        UndoTool.Icon = Glyph(0xE7A7);  // Undo
+        RedoTool.Icon = Glyph(0xE7A6);  // Redo
+        SettingsTool.Icon = Glyph(0xE713); // Setting
         AutomationProperties.SetName(MouseTool, "鼠标模式");
         AutomationProperties.SetName(PenTool, "笔；再次点击打开笔设置");
-        AutomationProperties.SetName(EraseTool, "橡皮");
+        AutomationProperties.SetName(EraseTool, "橡皮；再次点击打开橡皮设置");
+        AutomationProperties.SetName(UndoTool, "撤销");
+        AutomationProperties.SetName(RedoTool, "重做");
         AutomationProperties.SetName(SettingsTool, "设置");
         MouseTool.ToolTip = "鼠标模式";
         PenTool.ToolTip = "笔 · 再次点击打开笔设置";
-        EraseTool.ToolTip = "橡皮";
+        EraseTool.ToolTip = "橡皮 · 再次点击打开橡皮设置";
+        UndoTool.ToolTip = "撤销";
+        RedoTool.ToolTip = "重做";
         SettingsTool.ToolTip = "设置";
     }
 
@@ -298,6 +365,7 @@ public partial class AnnotationToolbarWindow : Window
     private void WireSecondaryToolTriggers()
     {
         PenTool.Reactivated += (_, _) => TogglePenSecondaryMenu();
+        EraseTool.Reactivated += (_, _) => ToggleEraserSecondaryMenu();
     }
 
     private void EnsurePenSecondaryMenuWindow()
@@ -324,6 +392,8 @@ public partial class AnnotationToolbarWindow : Window
             _currentPenKind = k;
             ApplyPenSettingsToOverlay();
         };
+        // 笔锋档位不在本窗口缓存：全局只有一份（InkTipOptions），菜单只管发选择、这里只管转交。
+        _penMenuWindow.TipPresetChanged += id => InkTipOptions.SelectPreset(id);
         _penMenuWindow.Closed += (_, _) =>
         {
             _penMenuWindow = null;
@@ -349,13 +419,14 @@ public partial class AnnotationToolbarWindow : Window
         if (PenTool.IsChecked != true)
             return;
 
+        HideEraserSecondaryMenu();
         EnsurePenSecondaryMenuWindow();
         _penMenuWindow!.SetCurrentState(_currentPenColor, _currentPenThickness, _currentPenKind);
         PositionPenSecondaryMenu();
         _penMenuWindow.Show();
         PositionPenSecondaryMenu();
         _penMenuVisible = true;
-        FluentTheme.Enter(_penMenuWindow.Content as UIElement ?? _penMenuWindow);
+        FluentThemeManager.Enter(_penMenuWindow.Content as UIElement ?? _penMenuWindow);
         if (focus)
             Dispatcher.BeginInvoke(() =>
             {
@@ -394,6 +465,105 @@ public partial class AnnotationToolbarWindow : Window
         _annotationOverlay.SetPenKind(_currentPenKind);
         _annotationOverlay.SetPenColor(_currentPenColor);
         _annotationOverlay.SetPenThickness(_currentPenThickness);
+    }
+
+    private void EnsureEraserSecondaryMenuWindow()
+    {
+        if (_eraserMenuWindow is not null)
+            return;
+
+        _eraserMenuWindow = new EraserSecondaryMenuWindow { Owner = this };
+        _eraserMenuWindow.DismissRequested += () => { HideEraserSecondaryMenu(); Activate(); EraseTool.Focus(); };
+        _eraserMenuWindow.SetCurrentState(_currentEraserMode, _currentEraserRadius);
+        _eraserMenuWindow.EraserModeChanged += mode =>
+        {
+            _currentEraserMode = mode;
+            AppPreferences.Update(AppPreferences.Current with { EraseMode = mode });
+            ApplyEraserSettingsToOverlay();
+        };
+        _eraserMenuWindow.EraserRadiusChanged += radius =>
+        {
+            _currentEraserRadius = radius;
+            AppPreferences.Update(AppPreferences.Current with { EraserRadius = radius });
+            ApplyEraserSettingsToOverlay();
+        };
+        _eraserMenuWindow.ClearRequested += () =>
+        {
+            _annotationOverlay?.ClearCanvas();
+            SyncUndoRedoState();
+        };
+        _eraserMenuWindow.Closed += (_, _) =>
+        {
+            _eraserMenuWindow = null;
+            _eraserMenuVisible = false;
+        };
+    }
+
+    private void PositionEraserSecondaryMenu()
+    {
+        if (_eraserMenuWindow is null)
+            return;
+
+        if (!FlyoutPlacement.Position(this, _eraserMenuWindow))
+        {
+            _eraserMenuWindow.Left = Left;
+            _eraserMenuWindow.Top = Top + Height - 8;
+        }
+        _eraserMenuWindow.Topmost = Topmost;
+    }
+
+    private void ShowEraserSecondaryMenu(bool focus = false)
+    {
+        if (EraseTool.IsChecked != true)
+            return;
+
+        HidePenSecondaryMenu();
+        EnsureEraserSecondaryMenuWindow();
+        _eraserMenuWindow!.SetCurrentState(_currentEraserMode, _currentEraserRadius);
+        PositionEraserSecondaryMenu();
+        _eraserMenuWindow.Show();
+        PositionEraserSecondaryMenu();
+        _eraserMenuVisible = true;
+        FluentThemeManager.Enter(_eraserMenuWindow.Content as UIElement ?? _eraserMenuWindow);
+        if (focus)
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (_isClosing || !_eraserMenuVisible || _eraserMenuWindow is null) return;
+                _eraserMenuWindow.Activate();
+                _eraserMenuWindow.FocusSelectedMode();
+            });
+    }
+
+    private void HideEraserSecondaryMenu()
+    {
+        if (_eraserMenuWindow is null)
+            return;
+
+        _eraserMenuWindow.ResetClearConfirmation();
+        _eraserMenuWindow.Hide();
+        _eraserMenuVisible = false;
+    }
+
+    private void ToggleEraserSecondaryMenu()
+    {
+        if (EraseTool.IsChecked != true)
+            return;
+
+        if (_eraserMenuWindow is not null && _eraserMenuVisible)
+        {
+            HideEraserSecondaryMenu();
+            return;
+        }
+
+        ShowEraserSecondaryMenu();
+    }
+
+    private void ApplyEraserSettingsToOverlay()
+    {
+        if (_annotationOverlay is null)
+            return;
+        _annotationOverlay.SetEraserMode(_currentEraserMode);
+        _annotationOverlay.SetEraserRadius(_currentEraserRadius);
     }
 
     private void DragHandle_OnPreviewPointerDown(object sender, RoutedEventArgs e)
@@ -502,7 +672,10 @@ public partial class AnnotationToolbarWindow : Window
         Topmost = false;
         if (_penMenuWindow is not null)
             _penMenuWindow.Topmost = false;
+        if (_eraserMenuWindow is not null)
+            _eraserMenuWindow.Topmost = false;
         HidePenSecondaryMenu();
+        HideEraserSecondaryMenu();
         // Hide suspends input without destroying the user's existing strokes.
         _annotationOverlay?.Hide();
 
@@ -523,6 +696,7 @@ public partial class AnnotationToolbarWindow : Window
         Topmost = _settingsWindow is null &&
             (MouseTool.IsChecked != true || AppPreferences.Current.KeepToolbarOnTop);
         if (_penMenuWindow is not null) _penMenuWindow.Topmost = Topmost;
+        if (_eraserMenuWindow is not null) _eraserMenuWindow.Topmost = Topmost;
     }
 
     private void OnPreferencesChanged(PreferenceSnapshot value)
@@ -532,6 +706,13 @@ public partial class AnnotationToolbarWindow : Window
             _currentPenThickness = value.PenWidth;
             _penMenuWindow?.SetCurrentState(_currentPenColor, _currentPenThickness, _currentPenKind);
             ApplyPenSettingsToOverlay();
+        }
+        if (_currentEraserMode != value.EraseMode || _currentEraserRadius != value.EraserRadius)
+        {
+            _currentEraserMode = value.EraseMode;
+            _currentEraserRadius = value.EraserRadius;
+            _eraserMenuWindow?.SetCurrentState(_currentEraserMode, _currentEraserRadius);
+            ApplyEraserSettingsToOverlay();
         }
         ApplyTopmostPolicy();
     }

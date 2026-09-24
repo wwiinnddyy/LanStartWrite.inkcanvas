@@ -1,0 +1,13 @@
+<!--
+  应用自有 token：只放 FluentJalium（Astra）没有的那几个，浅色取值。
+  深色取值写在 FluentTheme.AppTokenColors 里 —— 只有两项，不值得第二个字典文件。
+
+  这两个都是"实体浮层表面"，是揽星书写自己的决定：浮动窗口不用 acrylic/mica，
+  而在任意桌面背景上保持不透明（见 Design.MD §1 与 docs/FLUENT_UI_PARITY.md）。
+  WinUI 的对应物 FlyoutPresenterBackground 是亚克力，所以这里不能借用那个键名。
+-->
+<ResourceDictionary xmlns="http://schemas.jalium.ui/2024"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <SolidColorBrush x:Key="ToolbarSurfaceBrush" Color="#FFFFFF" Opacity="1" />
+  <SolidColorBrush x:Key="FlyoutSurfaceBrush" Color="#F9F9F9" Opacity="1" />
+</ResourceDictionary>

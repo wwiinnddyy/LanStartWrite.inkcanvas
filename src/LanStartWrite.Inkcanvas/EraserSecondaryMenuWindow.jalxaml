@@ -1,0 +1,23 @@
+<Window xmlns="http://schemas.jalium.ui/2024" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ x:Class="LanStartWrite.Inkcanvas.EraserSecondaryMenuWindow" Title="橡皮设置" WindowStartupLocation="Manual"
+ Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" WindowStyle="None"
+ IsShowTitleBar="False" IsShowMinimizeButton="False" IsShowMaximizeButton="False" IsShowCloseButton="False" HasSystemMenu="False"
+ AllowsTransparency="True" SystemBackdrop="None" Background="Transparent" Foreground="{StaticResource TextFillColorPrimaryBrush}">
+  <Border x:Name="EraserMenuSurface" Margin="6" Padding="16" CornerRadius="8" Background="{StaticResource FlyoutSurfaceBrush}" BorderBrush="{StaticResource SurfaceStrokeColorDefaultBrush}" BorderThickness="1">
+    <StackPanel Width="200">
+      <TextBlock Text="橡皮" Style="{StaticResource BodyStrongTextBlockStyle}" />
+      <StackPanel Margin="0,12,0,0">
+        <RadioButton x:Name="EraserAreaRadio" GroupName="EraserMode" Content="面积擦" Margin="0,2" />
+        <RadioButton x:Name="EraserStrokeRadio" GroupName="EraserMode" Content="笔迹擦" Margin="0,2" />
+      </StackPanel>
+      <TextBlock x:Name="EraserHintText" Text="画过的地方被擦掉，一笔可能被切成几段。" Style="{StaticResource HelperTextStyle}" Margin="0,6,0,0" />
+      <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+        <TextBlock x:Name="EraserRadiusLabel" Text="擦除半径" Style="{StaticResource BodyTextBlockStyle}" />
+        <TextBlock x:Name="EraserRadiusValueText" Grid.Column="1" FontSize="12" Foreground="{StaticResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
+      </Grid>
+      <Slider x:Name="EraserRadiusSlider" Margin="0,4,0,0" Minimum="4" Maximum="48" Value="14" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True" />
+      <Border Height="1" Background="{StaticResource DividerStrokeColorDefaultBrush}" Margin="0,12,0,12" />
+      <Button x:Name="EraseAllButton" Content="清空全部" HorizontalAlignment="Stretch" />
+    </StackPanel>
+  </Border>
+</Window>

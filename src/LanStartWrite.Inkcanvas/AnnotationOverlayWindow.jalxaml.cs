@@ -1,45 +1,26 @@
 using System.Diagnostics;
-using System.Collections.Generic;
-using System.Reflection;
+using Dusk.Adapter.Jalium;
+using Dusk.Ink.Controls;
+using Dusk.Ink.Document;
+using Dusk.Ink.Model;
+using Dusk.Ink.Primitives;
 using Jalium.UI;
 using Jalium.UI.Controls;
-using Jalium.UI.Ink;
-using Jalium.UI.Input;
-using Jalium.UI.Input.StylusPlugIns;
 using Jalium.UI.Media;
-using Jalium.UI.Threading;
 
 namespace LanStartWrite.Inkcanvas;
 
 public partial class AnnotationOverlayWindow : Window
 {
-    private bool _isRebuildingStroke;
-    private PenKind _currentKind = PenKind.Pen;
-    private readonly List<DispatcherTimer> _laserFadeTimers = [];
-    private readonly InkInputMetrics _metrics = new();
-    private int _lastPointerId = -1;
-    private StylusPointCollection? _lastRealtimePoints;
-    private PointerDeviceType _lastPointerDeviceType = PointerDeviceType.Mouse;
-
-    private static readonly MethodInfo[] RealtimeFeedMethods =
-        typeof(InkCanvas)
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-
-    // 26.10.5+ 起 InkCanvas.DynamicRenderer 改为 protected；类型本身仍公开，经反射取实例后强类型使用。
-    private static readonly PropertyInfo? DynamicRendererProperty =
-        typeof(InkCanvas).GetProperty(
-            "DynamicRenderer",
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-
     private static readonly Brush TransparentBrush =
         new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
 
-    private InkCanvas Surface => (InkCanvas)OverlayInk!;
-
-    private DrawingAttributes? TryGetDynamicRendererAttributes() =>
-        DynamicRendererProperty?.GetValue(Surface) is DynamicRenderer renderer
-            ? renderer.DrawingAttributes
-            : null;
+    private readonly JaliumInkCanvas _surface = new();
+    private readonly InkHistory _history;
+    private PenKind _currentKind = PenKind.Pen;
+    private Color _currentColor = Colors.Black;
+    private double _currentThickness = 3;
+    private EraserMode _eraserMode = EraserMode.Area;
 
     public AnnotationOverlayWindow()
     {
@@ -49,382 +30,112 @@ public partial class AnnotationOverlayWindow : Window
         Opacity = 1;
         Background = TransparentBrush;
         InitializeComponent();
-        Surface.Background = TransparentBrush;
 
-        // MinPointDistance 若为实例字段，在 Surface 构造后再写一次。
-        InkCanvasTuning.ApplyStartupDefaults(Surface);
+        InkHost.Children.Add(_surface);
 
-        ApplyDefaultDrawingAttributes();
-        Surface.StrokeCollected += Surface_OnStrokeCollected_EnforceSmoothAttributes;
-        Surface.PreviewPointerMove += Surface_OnPreviewPointerMove_RealtimeSampling;
-        Surface.EditingMode = InkCanvasEditingMode.Ink;
+        // 撤销/重做挂在文档上：书写、擦除、清空、整笔擦都进同一条历史。
+        _history = new InkHistory(_surface.Document);
+        _surface.Document.AttachHistory(_history);
+        _surface.Document.Changed += (_, _) => HistoryStateChanged?.Invoke();
 
-        Closed += (_, _) => CancelLaserFadeTimers();
+        ApplyAttributes();
+        ApplyTipOptions();
         InkRuntimeOptions.Changed += OnInkRuntimeOptionsChanged;
+        InkTipOptions.Changed += OnInkTipOptionsChanged;
         ApplyRuntimeOptions(InkRuntimeOptions.Current);
+        Closed += OnClosed;
 
 #if DEBUG
-        Surface.PreviewPointerMove += Surface_OnPreviewPointerMove_InkDiag;
+        // 可见区由 ArrangeOverride 报进来的尺寸算出；格子塌成零尺寸时画面全空且不报错。
+        _surface.Loaded += (_, _) => Debug.Assert(
+            _surface.ActualWidth > 0, "ink host arranged to zero size: nothing will render");
+        _surface.StrokeCommitted += (_, _) => Debug.WriteLine(
+            $"[ink-metrics] doc={_surface.Document.Count} passes={_surface.RenderPassCount} "
+            + $"last={_surface.LastInputToRenderMs:F1}ms peak={_surface.PeakInputToRenderMs:F1}ms");
 #endif
-    }
-
-#if DEBUG
-    private static void Surface_OnPreviewPointerMove_InkDiag(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not InkCanvas canvas || e is not PointerMoveEventArgs p)
-            return;
-
-        var inter = p.GetIntermediatePoints(canvas);
-        Debug.WriteLine(
-            $"[ink] device={p.Pointer.PointerDeviceType} intermediate={inter.Count}");
-    }
-#endif
-
-    private void ApplyDefaultDrawingAttributes()
-    {
-        var da = Surface.DefaultDrawingAttributes;
-        da.Color = Colors.Black;
-        da.Width = 3;
-        da.Height = 3;
-        da.StylusTip = StylusTip.Ellipse;
-        da.FitToCurve = true;
-        da.BrushType = BrushType.Round;
-        da.IgnorePressure = !InkRuntimeOptions.Current.EnablePressure;
-        da.IsHighlighter = false;
-        SyncDynamicRendererAttributes(da);
-    }
-
-    private void SyncDynamicRendererAttributes(DrawingAttributes source)
-    {
-        var previewDa = TryGetDynamicRendererAttributes();
-        if (previewDa is null)
-            return;
-
-        previewDa.Color = source.Color;
-        previewDa.Width = source.Width;
-        previewDa.Height = source.Height;
-        previewDa.StylusTip = source.StylusTip;
-        previewDa.FitToCurve = source.FitToCurve;
-        previewDa.BrushType = source.BrushType;
-        previewDa.IgnorePressure = source.IgnorePressure;
-        previewDa.IsHighlighter = source.IsHighlighter;
-    }
-
-    private void Surface_OnStrokeCollected_EnforceSmoothAttributes(
-        object? sender,
-        InkCanvasStrokeCollectedEventArgs e)
-    {
-        var stroke = e.Stroke;
-        var da = stroke.DrawingAttributes;
-        da.StylusTip = StylusTip.Ellipse;
-        da.FitToCurve = InkRuntimeOptions.Current.SmoothingLevel != InkSmoothingLevel.Low;
-        da.IgnorePressure = !InkRuntimeOptions.Current.EnablePressure;
-        ApplyBrushTypeAndHighlighterForCurrentKind(da);
-        var runtime = InkRuntimeOptions.Current;
-        var activeStroke = runtime.EnableLegacyPostProcessFallback
-            ? TryRebuildSparseStroke(stroke, runtime, _lastPointerDeviceType) ?? stroke
-            : stroke;
-        _metrics.OnStrokeCommitted(activeStroke.StylusPoints.Count);
-        _metrics.EmitIfNeeded();
-
-        if (_currentKind == PenKind.Laser)
-            BeginLaserFade(activeStroke);
-    }
-
-    private Stroke? TryRebuildSparseStroke(
-        Stroke stroke,
-        InkRuntimeSnapshot runtime,
-        PointerDeviceType deviceType)
-    {
-        if (_isRebuildingStroke)
-            return null;
-
-        var source = stroke.StylusPoints;
-        if (source.Count < 3)
-            return null;
-
-        var dense = BuildDensifiedPoints(source, runtime, deviceType);
-        if (dense is null || dense.Count <= source.Count)
-            return null;
-
-        var replacement = new Stroke(dense, stroke.DrawingAttributes.Clone())
-        {
-            TaperMode = stroke.TaperMode,
-        };
-
-        var strokes = Surface.Strokes;
-        var index = strokes.IndexOf(stroke);
-        if (index < 0)
-            return null;
-
-        try
-        {
-            _isRebuildingStroke = true;
-            strokes[index] = replacement;
-            _metrics.RebuiltStrokeCount++;
-            return replacement;
-        }
-        finally
-        {
-            _isRebuildingStroke = false;
-        }
-    }
-
-    private void BeginLaserFade(Stroke stroke)
-    {
-        const int holdMs = 600;
-        const int fadeMs = 600;
-        const int ticks = 12;
-
-        var startColor = stroke.DrawingAttributes.Color;
-        if (startColor.A == 0)
-            return;
-
-        var stepAlpha = startColor.A / (double)ticks;
-
-        var hold = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(holdMs),
-        };
-        _laserFadeTimers.Add(hold);
-
-        hold.Tick += HoldTick;
-        hold.Start();
-
-        void HoldTick(object? s, EventArgs e2)
-        {
-            hold.Tick -= HoldTick;
-            hold.Stop();
-            _laserFadeTimers.Remove(hold);
-
-            var fade = new DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds((double)fadeMs / ticks),
-            };
-            _laserFadeTimers.Add(fade);
-
-            var i = 0;
-            fade.Tick += FadeTick;
-            fade.Start();
-
-            void FadeTick(object? s2, EventArgs e3)
-            {
-                i++;
-                var a = (byte)Math.Clamp(startColor.A - stepAlpha * i, 0, 255);
-                stroke.DrawingAttributes.Color = Color.FromArgb(
-                    a,
-                    startColor.R,
-                    startColor.G,
-                    startColor.B);
-
-                if (i < ticks)
-                    return;
-
-                fade.Tick -= FadeTick;
-                fade.Stop();
-                _laserFadeTimers.Remove(fade);
-
-                try
-                {
-                    Surface.Strokes.Remove(stroke);
-                }
-                catch
-                {
-                    // 忽略关闭窗口或集合已释放等情况
-                }
-            }
-        }
-    }
-
-    private void CancelLaserFadeTimers()
-    {
-        foreach (var t in _laserFadeTimers)
-            t.Stop();
-        _laserFadeTimers.Clear();
-        InkRuntimeOptions.Changed -= OnInkRuntimeOptionsChanged;
-    }
-
-    public void SetPenKind(PenKind kind)
-    {
-        _currentKind = kind;
-        var da = Surface.DefaultDrawingAttributes;
-        ApplyBrushTypeAndHighlighterForCurrentKind(da);
-        SyncDynamicRendererAttributes(da);
-    }
-
-    /// <summary>
-    /// 荧光笔使用 <see cref="BrushType.Marker"/>（宽、半透明笔刷）并打开 <see cref="DrawingAttributes.IsHighlighter"/>；
-    /// 书写笔与激光笔使用 <see cref="BrushType.Round"/>。
-    /// </summary>
-    private void ApplyBrushTypeAndHighlighterForCurrentKind(DrawingAttributes da)
-    {
-        if (_currentKind == PenKind.Highlighter)
-        {
-            da.IsHighlighter = true;
-            da.BrushType = BrushType.Marker;
-        }
-        else
-        {
-            da.IsHighlighter = false;
-            da.BrushType = BrushType.Round;
-        }
-    }
-
-    private static StylusPointCollection? BuildDensifiedPoints(
-        StylusPointCollection source,
-        InkRuntimeSnapshot runtime,
-        PointerDeviceType deviceType)
-    {
-        if (source.Count < 2)
-            return null;
-
-        var minSegmentLength = GetMinSegmentLength(runtime, deviceType);
-        var dense = new StylusPointCollection();
-        dense.Add(source[0]);
-
-        for (var i = 1; i < source.Count; i++)
-        {
-            var prev = source[i - 1];
-            var current = source[i];
-            var dx = current.X - prev.X;
-            var dy = current.Y - prev.Y;
-            var distance = Math.Sqrt((dx * dx) + (dy * dy));
-
-            if (distance > minSegmentLength)
-            {
-                var insertCount = Math.Clamp((int)(distance / minSegmentLength), 1, 8);
-                for (var k = 1; k < insertCount; k++)
-                {
-                    var t = (double)k / insertCount;
-                    var x = prev.X + (dx * t);
-                    var y = prev.Y + (dy * t);
-                    dense.Add(new StylusPoint(x, y));
-                }
-            }
-
-            dense.Add(current);
-        }
-
-        return dense;
     }
 
     public void SetInkMode()
     {
-        Surface.EditingMode = InkCanvasEditingMode.Ink;
+        _surface.IsEraserMode = false;
     }
 
     public void SetEraseMode()
     {
-        Surface.EditingMode = InkCanvasEditingMode.EraseByStroke;
+        SetEraserMode(_eraserMode);
+    }
+
+    /// <summary>换橡皮的擦法：面积擦＝引擎点擦，笔迹擦＝整笔摘除。</summary>
+    public void SetEraserMode(EraserMode mode)
+    {
+        _eraserMode = mode;
+        _surface.EditingMode = mode == EraserMode.Stroke
+            ? InkEditingMode.EraseByStroke
+            : InkEditingMode.EraseByPoint;
+    }
+
+    public void SetEraserRadius(double radius)
+    {
+        _surface.EraserRadius = double.IsFinite(radius) ? Math.Clamp(radius, 4, 48) : 14;
+    }
+
+    public void ClearCanvas() => _surface.Clear();
+
+    public bool CanUndo => _history.CanUndo;
+
+    public bool CanRedo => _history.CanRedo;
+
+    public void Undo() => _history.Undo();
+
+    public void Redo() => _history.Redo();
+
+    /// <summary>文档变了（因而可撤销/可重做的东西也变了）。宿主工具栏据此刷按钮状态。</summary>
+    public event Action? HistoryStateChanged;
+
+    public void SetPenKind(PenKind kind)
+    {
+        _currentKind = kind;
+        ApplyAttributes();
     }
 
     public void SetPenColor(Color color)
     {
-        var da = Surface.DefaultDrawingAttributes;
-        da.Color = color;
-        if (TryGetDynamicRendererAttributes() is { } previewDa)
-            previewDa.Color = color;
+        _currentColor = color;
+        ApplyAttributes();
     }
 
     public void SetPenThickness(double thickness)
     {
-        var t = Math.Max(1, thickness);
-        var da = Surface.DefaultDrawingAttributes;
-        da.Width = t;
-        da.Height = t;
-        if (TryGetDynamicRendererAttributes() is { } previewDa)
-        {
-            previewDa.Width = t;
-            previewDa.Height = t;
-        }
+        _currentThickness = Math.Max(1, thickness);
+        ApplyAttributes();
     }
 
-    private void Surface_OnPreviewPointerMove_RealtimeSampling(object? sender, RoutedEventArgs e)
+    private void ApplyAttributes()
     {
-        if (sender is not InkCanvas canvas || e is not PointerMoveEventArgs p)
-            return;
-
-        var runtime = InkRuntimeOptions.Current;
-        var inter = p.GetIntermediatePoints(canvas);
-        if (inter.Count == 0)
-            return;
-
-        _metrics.OnIntermediatePoints(inter.Count);
-        if (runtime.EnableTilt)
-            _metrics.OnTiltSample(TryReadTiltMagnitude(p, canvas));
-        if (!runtime.EnableRealtimeSampling || Surface.EditingMode != InkCanvasEditingMode.Ink)
-            return;
-
-        var points = new StylusPointCollection();
-        foreach (var item in inter)
-            points.Add(new StylusPoint(item.Position.X, item.Position.Y));
-
-        var pointerId = p.Pointer.GetHashCode();
-        _lastPointerDeviceType = p.Pointer.PointerDeviceType;
-        if (pointerId != _lastPointerId)
-        {
-            _lastPointerId = pointerId;
-            _lastRealtimePoints = null;
-        }
-
-        if (_lastRealtimePoints is not null && points.Count > 0)
-        {
-            var first = points[0];
-            var prev = _lastRealtimePoints[^1];
-            if (Math.Abs(prev.X - first.X) < 0.001 && Math.Abs(prev.Y - first.Y) < 0.001)
-                points.RemoveAt(0);
-        }
-
-        if (points.Count == 0)
-            return;
-
-        _lastRealtimePoints = points;
-        TryFeedRealtimePoints(points);
+        var da = _surface.InkAttributes;
+        da.Kind = KindFor(_currentKind);
+        da.Color = new InkColor(
+            _currentColor.R,
+            _currentColor.G,
+            _currentColor.B,
+            AlphaFor(_currentKind));
+        da.Width = _currentThickness;
+        da.Height = _currentThickness;
     }
 
-    private void TryFeedRealtimePoints(StylusPointCollection points)
+    private static StrokeKind KindFor(PenKind kind) => kind switch
     {
-        // 优先探测 Jalium InkCanvas 可用的实时喂点入口；若当前版本未公开对应 API，保持兼容降级。
-        foreach (var m in RealtimeFeedMethods)
-        {
-            if (m.Name is not ("AddPoints" or "AppendPoints" or "FeedPoints" or "UpdateDrawing"))
-                continue;
+        PenKind.Highlighter => StrokeKind.Uniform,
+        PenKind.Laser => StrokeKind.Laser,
+        _ => StrokeKind.VariableWidth,
+    };
 
-            var ps = m.GetParameters();
-            if (ps.Length == 1 && ps[0].ParameterType.IsAssignableFrom(typeof(StylusPointCollection)))
-            {
-                try
-                {
-                    m.Invoke(Surface, [points]);
-                }
-                catch
-                {
-                    // ignore and continue fallback
-                }
-
-                return;
-            }
-        }
-    }
-
-    private static double GetMinSegmentLength(
-        InkRuntimeSnapshot runtime,
-        PointerDeviceType deviceType)
+    private static byte AlphaFor(PenKind kind) => kind switch
     {
-        var baseLength = runtime.SmoothingLevel switch
-        {
-            InkSmoothingLevel.Low => Math.Max(0.95, runtime.MinPointDistance * 1.35),
-            InkSmoothingLevel.High => Math.Max(0.45, runtime.MinPointDistance * 0.75),
-            _ => Math.Max(0.65, runtime.MinPointDistance),
-        };
-
-        return deviceType switch
-        {
-            PointerDeviceType.Pen => baseLength * 0.9,
-            PointerDeviceType.Touch => baseLength * 1.1,
-            _ => baseLength,
-        };
-    }
+        PenKind.Highlighter => InkBrushes.HighlighterAlpha,
+        PenKind.Laser => InkBrushes.LaserAlpha,
+        _ => byte.MaxValue,
+    };
 
     private void OnInkRuntimeOptionsChanged(InkRuntimeSnapshot snapshot)
     {
@@ -433,75 +144,31 @@ public partial class AnnotationOverlayWindow : Window
 
     private void ApplyRuntimeOptions(InkRuntimeSnapshot snapshot)
     {
-        InkCanvasTuning.ApplyRuntimeMinPointDistance(snapshot.MinPointDistance, Surface);
-        var da = Surface.DefaultDrawingAttributes;
-        da.IgnorePressure = !snapshot.EnablePressure;
-        da.FitToCurve = snapshot.SmoothingLevel != InkSmoothingLevel.Low;
-        SyncDynamicRendererAttributes(da);
+        _surface.InkAttributes.IgnorePressure = !snapshot.EnablePressure;
     }
 
-    private static double TryReadTiltMagnitude(PointerMoveEventArgs p, InkCanvas canvas)
+    /// <summary>
+    /// 笔锋的注入点只有这一处：把应用侧的笔锋状态写进墨迹控件的 <c>TipSettings</c>。
+    /// <para>
+    /// 走的是引擎的快照往返（按参数名对齐、批量写），因此参数只改一次就只请求一次重绘。
+    /// 排队一拍的理由与墨迹偏好一致 —— 变更可能来自别的窗口的输入事件，
+    /// 同一拍里改画布属性会让那一拍的渲染读到半套参数。
+    /// </para>
+    /// </summary>
+    private void OnInkTipOptionsChanged()
     {
-        try
-        {
-            var point = p.GetCurrentPoint(canvas);
-            var props = point.Properties;
-            var t = props.GetType();
-            var x = t.GetProperty("XTilt")?.GetValue(props) as double?;
-            var y = t.GetProperty("YTilt")?.GetValue(props) as double?;
-            if (x is null || y is null)
-                return 0;
-            return Math.Sqrt((x.Value * x.Value) + (y.Value * y.Value));
-        }
-        catch
-        {
-            return 0;
-        }
+        Dispatcher.BeginInvoke(ApplyTipOptions);
     }
 
-    private sealed class InkInputMetrics
+    private void ApplyTipOptions()
     {
-        private readonly Stopwatch _watch = Stopwatch.StartNew();
-        private int _strokeCount;
-        private int _strokePointCount;
-        private int _intermediatePoints;
-        private int _tiltSamples;
-        private double _tiltSum;
+        InkTipOptions.ApplyTo(_surface.TipSettings);
+    }
 
-        internal int RebuiltStrokeCount { get; set; }
-
-        internal void OnIntermediatePoints(int count) => _intermediatePoints += count;
-
-        internal void OnStrokeCommitted(int strokePointCount)
-        {
-            _strokeCount++;
-            _strokePointCount += strokePointCount;
-        }
-
-        internal void OnTiltSample(double tiltMagnitude)
-        {
-            if (tiltMagnitude <= 0)
-                return;
-            _tiltSamples++;
-            _tiltSum += tiltMagnitude;
-        }
-
-        internal void EmitIfNeeded()
-        {
-            if (_watch.Elapsed < TimeSpan.FromSeconds(3))
-                return;
-
-            var avgStrokePoints = _strokeCount == 0 ? 0 : _strokePointCount / (double)_strokeCount;
-            var avgTilt = _tiltSamples == 0 ? 0 : _tiltSum / _tiltSamples;
-            Debug.WriteLine(
-                $"[ink-metrics] strokes={_strokeCount} avgPoints={avgStrokePoints:F1} inter={_intermediatePoints} rebuilt={RebuiltStrokeCount} avgTilt={avgTilt:F2}");
-            _watch.Restart();
-            _strokeCount = 0;
-            _strokePointCount = 0;
-            _intermediatePoints = 0;
-            _tiltSamples = 0;
-            _tiltSum = 0;
-            RebuiltStrokeCount = 0;
-        }
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        InkRuntimeOptions.Changed -= OnInkRuntimeOptionsChanged;
+        InkTipOptions.Changed -= OnInkTipOptionsChanged;
+        _surface.Dispose();
     }
 }

@@ -20,12 +20,24 @@
 
   <ItemGroup>
     <PackageReference Include="Jalium.UI" Version="26.10.9" />
+    <!-- 闭源 SDK：单个混淆过的 Dusk.dll，来自 ../dusk-feed（见 NuGet.config）。 -->
+    <PackageReference Include="Dusk" Version="1.0.1" />
+    <!--
+      Fluent 控件层：FluentJalium（Astra），源码直引。
+      它与本仓库同为 C:\git 下的兄弟目录；库自己只依赖 Jalium.UI.Controls + .Xaml，
+      桌面宿主（Jalium.UI.Desktop）由上面的 Jalium.UI 元包带进来。
+      墨迹引擎 Dusk 才需要 feed 那套版本仪式（要混淆、要闭源），这里没有那个理由。
+    -->
+    <ProjectReference Include="..\..\..\..\Jalium\FluentJalium\src\FluentJalium\FluentJalium.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Fluent(WinUI3) 主题字典：嵌入资源，启动时由 XamlReader 加载到应用资源 -->
-    <EmbeddedResource Include="Themes\Fluent\*.jalxaml" LogicalName="Themes/Fluent/%(Filename)%(Extension)" />
-    <EmbeddedResource Include="Themes\Fluent\Controls\*.jalxaml" LogicalName="Themes/Fluent/Controls/%(Filename)%(Extension)" />
+    <!--
+      应用自有主题：只有 FluentJalium 没有的东西 —— 实体浮层表面色、颜色色板。
+      控件外观全部由 FluentThemeManager.Apply 装入的库字典提供，这里不再自带任何一份。
+      嵌入资源、启动时由 FluentTheme 用 XamlReader 装载（与库自己的装载方式一致）。
+    -->
+    <EmbeddedResource Include="Themes\*.jalxaml" LogicalName="Themes/%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

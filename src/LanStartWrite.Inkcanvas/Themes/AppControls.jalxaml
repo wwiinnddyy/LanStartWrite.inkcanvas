@@ -1,0 +1,62 @@
+<!--
+  应用自有样式：只放 FluentJalium（Astra）没有的那几项，且一律 BasedOn 库的键往上加，
+  不另起一套尺度。为什么这几项算"库没有"：
+
+  - PenColorSwatchStyle    九色画笔色板是揽星书写自己的交互，WinUI 侧没有对应控件。
+  - SettingsCardStyle      库的 CardBorderStyle 只画卡片，不带设置页的行距与最小行高。
+  - HelperTextStyle / SectionTextStyle
+      库按 WinUI 原样发布字号尺度（BaseTextBlockStyle 那一族），不替宿主决定"辅助文字该是什么颜色"；
+      而 Design.MD §3 要的是页面标题 > 分组标题 > 条目名称 > 辅助说明四级，颜色与节奏得由应用钉一次。
+-->
+<ResourceDictionary xmlns="http://schemas.jalium.ui/2024"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style x:Key="PenColorSwatchStyle" TargetType="RadioButton">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="2" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="RadioButton">
+        <Grid Background="Transparent">
+          <Border Name="SelectionRing" Width="30" Height="30" CornerRadius="15" BorderThickness="2" BorderBrush="Transparent" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          <Border Name="Swatch" Width="22" Height="22" CornerRadius="11" Background="{TemplateBinding Background}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          <Border Name="SwatchFocus" Margin="0" BorderThickness="1" CornerRadius="4" BorderBrush="{StaticResource FocusStrokeColorOuterBrush}" Opacity="0" IsHitTestVisible="False" />
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True">
+            <Setter TargetName="SelectionRing" Property="BorderBrush" Value="{StaticResource ControlStrongStrokeColorDefaultBrush}" />
+          </Trigger>
+          <Trigger Property="IsChecked" Value="True">
+            <Setter TargetName="SelectionRing" Property="BorderBrush" Value="{StaticResource AccentFillColorDefaultBrush}" />
+          </Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True">
+            <Setter TargetName="SwatchFocus" Property="Opacity" Value="1" />
+          </Trigger>
+          <Trigger Property="IsPressed" Value="True">
+            <Setter TargetName="Swatch" Property="Width" Value="20" />
+            <Setter TargetName="Swatch" Property="Height" Value="20" />
+          </Trigger>
+          <Trigger Property="IsEnabled" Value="False">
+            <Setter TargetName="Swatch" Property="Opacity" Value="0.4" />
+            <Setter TargetName="SwatchFocus" Property="Opacity" Value="0" />
+          </Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style x:Key="SettingsCardStyle" TargetType="Border" BasedOn="{StaticResource CardBorderStyle}">
+    <Setter Property="Margin" Value="0,0,0,4" />
+    <Setter Property="MinHeight" Value="72" />
+  </Style>
+
+  <Style x:Key="HelperTextStyle" TargetType="TextBlock" BasedOn="{StaticResource CaptionTextBlockStyle}">
+    <Setter Property="Foreground" Value="{StaticResource TextFillColorSecondaryBrush}" />
+  </Style>
+
+  <Style x:Key="SectionTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+    <Setter Property="Margin" Value="0,24,0,8" />
+  </Style>
+</ResourceDictionary>

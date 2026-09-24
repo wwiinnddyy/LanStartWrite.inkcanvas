@@ -1,5 +1,14 @@
 # Fluent UI implementation and verification
 
+> **状态（2026-09-24）：本文的控制层部分已被取代。**
+> 本仓库那份手写 Fluent 层（`Themes/Fluent/` 1,067 行 + 四个自建控件类型）已整体下架，
+> 控件外观改由兄弟仓库 **FluentJalium（Astra）** 源码直引提供。当前权威事实与"换层实测换来的
+> 判断"记在 `AGENTS.md` 的『Critical: 控件层是 FluentJalium』一节；本文其余部分保留价值的是
+> **本应用自己的设计决定**（§1 窗口分层、实体浮层不用 acrylic、浮窗用原生坐标定位且不抢激活、
+> 拖动把手不能换成 Button）和 **仍未认证的验证清单**（文末），那几件事不因换层而失效。
+> 下面凡是写"本项目实现了 X 模板/几何/PART 契约"的句子，描述的已经是 FluentJalium 的实现，
+> 它自己的逐控件审计在 `C:/git/Jalium/FluentJalium/docs/astra/audits/`。
+
 ## Reference baseline
 
 - Framework: **Jalium.UI 26.10.9**, `.jalxaml` plus code-behind; neither WPF nor WinUI runtime controls.
@@ -13,9 +22,9 @@
   `https://github.com/Kinnara/ModernWpf/blob/master/docs/winui3-source-parity.md`
   and `ModernWpf.Controls/ToggleSwitch/ToggleSwitch.xaml`. This informs resource/state
   separation and documentation of framework-specific substitutions, not a WPF migration.
-- The explicitly requested `C:\git\Jalium` reference directories were located but are
-  outside the connected workspace's approved read roots. This review does **not** establish
-  equivalence with that inaccessible local ModernWpf checkout or its purported 1.0 revision.
+- `C:\git\Jalium\FluentJalium` was likewise recorded as inaccessible by an earlier revision
+  of this document. It is not: it is now a connected workspace directory and it **is** this
+  application's control layer.
 
 ## Covered application controls
 
@@ -25,9 +34,10 @@ sliders, radio buttons, ComboBox/ComboBoxItem, color swatches, text hierarchy, c
 tooltips and the floating pen menu. This is an application theme, not a port of the
 entire WinUI/Jalium control catalog.
 
-Resources live in `src/LanStartWrite.Inkcanvas/Themes/Fluent`. `FluentTheme.Initialize`
-loads exact embedded resource names, in dependency order, and fails with the resource
-name if a dictionary is missing or malformed. There is no silent partial-theme fallback.
+控件字典在 FluentJalium 里，由 `FluentThemeManager.Apply` 按它自己的 `Themes/Manifest.txt`
+装入（清单与内嵌资源双向校验，多一条少一条都是启动失败，不是静默默认）。应用侧只剩
+`Themes/AppTokens.jalxaml` 与 `Themes/AppControls.jalxaml` 两个文件，装的是库没有的那几项；
+`FluentTheme.Initialize` 装载它们，缺项直接抛，不做半成品主题。
 
 Light and Dark brush values come from the source's corresponding dictionaries.
 Application-specific accents are `#0078D4` / `#60CDFF`; hover/pressed accent brushes

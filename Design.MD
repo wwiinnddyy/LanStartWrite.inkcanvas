@@ -12,8 +12,10 @@
 
 - 使用 `.jalxaml + code-behind`，避免在运行时拼装复杂视图树。
 - 保持 `x:Name` 明确，交互控件在 code-behind 中强类型转换后使用。
-- 颜色优先 `ThemeResource`，仅在关键可读性场景使用显式色值。
-- 图标统一使用 `SymbolIcon + Symbol`，并在代码中集中设置画刷。
+- 颜色走主题资源键，仅在关键可读性场景使用显式色值。标记里用 `{StaticResource}` 是安全的，前提只有一个：
+  主题翻转改的是**已发布画笔实例的颜色**而不是换实例（FluentJalium 与应用自有 token 都是这么做的，UiSmoke 有 `ReferenceEquals` 那条守着）。
+- 图标统一使用 `FontIcon` + 显式 `FontFamily="Segoe Fluent Icons"`，码点取自 FluentJalium 的实测表；
+  **不在代码里给图标设本地 `Foreground`** —— 颜色由控件的 `IconInk` 活绑定 handed 下去，设了就压住那条绑定。
 - 布局优先 `Grid`（结构）+ `StackPanel`（流式），减少多层空 `Border` 套娃。
 
 ## 3. Win11 Fluent 对齐规则
@@ -50,6 +52,6 @@
 
 ## 6. 后续演进建议
 
-- 若 Jalium.UI 的 `NavigationView` 在当前版本稳定可用，优先迁移到 `NavigationView` 统一导航范式。
+- ~~若 `NavigationView` 稳定可用就优先迁移~~ —— 已迁：设置页用的是 FluentJalium 的 `FluentNavigationView`（2026-09-24）。
 - 将设置项绑定到配置模型（持久化），避免 UI 仅做展示。
 - 增加深色主题策略后，再放开“跟随系统主题”开关。

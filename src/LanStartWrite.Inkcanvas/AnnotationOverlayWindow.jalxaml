@@ -16,7 +16,8 @@
         AllowsTransparency="True"
         SystemBackdrop="None"
         ResizeMode="NoResize">
-    <InkCanvas x:Name="OverlayInk"
-               HorizontalAlignment="Stretch"
-               VerticalAlignment="Stretch"/>
+    <!-- 墨迹面不在标记里声明：由 code-behind new 出来塞进这个格子。 -->
+    <Grid x:Name="InkHost"
+          HorizontalAlignment="Stretch"
+          VerticalAlignment="Stretch"/>
 </Window>

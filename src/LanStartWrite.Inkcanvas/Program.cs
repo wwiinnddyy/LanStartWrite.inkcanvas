@@ -1,6 +1,7 @@
 using Jalium.UI;
 using Jalium.UI.Controls;
 using Jalium.UI.Interop;
+using Jalium.UI.Markup;
 
 namespace LanStartWrite.Inkcanvas;
 
@@ -13,17 +14,15 @@ internal static class Program
         var renderContext = RenderContext.GetOrCreateCurrent(RenderBackend.Auto);
         renderContext.DefaultRenderingEngine = RenderingEngine.Impeller;
 
-        // 全局主题键（静态）：暗色下 TextPrimary 为白，与浅色圆角批注栏不协调。
-        ResourceDictionary.CurrentThemeKey = "Light";
-
-        // 降低 InkCanvas 最小点距（反射），减轻快速书写时的采样丢弃。
-        InkCanvasTuning.ApplyStartupDefaults();
+        // FluentJalium 装的 dictionaries 是运行时用 XamlReader 解析的，
+        // 所以这一步必须排在任何 JALXAML 解析之前 —— 应用自己的页面也是。
+        ThemeLoader.Initialize();
 
         // 保持项目原有窗口生命周期：批注画布 / 工具栏的 Z 序逻辑依赖同一 Application
         // 中由主窗口显式 Show + Activate 后再进入消息循环。
         var app = new Application();
 
-        // 加载项目级 Fluent(WinUI3) 主题字典（token 在前、控件样式在后）。
+        // FluentJalium（Astra）主题字典 + 应用自有 token。必须在任何控件构造之前。
         AppPreferences.Initialize();
         FluentTheme.Initialize(app);
 

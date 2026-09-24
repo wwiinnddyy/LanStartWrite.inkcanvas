@@ -40,26 +40,48 @@
             <StackPanel Orientation="Horizontal"
                         VerticalAlignment="Center"
                         Background="Transparent">
+                <!--
+                  RadioToolToggleButton 是 AppBarToggleButton 的派生类型，而隐式样式按精确类型查，
+                  派生类型不保证命中 —— 所以这里显式点库的键名（FluentJalium 自己的派生控件也一律这么做）。
+                -->
                 <local:RadioToolToggleButton x:Name="MouseToolToggle"
+                                             Style="{StaticResource DefaultAppBarToggleButtonStyle}"
+                                             FocusVisualStyle="{StaticResource FocusVisualRingStyle}"
                                              IsCompact="True"
                                              Label="鼠标"
                                              Margin="2,0" />
                 <local:RadioToolToggleButton x:Name="PenToolToggle"
+                                             Style="{StaticResource DefaultAppBarToggleButtonStyle}"
+                                             FocusVisualStyle="{StaticResource FocusVisualRingStyle}"
                                              IsCompact="True"
                                              Label="笔"
                                              Margin="2,0" />
                 <local:RadioToolToggleButton x:Name="EraseToolToggle"
+                                             Style="{StaticResource DefaultAppBarToggleButtonStyle}"
+                                             FocusVisualStyle="{StaticResource FocusVisualRingStyle}"
                                              IsCompact="True"
                                              Label="橡皮"
                                              Margin="2,0" />
 
+                <AppBarButton x:Name="UndoToolbarButton"
+                              FocusVisualStyle="{StaticResource FocusVisualRingStyle}"
+                              IsCompact="True"
+                              Label="撤销"
+                              Margin="2,0" />
+                <AppBarButton x:Name="RedoToolbarButton"
+                              FocusVisualStyle="{StaticResource FocusVisualRingStyle}"
+                              IsCompact="True"
+                              Label="重做"
+                              Margin="2,0" />
+
                 <Border Width="1"
                         Height="26"
-                        Margin="{StaticResource CommandBarSeparatorMargin}"
+                        Margin="{StaticResource AppBarSeparatorMargin}"
                         Background="{StaticResource DividerStrokeColorDefaultBrush}"
                         VerticalAlignment="Center" />
 
                 <AppBarButton x:Name="SettingsToolbarButton"
+                              FocusVisualStyle="{StaticResource FocusVisualRingStyle}"
                               IsCompact="True"
                               Label="设置"
                               Margin="2,0"

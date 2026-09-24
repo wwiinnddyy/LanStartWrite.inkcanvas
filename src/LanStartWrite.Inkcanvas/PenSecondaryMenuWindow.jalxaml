@@ -3,28 +3,32 @@
  Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" WindowStyle="None"
  IsShowTitleBar="False" IsShowMinimizeButton="False" IsShowMaximizeButton="False" IsShowCloseButton="False" HasSystemMenu="False"
  AllowsTransparency="True" SystemBackdrop="None" Background="Transparent" Foreground="{StaticResource TextFillColorPrimaryBrush}">
-  <Border x:Name="PenMenuSurface" Margin="6" Padding="16" CornerRadius="8" Background="{StaticResource FlyoutPresenterBackgroundBrush}" BorderBrush="{StaticResource SurfaceStrokeColorDefaultBrush}" BorderThickness="1">
+  <Border x:Name="PenMenuSurface" Margin="6" Padding="16" CornerRadius="8" Background="{StaticResource FlyoutSurfaceBrush}" BorderBrush="{StaticResource SurfaceStrokeColorDefaultBrush}" BorderThickness="1">
     <StackPanel>
-      <TextBlock Text="画笔" Style="{StaticResource FluentBodyTextStyle}" FontWeight="SemiBold" />
+      <TextBlock Text="画笔" Style="{StaticResource BodyStrongTextBlockStyle}" />
       <Grid Margin="0,12,0,12">
         <Grid.ColumnDefinitions><ColumnDefinition Width="108" /><ColumnDefinition Width="16" /><ColumnDefinition Width="112" /></Grid.ColumnDefinitions>
         <Grid Width="108" Height="108">
           <Grid.RowDefinitions><RowDefinition Height="36" /><RowDefinition Height="36" /><RowDefinition Height="36" /></Grid.RowDefinitions>
           <Grid.ColumnDefinitions><ColumnDefinition Width="36" /><ColumnDefinition Width="36" /><ColumnDefinition Width="36" /></Grid.ColumnDefinitions>
-          <RadioButton x:Name="PenColorRing1" Grid.Row="0" Grid.Column="0" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#202020" ToolTip="黑色" /><RadioButton x:Name="PenColorRing2" Grid.Row="0" Grid.Column="1" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#D13438" ToolTip="红色" /><RadioButton x:Name="PenColorRing3" Grid.Row="0" Grid.Column="2" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#F26B1F" ToolTip="橙色" /><RadioButton x:Name="PenColorRing4" Grid.Row="1" Grid.Column="0" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#F2C811" ToolTip="黄色" /><RadioButton x:Name="PenColorRing5" Grid.Row="1" Grid.Column="1" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#107C10" ToolTip="绿色" /><RadioButton x:Name="PenColorRing6" Grid.Row="1" Grid.Column="2" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#00B7C3" ToolTip="青色" /><RadioButton x:Name="PenColorRing7" Grid.Row="2" Grid.Column="0" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#0078D4" ToolTip="蓝色" /><RadioButton x:Name="PenColorRing8" Grid.Row="2" Grid.Column="1" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#8764B8" ToolTip="紫色" /><RadioButton x:Name="PenColorRing9" Grid.Row="2" Grid.Column="2" GroupName="PenColor" Style="{StaticResource FluentColorSwatchStyle}" Background="#737373" ToolTip="灰色" />
+          <RadioButton x:Name="PenColorRing1" Grid.Row="0" Grid.Column="0" GroupName="PenColor" Style="{StaticResource PenColorSwatchStyle}" Background="#202020" ToolTip="黑色" /><RadioButton x:Name="PenColorRing2" Grid.Row="0" Grid.Column="1" GroupName="PenColor" Style="{StaticResource PenColorSwatchStyle}" Background="#D13438" ToolTip="红色" /><RadioButton x:Name="PenColorRing3" Grid.Row="0" Grid.Column="2" GroupName="PenColor" Style="{StaticResource PenColorSwatchStyle}" Background="#F26B1F" ToolTip="橙色" /><RadioButton x:Name="PenColorRing4" Grid.Row="1" Grid.Column="0" GroupName="PenColor" Style="{StaticResource PenColorSwatchStyle}" Background="#F2C811" ToolTip="黄色" /><RadioButton x:Name="PenColorRing5" Grid.Row="1" Grid.Column="1" GroupName="PenColor" Style="{StaticResource PenColorSwatchStyle}" Background="#107C10" ToolTip="绿色" /><RadioButton x:Name="PenColorRing6" Grid.Row="1" Grid.Column="2" GroupName="PenColor" Style="{StaticResource PenColorSwatchStyle}" Background="#00B7C3" ToolTip="青色" /><RadioButton x:Name="PenColorRing7" Grid.Row="2" Grid.Column="0" GroupName="PenColor" Style="{StaticResource PenColorSwatchStyle}" Background="#0078D4" ToolTip="蓝色" /><RadioButton x:Name="PenColorRing8" Grid.Row="2" Grid.Column="1" GroupName="PenColor" Style="{StaticResource PenColorSwatchStyle}" Background="#8764B8" ToolTip="紫色" /><RadioButton x:Name="PenColorRing9" Grid.Row="2" Grid.Column="2" GroupName="PenColor" Style="{StaticResource PenColorSwatchStyle}" Background="#737373" ToolTip="灰色" />
         </Grid>
         <StackPanel Grid.Column="2" VerticalAlignment="Center">
-          <RadioButton x:Name="PenKindPenRadio" GroupName="PenKind" Content="书写笔" Style="{StaticResource FluentRadioButtonStyle}" Margin="0,2" />
-          <RadioButton x:Name="PenKindHighlighterRadio" GroupName="PenKind" Content="荧光笔" Style="{StaticResource FluentRadioButtonStyle}" Margin="0,2" />
-          <RadioButton x:Name="PenKindLaserRadio" GroupName="PenKind" Content="激光笔" Style="{StaticResource FluentRadioButtonStyle}" Margin="0,2" />
+          <RadioButton x:Name="PenKindPenRadio" GroupName="PenKind" Content="书写笔" Margin="0,2" />
+          <RadioButton x:Name="PenKindHighlighterRadio" GroupName="PenKind" Content="荧光笔" Margin="0,2" />
+          <RadioButton x:Name="PenKindLaserRadio" GroupName="PenKind" Content="激光笔" Margin="0,2" />
         </StackPanel>
       </Grid>
       <Border Height="1" Background="{StaticResource DividerStrokeColorDefaultBrush}" Margin="0,0,0,12" />
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-        <TextBlock Text="粗细" Style="{StaticResource FluentBodyTextStyle}"  />
+        <TextBlock Text="粗细" Style="{StaticResource BodyTextBlockStyle}"  />
         <TextBlock x:Name="PenThicknessValueText" Grid.Column="1" FontSize="12" Foreground="{StaticResource TextFillColorSecondaryBrush}" VerticalAlignment="Center" />
       </Grid>
-      <Slider x:Name="PenThicknessSlider" Style="{StaticResource FluentSliderStyle}" Width="236" Margin="0,4,0,0" Minimum="1" Maximum="24" Value="4" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True" />
+      <Slider x:Name="PenThicknessSlider" Width="236" Margin="0,4,0,0" Minimum="1" Maximum="24" Value="4" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True" />
+      <Border Height="1" Background="{StaticResource DividerStrokeColorDefaultBrush}" Margin="0,12,0,12" />
+      <TextBlock Text="笔锋" Style="{StaticResource BodyTextBlockStyle}" />
+      <TextBlock x:Name="PenTipHintText" Text="起笔与收笔的形状。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+      <ComboBox x:Name="PenTipPresetComboBox" Width="236" Margin="0,6,0,0" />
     </StackPanel>
   </Border>
 </Window>
