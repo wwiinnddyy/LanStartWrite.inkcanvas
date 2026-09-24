@@ -153,6 +153,11 @@ public partial class AnnotationToolbarWindow : Window
             if (e.Key != Key.Escape) return;
             if (_penMenuVisible) HidePenSecondaryMenu();
             else if (_eraserMenuVisible) HideEraserSecondaryMenu();
+            else if (_whiteboard is not null && _whiteboard.ClearSelectionForEscape())
+            {
+                // 白板里选着东西时，Esc 的第一件事是"取消选择"而不是"退出这块画布"：
+                // 一次 Esc 就把整块白板收掉，用户下一次进来会以为是笔迹没了。
+            }
             else ToolbarTools.Select(FirstToolId(ToolbarToolKind.Mouse));
             e.Handled = true;
         };
@@ -353,12 +358,15 @@ public partial class AnnotationToolbarWindow : Window
         if (control is ContentControl content) content.Content = ToolbarToolVisuals.BuildContent(tool, 40);
 
         var description = ToolbarTools.Describe(tool);
-        AutomationProperties.SetName(control, $"{tool.Name}：{description}");
+        // 名字与图标都是"此刻"的：同一颗鼠标钮在白板里念作「选择」（呈现，不改存档里的 Name）。
+        var display = ToolbarToolVisuals.DisplayName(tool);
+        AutomationProperties.SetName(control, $"{display}：{description}");
         control.ToolTip = tool.Kind switch
         {
-            ToolbarToolKind.Pen => $"{tool.Name} · {description}（再点一次打开设置）",
-            ToolbarToolKind.Eraser => $"{tool.Name} · {description}（再点一次打开设置）",
-            _ => tool.Name,
+            ToolbarToolKind.Pen => $"{display} · {description}（再点一次打开设置）",
+            ToolbarToolKind.Eraser => $"{display} · {description}（再点一次打开设置）",
+            ToolbarToolKind.Mouse when ToolbarToolVisuals.SelectionHint is { } hint => $"{display}：{hint}",
+            _ => display,
         };
     }
 
@@ -663,7 +671,7 @@ public partial class AnnotationToolbarWindow : Window
         }
 
         var tool = ToolbarTools.Selected;
-        if (tool is null || tool.Kind == ToolbarToolKind.Mouse)
+        if (tool is null)
         {
             HidePenSecondaryMenu();
             HideEraserSecondaryMenu();
@@ -672,12 +680,27 @@ public partial class AnnotationToolbarWindow : Window
             return;
         }
 
+        if (tool.Kind == ToolbarToolKind.Mouse)
+        {
+            // 「选择」<b>不收起白板</b>：这一档的意思就是"留在这块底上，只是不写"。
+            // 引擎的编辑模式交给白板自己（None = 输入归宿主），窗口那边才有挑与挪的那一路。
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+            EnsureWhiteboard();
+            _whiteboard!.Surface.SetSelectMode(true);
+            PresentWhiteboard();
+            SyncUndoRedoState();
+            KeepToolbarForeground();
+            return;
+        }
+
         switch (tool.Kind)
         {
             case ToolbarToolKind.Pen:
                 HideEraserSecondaryMenu();
                 EnsureWhiteboard();
-                _whiteboard!.Surface.SetInkMode();
+                _whiteboard!.Surface.SetSelectMode(false);
+                _whiteboard.Surface.SetInkMode();
                 ApplyPenTool(_whiteboard.Surface, tool);
                 PresentWhiteboard();
                 SyncUndoRedoState();
@@ -687,7 +710,8 @@ public partial class AnnotationToolbarWindow : Window
             case ToolbarToolKind.Eraser:
                 HidePenSecondaryMenu();
                 EnsureWhiteboard();
-                _whiteboard!.Surface.SetEraseMode();
+                _whiteboard!.Surface.SetSelectMode(false);
+                _whiteboard.Surface.SetEraseMode();
                 ApplyEraserTool(_whiteboard.Surface, tool);
                 PresentWhiteboard();
                 SyncUndoRedoState();

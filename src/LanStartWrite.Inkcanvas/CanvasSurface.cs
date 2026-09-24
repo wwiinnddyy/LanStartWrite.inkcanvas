@@ -79,8 +79,41 @@ internal sealed class CanvasSurface
 
     // ------------------------------------------------------------- 工具与模式
 
+    /// <summary>
+    /// 选择态。<b>开的时候引擎的编辑模式设成 <see cref="InkEditingMode.None"/></b> ——
+    /// 那个成员在引擎里的注释就是"不接收墨迹输入（宿主自己在处理，例如双指缩放）"，
+    /// 这是它留给宿主的槽，不是一个我们绕过去的手法。
+    /// <para>
+    /// 关的时候不"恢复成上一个值"，而是按"上一次是写还是擦"这一个事实重发一遍：
+    /// 模式只有一个落点（引擎的 <c>EditingMode</c>），而"上一次是什么"记在这里，
+    /// 所以不会出现"从选择切回去结果两边都不对"。
+    /// </para>
+    /// </summary>
+    internal bool IsSelectMode { get; private set; }
+
+    /// <summary>上一次非选择态是擦除还是书写 —— 退出选择态时按它重发模式。</summary>
+    private bool _wasErasing;
+
+    internal void SetSelectMode(bool enabled)
+    {
+        if (enabled)
+        {
+            IsSelectMode = true;
+            _canvas.EditingMode = InkEditingMode.None;
+            return;
+        }
+
+        if (!IsSelectMode) return;
+        IsSelectMode = false;
+
+        if (_wasErasing) SetEraseMode();
+        else SetInkMode();
+    }
+
     internal void SetInkMode()
     {
+        IsSelectMode = false;
+        _wasErasing = false;
         _canvas.IsEraserMode = false;
     }
 
@@ -92,7 +125,9 @@ internal sealed class CanvasSurface
     /// <summary>换橡皮的擦法：面积擦＝引擎点擦，笔迹擦＝整笔摘除。</summary>
     internal void SetEraserMode(EraserMode mode)
     {
+        IsSelectMode = false;
         _eraserMode = mode;
+        _wasErasing = true;
         _canvas.EditingMode = mode == EraserMode.Stroke
             ? InkEditingMode.EraseByStroke
             : InkEditingMode.EraseByPoint;

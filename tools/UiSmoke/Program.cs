@@ -113,6 +113,9 @@ internal static class Program
         steps.Enqueue(CheckInkPreferenceLands);
         // 白板那两条读的是"下一拍才落地"的按钮状态，理由与上面那条相同（不能与发起那一拍同步断言）。
         steps.Enqueue(CheckWhiteboardUndoLands);
+        // 选择档排在它后面：它也要动全局的"眼前是哪块画布"，两步共用一个全局状态，
+        // 各自收尾都回到屏幕批注 + 两块画布都收起，才不会互相看见对方的残局。
+        steps.Enqueue(CheckWhiteboardSelect);
         QueueNavigationAnimationChecks(settings, steps);
         // 自愈那道网得真的在跑。它由 DispatcherTimer 驱动（1.5 秒一拍），
         // 而队列每拍 320ms、前面还压着一组导航动画检查 —— 排到最后，到这里早就过了一拍。
@@ -875,6 +878,181 @@ internal static class Program
         ToolbarTools.Select(ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id);
         Check(!CanvasSceneState.IsActive(CanvasScene.Whiteboard) && !toolbar.WhiteboardPresented,
             "回到屏幕批注：白板收起，两块画布都留在内存里（会话内还着）");
+
+        // 用完就收：这两块全屏窗口一直挂着会给后面的检查加重排负担
+        // （导航动画那组读的是中间帧，屏幕上多一块全屏面就是多一次合成）。
+        CloseWindow(toolbar);
+        _wbToolbar = null;
+        _wbBoard = null;
+        _wbAnnotation = null;
+    }
+
+    /// <summary>
+    /// 用完就收掉一个窗口。<b>不等收尾那趟</b>：这些检查建的是全屏画布窗口，
+    /// 挂着不动会给后面的时序检查加重排负担（导航动画那组读的就是中间帧）。
+    /// 收掉之后最后那趟统一的 <c>Close</c> 再叫一次是空操作。
+    /// </summary>
+    private static void CloseWindow(Window window)
+    {
+        window.Close();
+    }
+
+    /// <summary>
+    /// 送一个合成的指针事件到某个窗口的<b>冒泡口</b>（与用户那一条同路：
+    /// 白板注册的是 <c>PointerDown/Move/Up</c> 且 <c>handledEventsToo = true</c>）。
+    /// <para>落笔不这么做：引擎认不认一根"笔"还隔着设备类型与捕获那一层，那是 Dusk 自己探针的事。
+    /// 但挑、框、挪走的就是这些事件，所以这条合成路正好是要钉的那一条。</para>
+    /// </summary>
+    private static void SendPointer(Window target, RoutedEvent routed, uint id, Point position, PointerDeviceType device)
+    {
+        var point = new PointerPoint(id, position, device, true, new PointerPointProperties(), 1_000);
+        PointerEventArgs args = routed == UIElement.PointerMoveEvent
+            ? new PointerMoveEventArgs(point, ModifierKeys.None, 1_000)
+            : routed == UIElement.PointerUpEvent
+                ? new PointerUpEventArgs(point, ModifierKeys.None, 1_000)
+                : routed == UIElement.PointerCancelEvent
+                    ? new PointerCancelEventArgs(point, ModifierKeys.None, 1_000)
+                    : new PointerDownEventArgs(point, ModifierKeys.None, 1_000);
+        args.RoutedEvent = routed;
+        target.RaiseEvent(args);
+    }
+
+    /// <summary>白板上某一笔现在的第一个点（用来判断"整块挪了多少"与"撤销有没有原样回来"）。</summary>
+    private static Point2D FirstPointOf(CanvasSurface board, int index)
+    {
+        var stroke = board.Document.Strokes[index];
+        return new Point2D(stroke[0].X, stroke[0].Y);
+    }
+
+    /// <summary>
+    /// 白板的「选择」这一档。钉的是：
+    /// <list type="number">
+    /// <item>那颗钮此刻是"选择"（图标与说明都换了，存档里的身份没换），引擎收到的是 None；</item>
+    /// <item>点一笔挑中一笔、拖一个框挑中一批、点空处取消；</item>
+    /// <item>按住选框里挪动，<b>整块位移正好等于拖的那段</b>，而<b>一次拖拽只算一步撤销</b>；</item>
+    /// <item>选框真的算出来了（屏幕四角非空），删除走一步撤销；</item>
+    /// <item>换回书写那一档时选择自动作废（不留"框是空的却还能拖走东西"那种状态）。</item>
+    /// </list>
+    /// </summary>
+    private static void CheckWhiteboardSelect()
+    {
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        var mouseId = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id;
+        var penId = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen).Id;
+
+        // 进白板（手里是笔），再把那颗"鼠标"选中 —— 此刻它的意思是选择。
+        ToolbarTools.Select(penId);
+        ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        ToolbarTools.Select(mouseId);
+        toolbar.ForceRenderFrame();
+
+        var board = toolbar.Whiteboard!;
+        Check(board.IsSelecting && board.Surface.Canvas.EditingMode == InkEditingMode.None,
+            "白板里选中『鼠标』那颗 = 选择态，落到引擎是 None（不接收墨迹输入的那个宿主槽）");
+        Check(toolbar.WhiteboardPresented, "选择态下白板仍然留在屏上（这一档的意思不是退出这块画布）");
+
+        var mouseControl = toolbar.FindToolControl("mouse")!;
+        var mouseTip = (string?)mouseControl.ToolTip;
+        Check(mouseTip is string hint && hint.StartsWith("选择", StringComparison.Ordinal),
+            $"那颗钮此刻念作「选择」：{mouseTip}");
+        Check(Descendants(mouseControl).OfType<FontIcon>().Any(icon => icon.Glyph == char.ConvertFromUtf32(0xE8B3)),
+            "而且图标换成了选择那一格（E8B3，实测 ink=401）");
+
+        // ---------------------------------------------------------- 两笔板上的内容
+        CommitStroke(board.Surface, 200, 200);
+        CommitStroke(board.Surface, 900, 700);
+        Check(board.Surface.Document.Count == 2, "往白板文档里落两笔（后面都按这两笔判）");
+
+        // 点在笔上 = 挑中这一笔
+        SendPointer(board, UIElement.PointerDownEvent, 7, new Point(200, 200), PointerDeviceType.Pen);
+        SendPointer(board, UIElement.PointerUpEvent, 7, new Point(200, 200), PointerDeviceType.Pen);
+        Check(board.SelectedStrokeCount == 1, $"点在一笔上：挑中 {board.SelectedStrokeCount} 笔（容差 12 DIP）");
+        Check(board.AdornerFrameCorners is { Count: 4 }, "选框也算出来了（屏幕四角，不是矩形包围盒）");
+
+        // 拖一个框 = 两笔都进来
+        SendPointer(board, UIElement.PointerDownEvent, 8, new Point(60, 60), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerMoveEvent, 8, new Point(1100, 900), PointerDeviceType.Mouse);
+        Check(board.AdornerMarquee is { } marquee && marquee.Width > 1000,
+            $"拖动途中框选矩形在长（实测宽 {board.AdornerMarquee?.Width:0}）");
+        SendPointer(board, UIElement.PointerUpEvent, 8, new Point(1100, 900), PointerDeviceType.Mouse);
+        Check(board.SelectedStrokeCount == 2, $"拖一个框圈住两笔：现在选中 {board.SelectedStrokeCount} 笔");
+        Check(board.AdornerMarquee is null, "抬手之后框选矩形擦掉（留下后会一直挂在屏幕上）");
+
+        // 按住选框里挪动：整块位移 == 拖的那段，而且一次拖拽只算一步
+        var before0 = FirstPointOf(board.Surface, 0);
+        var before1 = FirstPointOf(board.Surface, 1);
+        SendPointer(board, UIElement.PointerDownEvent, 9, new Point(560, 500), PointerDeviceType.Mouse);
+        Check(board.Surface.History.HasOpenBatch, "按住已选中的那一块就开始了一批（一次拖拽 = 一步撤销的前提）");
+        for (var i = 1; i <= 3; i++)
+        {
+            SendPointer(board, UIElement.PointerMoveEvent, 9, new Point(560 + i * 30, 500 + i * 15), PointerDeviceType.Mouse);
+        }
+
+        SendPointer(board, UIElement.PointerUpEvent, 9, new Point(650, 545), PointerDeviceType.Mouse);
+        Check(!board.Surface.History.HasOpenBatch, "抬手收口这一批");
+        var moved0 = FirstPointOf(board.Surface, 0);
+        var moved1 = FirstPointOf(board.Surface, 1);
+        Check(System.Math.Abs(moved0.X - before0.X - 90) < 0.01 && System.Math.Abs(moved0.Y - before0.Y - 45) < 0.01,
+            $"两笔一起走，位移正好是拖的那段（实测 Δ=({moved0.X - before0.X:0}, {moved0.Y - before0.Y:0})，拖了 (90, 45)）");
+        Check(System.Math.Abs(moved1.X - before1.X - 90) < 0.01,
+            "隔壁那一笔的位移与这一笔相同（整块挪，不是逐笔各算各的）");
+
+        board.Surface.Undo();
+        var undone0 = FirstPointOf(board.Surface, 0);
+        Check(System.Math.Abs(undone0.X - before0.X) < 0.01 && System.Math.Abs(undone0.Y - before0.Y) < 0.01,
+            $"拖三拍之后一次撤销原样回来（现在第一笔在 ({undone0.X:0}, {undone0.Y:0})，原来是 ({before0.X:0}, {before0.Y:0})）");
+        Check(!board.Surface.CanUndo || board.Surface.CanRedo, "撤销之后有得重做（这一批确实是一步）");
+        board.Surface.Redo();
+
+        // 点空处 = 取消选择
+        SendPointer(board, UIElement.PointerDownEvent, 10, new Point(1400, 1200), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerUpEvent, 10, new Point(1400, 1200), PointerDeviceType.Mouse);
+        Check(board.SelectedStrokeCount == 0 && board.AdornerFrameCorners is null,
+            "点一下空处：选择取消，选框也没了");
+
+        // 换档与"选择集会不会过期"。引擎的文档不反向清理选择集（被擦掉的编号一直留在里面），
+        // 所以"选择还新不新"只有宿主管得着 —— 这两条分别钉住两个方向：
+        // 只是去写一会儿（选择该留着，回来不用重挑）与真的动了文档（选择必须作废）。
+        // 点的位置取<b>文档现在的值</b>：上面拖过又重做过，那一笔已经不在原来的坐标上了
+        // （按老位置点会挑空 —— 这个测试自己先踩过一次）。
+        var live = FirstPointOf(board.Surface, 0);
+        var liveScreen = new Point(live.X, live.Y);
+        SendPointer(board, UIElement.PointerDownEvent, 11, liveScreen, PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerUpEvent, 11, liveScreen, PointerDeviceType.Mouse);
+        Check(board.SelectedStrokeCount == 1, $"先挑回那一笔（它现在在 ({live.X:0}, {live.Y:0})）");
+
+        ToolbarTools.Select(penId);
+        Check(!board.IsSelecting && board.SelectedStrokeCount == 1,
+            "换到笔那一档：选择态关了，但选择留着（它是一份视图，回到选择那档还是这一笔）");
+        CommitStroke(board.Surface, 1300, 1200);
+        Check(board.Surface.Document.Count == 3 && board.SelectedStrokeCount == 0,
+            "落了一笔（文档变了）：旧选择当场作废 —— 否则就是「框是空的、却能拖走一串已经不存在的笔迹」");
+        ToolbarTools.Select(mouseId);
+
+        // 删除所选 = 一步撤销
+        ToolbarTools.Select(mouseId);
+        SendPointer(board, UIElement.PointerDownEvent, 12, new Point(60, 60), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerMoveEvent, 12, new Point(1500, 1400), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerUpEvent, 12, new Point(1500, 1400), PointerDeviceType.Mouse);
+        Check(board.SelectedStrokeCount == 3, "框住全部：三笔都选中");
+        Check(board.DeleteSelection() && board.Surface.Document.Count == 0,
+            "删除所选：三笔一起摘掉");
+        board.Surface.Undo();
+        Check(board.Surface.Document.Count == 3,
+            "而这一次删除是一步撤销（不是一笔一次）");
+
+        // 收尾：回到屏幕批注 + 两块画布都收起（下一步还有检查，别留全屏窗口）
+        ToolbarTools.Select(mouseId);
+        ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        ToolbarTools.Select(ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id);
+        Check(!CanvasSceneState.IsActive(CanvasScene.Whiteboard)
+            && !toolbar.WhiteboardPresented && !toolbar.CanvasPresented,
+            "收尾：选择档验完就回到屏幕批注，两块画布都收起");
+        CloseWindow(toolbar);
     }
 
     private static void CheckPenMenu()

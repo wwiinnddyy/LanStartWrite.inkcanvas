@@ -47,7 +47,11 @@ internal static class ToolbarToolVisuals
     /// </summary>
     internal static ushort GlyphFor(ToolbarTool tool) => tool.Kind switch
     {
-        ToolbarToolKind.Mouse => 0xE7C9,       // TouchPointer
+        // 同一颗钮在两块画布上是两件事：批注里"鼠标"= 把桌面还回去，白板里 = 挑墨迹、挪墨迹。
+        // 换的是呈现，不换身份（存档里的 Id 仍是 mouse、Name 仍不动）。
+        ToolbarToolKind.Mouse => CanvasSceneState.IsActive(CanvasScene.Whiteboard)
+            ? (ushort)0xE8B3        // SelectAll，实测 ink=401
+            : (ushort)0xE7C9,       // TouchPointer，ink=338
         ToolbarToolKind.Pen => 0xE76D,         // InkingTool
         ToolbarToolKind.Eraser => 0xE75C,      // EraseTool
         ToolbarToolKind.Undo => 0xE7A7,        // Undo
@@ -56,6 +60,27 @@ internal static class ToolbarToolVisuals
         ToolbarToolKind.Whiteboard => 0xE786,  // Slideshow，ink=389
         _ => 0xE76D,
     };
+
+    /// <summary>
+    /// 这颗钮<b>此刻</b>念作什么。<b>存档里的 <c>Name</c> 一个字都不动</b>：
+    /// 改的是呈现，不是用户给这颗钮起的名字。
+    /// <para>
+    /// 与 <see cref="GlyphFor"/> 放在同一个类里是同一条理由 —— 批注栏与设置页那份列表画的是
+    /// 同一颗钮，"按场景换说法"这件事抄两处，迟早出现"列表里写鼠标、工具栏上画选择"。
+    /// </para>
+    /// </summary>
+    internal static string DisplayName(ToolbarTool tool) =>
+        tool.Kind == ToolbarToolKind.Mouse && CanvasSceneState.IsActive(CanvasScene.Whiteboard)
+            ? "选择"
+            : tool.Name;
+
+    /// <summary>
+    /// 「选择」在白板里到底能干什么 —— 一句就懂，不用说"再点一次试试"。
+    /// <para>批注那侧没有这句：那里的鼠标档是"退出这块画布"，名字本身就是说清了的。</para>
+    /// </summary>
+    internal static string? SelectionHint => CanvasSceneState.IsActive(CanvasScene.Whiteboard)
+        ? "点一下挑中笔迹，拖一个框圈住一批，按住选中块拖动就整块挪走（一笔拖拽算一步撤销）"
+        : null;
 
     internal static FontIcon Icon(ToolbarTool tool, double size) => new()
     {
