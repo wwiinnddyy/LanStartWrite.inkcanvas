@@ -25,10 +25,13 @@ cp -a "$PUBLISH_DIR/." "$APPDIR/usr/bin/"
 chmod +x "$APPDIR/usr/bin/$EXEC_NAME"
 
 # 2) 桌面文件与图标：AppImage 的集成约定（appid 与 .desktop 的 Icon= 必须同名）。
+#    根目录那一份不是冗余 —— appimagetool 就找 AppDir 根下的 <appid>.desktop 与 <appid>.png，
+#    只有 usr/share 那一份时它直接 "Desktop file not found, aborting"（实测红过一次）。
 mkdir -p "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 cp "$(dirname "$0")/lanstartwrite.desktop" "$APPDIR/usr/share/applications/$LOWER_APPID.desktop"
 cp "$(dirname "$0")/$LOWER_APPID.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/$LOWER_APPID.png"
 cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/$LOWER_APPID.png" "$APPDIR/$LOWER_APPID.png"
+cp "$APPDIR/usr/share/applications/$LOWER_APPID.desktop" "$APPDIR/$LOWER_APPID.desktop"
 
 # 3) AppRun：AppImage 的入口就是这个脚本，它进的是 usr/bin 里那个可执行文件。
 #    自己写死，而不是让工具去推导。

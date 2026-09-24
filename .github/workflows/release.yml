@@ -194,12 +194,17 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # appimagetool（continuous 那一支）硬要 desktop-file-validate，缺了就打出这行然后退出码 1：
-          # "desktop-file-validate command is missing, please install it"。runner 镜像里没预装。
-          command -v desktop-file-validate >/dev/null || {
+          # appimagetool 的两个硬依赖：desktop-file-validate（缺了直接退出码 1，实测红过）、
+          # 以及 mksquashfs（产 AppImage 本体）。runner 镜像里前者没有，所以按需 apt 补一次。
+          missing=""
+          command -v desktop-file-validate >/dev/null || missing="$missing desktop-file-utils"
+          command -v mksquashfs >/dev/null || missing="$missing squashfs-tools"
+          if [ -n "$missing" ]; then
             sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends desktop-file-utils
-          }
+            # shellcheck disable=SC2086
+            sudo apt-get install -y --no-install-recommends $missing
+          fi
+          echo "补齐：${missing:-都不缺}"
           # 打包工具（appimagetool）由脚本自己取：它得先解包再跑，CI 上没有 FUSE。
           chmod +x packaging/linux/build-appimage.sh
           packaging/linux/build-appimage.sh publish "$VERSION" dist
