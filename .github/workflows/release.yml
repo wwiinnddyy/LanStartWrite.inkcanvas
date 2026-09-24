@@ -304,17 +304,20 @@ jobs:
           cp -a publish "$(dirname "$manifest")/files"
           # 一趟做完：build + 装进 --install + 导出进 --repo。分两趟会红在
           # "App dir '/tmp/bc' is not empty"（第一趟失败留下的状态），还白花一倍时间。
-          time flatpak-builder --user --assumeyes --force-clean             --repo=/tmp/repo --state-dir=/tmp/fbstate --install=/tmp/inst /tmp/bc "$manifest"
+          # --install 不带路径 = 装进 --user 那个默认安装，这样下面能用 flatpak 自己去查，
+          # 而不是猜它把树落在 /tmp/inst 的第几层（上一轮就是栽在这：builder rc=0，
+          # 我的 find 找不到东西，红得像是打包失败）。
+          time flatpak-builder --user --assumeyes --force-clean             --repo=/tmp/repo --state-dir=/tmp/fbstate --install /tmp/bc "$manifest"
           echo "builder rc=$?"
-          echo "== 装进去的东西 =="
-          # --install 的落位层级不靠猜（上一轮这里 ls 了一个不存在的路径，
-          # ls 失败却没人看退出码 —— job 照样绿，等于什么都没验）。find 出来并断言非空。
-          for want in lanstartwrite LanStartWrite.Inkcanvas "$appid.desktop" "$appid.png"; do
-            hit=$(find /tmp/inst -name "$want" -print -quit 2>/dev/null)
-            echo "  $want -> ${hit:-<没找到>}"
-            [ -n "$hit" ] || { echo "::error 沙箱树里没有 $want"; exit 1; }
-          done
-          du -sh /tmp/inst 2>/dev/null
+          echo "== 进沙箱里问它自己有什么 =="
+          flatpak list --app --columns=application,version,size 2>&1 | head -4
+          timeout 180 flatpak run --command=sh "$appid" -c '
+            test -x /app/bin/lanstartwrite || { echo "缺 /app/bin/lanstartwrite"; exit 1; }
+            test -x /app/lib/lanstartwrite/LanStartWrite.Inkcanvas || { echo "缺 apphost"; exit 1; }
+            ls /app/share/applications /app/share/icons/hicolor/256x256/apps
+            echo SANDBOX-OK'
+          echo "sandbox check rc=$?"
+          timeout 180 flatpak run --command=sh "$appid" -c 'test -x /app/bin/lanstartwrite'             || { echo "::error 沙箱里没有可执行入口"; exit 1; }
           echo "== 打单文件 .flatpak =="
           flatpak build-bundle /tmp/repo "/tmp/$appid.flatpak" "$appid" 2>&1 | tail -3
           out="dist/LanStartWrite.Inkcanvas-$VERSION-linux-x64.flatpak"
@@ -400,17 +403,18 @@ jobs:
           fill() {
             sed -e "s#@APPID@#$appid#g" -e "s#@LLVERSION@#$llversion#"                 -e "s#@DEBNAME@#$(basename "$deb")#" -e "s#@DEBSHA256@#$sha#"                 -e "s#@DEBURL@#$1#" "$repo/packaging/linux/linglong.yaml.in" > "$proj/linglong.yaml"
           }
-          fill "file://$deb"
+          ( cd dist && python3 -m http.server 8099 >/tmp/httpd.log 2>&1 ) &
+          httpd=$!
+          trap 'kill $httpd 2>/dev/null' EXIT
+          sleep 2
+          fill "http://127.0.0.1:8099/$(basename "$deb")"
           echo "== 填好的 linglong.yaml =="; cat "$proj/linglong.yaml"
+          echo "== wget 自测（同一台机上、同一个 URL）=="
+          wget -q -O /dev/null "http://127.0.0.1:8099/$(basename "$deb")" && echo "  本地取包 OK"
           cd "$proj"
           time timeout 1500 ll-builder build; rc=$?
-          echo "build(file://) rc=$rc"
-          if [ "$rc" != 0 ]; then
-            echo "== 换相对路径重试 =="
-            fill "./$(basename "$deb")"
-            time timeout 1500 ll-builder build; rc=$?
-            echo "build(relative) rc=$rc"
-          fi
+          echo "build rc=$rc"
+          kill $httpd 2>/dev/null
           echo "== export（先把它认的参数打出来，不猜 flag：--uab 就不是）=="
           ll-builder export --help-all 2>&1 | head -24
           timeout 900 ll-builder export; echo "export rc=$?"
