@@ -40,6 +40,11 @@ public partial class WhiteboardWindow : Window
 
     private readonly CanvasSurface _surface;
     private readonly SelectionAdorner _adorner = new();
+    private readonly TouchGestureTracker _gestures = new();
+
+    /// <summary>捏合的上下限：拉到 0.2 倍看得见整版板书，拉到 8 倍够写最细的字。</summary>
+    private const double MinZoom = 0.2;
+    private const double MaxZoom = 8;
 
     private enum Drag
     {
@@ -62,6 +67,13 @@ public partial class WhiteboardWindow : Window
     }
 
     private Drag _drag;
+
+    /// <summary>
+    /// 手指按在空处、<b>还没确定</b>这是框选还是一次捏合的开始。
+    /// 确定之前不清旧选择 —— 捏合完发现选择没了，是用户绝对没料到的账。
+    /// </summary>
+    private bool _pendingEmptyClear;
+
     private int _dragHandle = -1;
     private int _dragPointerId = -1;
     private Point _pressScreen;
@@ -259,14 +271,24 @@ public partial class WhiteboardWindow : Window
     private void OnPointerDown(object sender, PointerDownEventArgs e)
     {
         if (!_surface.IsSelectMode) return;
-        if (_drag != Drag.None) return;   // 第二指落下的那一路属于双指手势（见 TouchGestureTracker）
-
         if (Local(e) is not { } screen) return;
 
-        _dragPointerId = (int)e.Pointer.PointerId;
+        // 双指优先：只有手指参与手势（笔态下多指各写各的，是 owner 定的规则，不是漏掉）。
+        var id = (int)e.Pointer.PointerId;
+        var isTouch = e.Pointer.PointerDeviceType == PointerDeviceType.Touch;
+        if (isTouch && _gestures.Down(id, screen))
+        {
+            AbandonDragForGesture();
+            return;
+        }
+
+        if (_gestures.IsActive || _gestures.IsParked(id) || _drag != Drag.None) return;
+
+        _dragPointerId = id;
         _pressScreen = _lastScreen = screen;
         var world = ToWorld(screen);
         var selection = _surface.Document.Selection;
+        _pendingEmptyClear = false;
 
         // 1) 手柄优先：画出来的那一颗必须就是点得中的那一颗（同一张表、同一个容差）。
         if (!selection.IsEmpty && HandleAt(screen) is { } hit)
@@ -302,8 +324,12 @@ public partial class WhiteboardWindow : Window
             return;
         }
 
-        // 3) 空处按下：鼠标与手指拖矩形，笔拖套索。
-        ClearSelection();
+        // 4) 空处按下：鼠标与手指拖矩形，笔拖套索。
+        // <b>手指那一路不当场清选择</b>：第二指马上落下就是捏合，而那一次"按在空处"根本不该
+        // 被当成"取消选择"。所以手指要等到它确实拖出了框（或抬手确认是个点）才清 ——
+        // 鼠标与笔不必延迟：它们不会变成双指手势，当场清才是"点空处取消"该有的手感。
+        _pendingEmptyClear = isTouch;
+        if (!isTouch) ClearSelection();
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen)
         {
             _drag = Drag.Lasso;
@@ -318,6 +344,44 @@ public partial class WhiteboardWindow : Window
         }
     }
 
+    /// <summary>
+    /// 第二指落下：把刚才那半笔单指动作<b>作废</b>。
+    /// <para>
+    /// 挪动那一路要额外撤掉自己 —— 批还没收口，而 <c>CanUndo</c> 只数已收口的步，
+    /// 所以必须先 <c>EndBatch</c>（把这半笔挪动收成一步）再 <c>Undo</c>（原样退回）。
+    /// 不这么做的话"想捏合却先拖了一下"会把板书留在挪歪的位置上，而用户从没打算挪它。
+    /// </para>
+    /// </summary>
+    private void AbandonDragForGesture()
+    {
+        var history = _surface.History;
+        var changed = history.OpenBatchChangeCount;
+
+        // <b>只有真的改到了东西才撤</b>：EndBatch 在零变更时不产生一步历史（引擎的语义），
+        // 这时再 Undo 就会弹掉<b>上一步真操作</b>。第一指落下、第二指紧跟着落下正是这种零变更
+        // —— 症状是"捏一下合少一笔"（而且长得像引擎的历史回放有毛病，实测干净板上 3→3 才排除掉）。
+        switch (_drag)
+        {
+            case Drag.Move:
+            case Drag.Scale:
+            case Drag.Rotate:
+                history.EndBatch();
+                if (changed > 0) history.Undo();
+                break;
+            default:
+                if (history.HasOpenBatch) history.EndBatch();
+                break;
+        }
+
+        _drag = Drag.None;
+        _dragHandle = -1;
+        _dragPointerId = -1;
+        _pendingEmptyClear = false;
+        _adorner.Marquee = null;
+        _adorner.LassoPoints = null;
+        _lassoWorld.Clear();
+    }
+
     private void BeginMove()
     {
         _drag = Drag.Move;
@@ -329,12 +393,24 @@ public partial class WhiteboardWindow : Window
 
     private void OnPointerMove(object sender, PointerMoveEventArgs e)
     {
-        if (_drag == Drag.None || (int)e.Pointer.PointerId != _dragPointerId) return;
-
+        if (!_surface.IsSelectMode) return;
         if (Local(e) is not { } screen) return;
+
+        var id = (int)e.Pointer.PointerId;
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch
+            && _gestures.Move(id, screen, out var pan, out var factor, out var anchor))
+        {
+            // 先平移后缩放：ZoomAt 保证锚点下的世界点不动，而它算的"当前视口"必须是刚平移过的那一个。
+            if (pan.X != 0 || pan.Y != 0) _surface.PanByScreen(pan.X, pan.Y);
+            if (System.Math.Abs(factor - 1) > 1e-9) _surface.ZoomAt(anchor, factor, MinZoom, MaxZoom);
+            return;
+        }
+
+        if (_drag == Drag.None || id != _dragPointerId) return;
 
         var dx = screen.X - _lastScreen.X;
         var dy = screen.Y - _lastScreen.Y;
+        var previous = _lastScreen;
         _lastScreen = screen;
 
         switch (_drag)
@@ -361,7 +437,11 @@ public partial class WhiteboardWindow : Window
 
             case Drag.Rotate:
                 var center = ToScreen(_frame.Center);
-                var before = System.Math.Atan2(_lastScreen.Y - center.Y, _lastScreen.X - center.X);
+
+                // 极角必须拿<b>上一拍</b>的点算：_lastScreen 在这里已经被上面覆盖成当前点了，
+                // 用它的结果就是 before == after、增量恒为 0 —— 症状是"旋转柄拖着完全没反应"，
+                // 而中心与半径两条断言都照样绿（它们对"什么都没发生"也成立）。
+                var before = System.Math.Atan2(previous.Y - center.Y, previous.X - center.X);
                 var after = System.Math.Atan2(screen.Y - center.Y, screen.X - center.X);
                 var deltaAngle = after - before;
                 if (double.IsFinite(deltaAngle) && System.Math.Abs(deltaAngle) > 1e-9)
@@ -374,6 +454,14 @@ public partial class WhiteboardWindow : Window
                 break;
 
             case Drag.Marquee:
+                if (_pendingEmptyClear && (System.Math.Abs(screen.X - _pressScreen.X) > ClickSlopScreen
+                        || System.Math.Abs(screen.Y - _pressScreen.Y) > ClickSlopScreen))
+                {
+                    // 拖出了框：这一指确定是框选，此刻才清掉旧选择。
+                    _pendingEmptyClear = false;
+                    ClearSelection();
+                }
+
                 _adorner.Marquee = new Rect(
                     System.Math.Min(_pressScreen.X, screen.X),
                     System.Math.Min(_pressScreen.Y, screen.Y),
@@ -397,9 +485,17 @@ public partial class WhiteboardWindow : Window
 
     private void OnPointerUp(object sender, PointerUpEventArgs e)
     {
+        _gestures.Reset();
         if (_drag == Drag.None || (int)e.Pointer.PointerId != _dragPointerId) return;
 
-        if (_drag == Drag.None) return;
+        var id = (int)e.Pointer.PointerId;
+        if (_gestures.ContactCount > 0 && e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
+        {
+            // 手势那几根手指的抬起先交还给追踪器：它们不是"选择的收尾"。
+            _gestures.Up(id);
+        }
+
+        if (_drag == Drag.None || id != _dragPointerId) return;
 
         var drag = _drag;
         _drag = Drag.None;
@@ -456,12 +552,14 @@ public partial class WhiteboardWindow : Window
 
     private void OnPointerCancel(object sender, PointerCancelEventArgs e)
     {
+        _gestures.Reset();
         if (_drag == Drag.None || (int)e.Pointer.PointerId != _dragPointerId) return;
 
         if (_drag is Drag.Move or Drag.Scale or Drag.Rotate) _surface.History.EndBatch();
         _drag = Drag.None;
         _dragHandle = -1;
         _dragPointerId = -1;
+        _pendingEmptyClear = false;
         _adorner.Marquee = null;
         _adorner.LassoPoints = null;
         _lassoWorld.Clear();

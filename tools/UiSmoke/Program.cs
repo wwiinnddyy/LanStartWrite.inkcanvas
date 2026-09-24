@@ -116,6 +116,7 @@ internal static class Program
         // 选择档排在它后面：它也要动全局的"眼前是哪块画布"，两步共用一个全局状态，
         // 各自收尾都回到屏幕批注 + 两块画布都收起，才不会互相看见对方的残局。
         steps.Enqueue(CheckWhiteboardSelect);
+        steps.Enqueue(CheckWhiteboardTransforms);
         QueueNavigationAnimationChecks(settings, steps);
         // 自愈那道网得真的在跑。它由 DispatcherTimer 驱动（1.5 秒一拍），
         // 而队列每拍 320ms、前面还压着一组导航动画检查 —— 排到最后，到这里早就过了一拍。
@@ -1045,12 +1046,57 @@ internal static class Program
         Check(board.Surface.Document.Count == 3,
             "而这一次删除是一步撤销（不是一笔一次）");
 
-        // ---------------------------------------------------------- 手柄：缩放与旋转
-        // 上面那次撤销已经把选择清了（撤销动了文档），所以这里从头框选一次再动手柄。
+        // 收尾：回到屏幕批注 + 两块画布都收起（后面还有检查，别留全屏窗口）
+        ToolbarTools.Select(ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id);
+        ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(!CanvasSceneState.IsActive(CanvasScene.Whiteboard)
+            && !toolbar.WhiteboardPresented && !toolbar.CanvasPresented,
+            "收尾：选择档验完就回到屏幕批注，两块画布都收起");
+        CloseWindow(toolbar);
+    }
+
+    /// <summary>
+    /// 白板的<b>变换与漫游</b>那组，单独一块干净的板、单独的窗口。
+    /// <para>
+    /// 为什么不和点选 / 框选 / 删除挤在同一次流程里：那块板上堆了四五轮"撤销 / 重做"之后，
+    /// 再撤一步会少一笔（引擎历史回放是按<b>位置</b>记账的，而 Remove 之后位置会变 ——
+    /// 这条账与白板无关，混在这里只会让"缩放的几何对不对"读不出答案）。分开之后每条断言
+    /// 都只依赖它自己那一步，红的时候说得出是谁的问题。
+    /// </para>
+    /// </summary>
+    private static void CheckWhiteboardTransforms()
+    {
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        var mouseId = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id;
+        var penId = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen).Id;
+        ToolbarTools.Select(penId);
+        ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        ToolbarTools.Select(mouseId);
+        toolbar.ForceRenderFrame();
+
+        var board = toolbar.Whiteboard!;
         Point Centroid(IReadOnlyList<Point> corners) => new(
             corners.Average(point => point.X), corners.Average(point => point.Y));
         double Distance(Point a, Point b) => System.Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+        double AngleOf(Point from, Point center) => System.Math.Atan2(from.Y - center.Y, from.X - center.X);
 
+        CommitStroke(board.Surface, 200, 200);
+        CommitStroke(board.Surface, 900, 700);
+        CommitStroke(board.Surface, 1300, 1200);
+        Check(board.Surface.Document.Count == 3, "变换那组：干净一块板上三笔");
+
+        SendPointer(board, UIElement.PointerDownEvent, 1, new Point(60, 60), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerMoveEvent, 1, new Point(1500, 1400), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerUpEvent, 1, new Point(1500, 1400), PointerDeviceType.Mouse);
+        Check(board.SelectedStrokeCount == 3 && board.AdornerHandles is { Count: 9 },
+            "框住全部并交出九颗手柄（八向 + 旋转柄）");
+
+        // ---------------------------------------------------------- 手柄：缩放与旋转
+        // 上面那次撤销已经把选择清了（撤销动了文档），所以这里从头框选一次再动手柄。
         SendPointer(board, UIElement.PointerDownEvent, 19, new Point(60, 60), PointerDeviceType.Mouse);
         SendPointer(board, UIElement.PointerMoveEvent, 19, new Point(1500, 1400), PointerDeviceType.Mouse);
         SendPointer(board, UIElement.PointerUpEvent, 19, new Point(1500, 1400), PointerDeviceType.Mouse);
@@ -1061,9 +1107,8 @@ internal static class Program
             $"选中之外交出九颗手柄（八向 + 旋转柄，实测 {handlesAtSelect?.Count} 颗）");
 
         // 拖右下角：对角（左上）必须钉在原地，而右下角正好走到手指那里 —— 这两条就是"以对角为锚"的
-        // 可测定义，不需要读任何内部状态。
-        // 量的是离锚点最远那一笔：stroke 0 的第一点几乎正好就是对角锚点，
-        // 拿它判"墨迹有没有被缩放"会得到一个恒等的 0 —— 第一版就是这么假绿了一次。
+        // 可测定义，不需要读任何内部状态。量的墨迹取<b>离锚点最远那一笔</b>：
+        // stroke 0 的第一点几乎正好就是对角锚点，拿它判"墨迹有没有被缩放"会得到一个恒等的 0。
         var preScale = FirstPointOf(board.Surface, 2);
         var cornerBefore = board.AdornerHandles![4];
         var anchorBefore = board.AdornerFrameCorners![0];
@@ -1099,6 +1144,7 @@ internal static class Program
         var preRotate = FirstPointOf(board.Surface, 0);
         var center0 = Centroid(board.AdornerFrameCorners!);
         var radius0 = Distance(board.AdornerFrameCorners![0], center0);
+        var corner0Before = board.AdornerFrameCorners![0];
         var handle0 = board.AdornerHandles![8];
         const double turn = 0.5;
         var cos = System.Math.Cos(turn);
@@ -1112,6 +1158,9 @@ internal static class Program
         var center1 = Centroid(board.AdornerFrameCorners!);
         Check(Distance(center1, center0) < 1.5,
             $"转了 {turn:0.0} 弧度而中心没跑（偏移 {Distance(center1, center0):0.00} DIP）");
+        var turnedAngle = AngleOf(board.AdornerFrameCorners![0], center1) - AngleOf(corner0Before, center0);
+        Check(System.Math.Abs(turnedAngle) > 0.3,
+            $"角真的转过了（左上角绕中心的极角变了 {turnedAngle:0.###} 弧度，目标 {turn:0.##}）—— 上一版没这条，框选也能让它绿");
         Check(System.Math.Abs(Distance(board.AdornerFrameCorners![0], center1) - radius0) < 1.5,
             $"角到中心的距离不变（{radius0:0} → {Distance(board.AdornerFrameCorners![0], center1):0}，刚体）");
         board.Surface.Undo();
@@ -1121,15 +1170,90 @@ internal static class Program
         Check(board.AdornerFrameCorners is null && board.SelectedStrokeCount == 0,
             "撤销动了文档 → 选择与选框一起作废（不会留下「框还在、内容已经回去」那种状态）");
 
-        // 收尾：回到屏幕批注 + 两块画布都收起（下一步还有检查，别留全屏窗口）
+        // ---------------------------------------------------------- 双指：缩放与平移
+        // 先把起点摆成"框住了三笔"：这样下面那句"选择没被搅掉"才是有内容的话
+        // （上一版直接跟在一次撤销后面跑，那时选择本来就是空的，断言恒真）。
+        SendPointer(board, UIElement.PointerDownEvent, 33, new Point(60, 60), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerMoveEvent, 33, new Point(1500, 1400), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerUpEvent, 33, new Point(1500, 1400), PointerDeviceType.Mouse);
+        var probeSelect = board.SelectedStrokeCount;
+        Check(probeSelect == 3,
+            $"捏合之前先框住三笔（下面那句『选择没被搅掉』才有内容）—— 实测选中 {probeSelect} 笔 / 文档 {board.Surface.Document.Count} 笔");
+
+        var view = board.Surface.View;
+        Check(System.Math.Abs(view.Viewport.Scale - 1) < 1e-9, "起点：白板也是 1:1（下面才看得出捏合真的改了缩放）");
+        var anchorScreen = new Point(600, 400);
+        var anchorWorld = view.ScreenToWorld(new Point2D(anchorScreen.X, anchorScreen.Y));
+        var strokesBeforePinch = board.Surface.Document.Count;
+
+        // 两指落下（相距 200），再拉到 400 —— 正好两倍。
+        SendPointer(board, UIElement.PointerDownEvent, 30, new Point(500, 400), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerDownEvent, 31, new Point(700, 400), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerMoveEvent, 30, new Point(400, 400), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerMoveEvent, 31, new Point(800, 400), PointerDeviceType.Touch);
+        Check(System.Math.Abs(view.Viewport.Scale - 2) < 1e-6,
+            $"两指拉开一倍，画面就放大一倍（实测 Scale={view.Viewport.Scale:0.####}）");
+        var anchorAfter = view.ScreenToWorld(new Point2D(anchorScreen.X, anchorScreen.Y));
+        Check(System.Math.Abs(anchorAfter.X - anchorWorld.X) < 1e-6 && System.Math.Abs(anchorAfter.Y - anchorWorld.Y) < 1e-6,
+            $"两指中点之下那个世界点没跑（({anchorWorld.X:0.####},{anchorWorld.Y:0.####}) → ({anchorAfter.X:0.####},{anchorAfter.Y:0.####})）—— 这就是「捏在哪、看哪」");
+
+        // 平移：两指同向走 50，间距不变 → 只平移。
+        var probe = new Point2D(300, 300);
+        var probeBefore = view.WorldToScreen(probe);
+        SendPointer(board, UIElement.PointerMoveEvent, 30, new Point(450, 400), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerMoveEvent, 31, new Point(850, 400), PointerDeviceType.Touch);
+        var probeAfter = view.WorldToScreen(probe);
+        Check(System.Math.Abs(view.Viewport.Scale - 2) < 1e-6,
+            $"同向拖不算缩放（Scale 仍是 {view.Viewport.Scale:0.####}）");
+        Check(System.Math.Abs(probeAfter.X - probeBefore.X - 50) < 0.5 && System.Math.Abs(probeAfter.Y - probeBefore.Y) < 0.5,
+            $"两指同向走 50，内容也正好走 50（实测 Δ={probeAfter.X - probeBefore.X:0.##}）");
+
+        // 抬到只剩一根：那根要"停住"，不能再拖出一个框选来。
+        SendPointer(board, UIElement.PointerUpEvent, 31, new Point(850, 400), PointerDeviceType.Touch);
+        var scaleParked = view.Viewport.Scale;
+        var offsetParkedX = view.Viewport.OffsetX;
+        SendPointer(board, UIElement.PointerMoveEvent, 30, new Point(90, 900), PointerDeviceType.Touch);
+        Check(System.Math.Abs(view.Viewport.Scale - scaleParked) < 1e-9 && view.Viewport.OffsetX == offsetParkedX,
+            "2 → 1 之后剩下那指没反应（不缩放也不漫游）");
+        Check(board.Surface.Document.Count == strokesBeforePinch,
+            $"整场捏合没写出笔迹（文档 {board.Surface.Document.Count} 笔，起手时 {strokesBeforePinch}）");
+        Check(board.SelectedStrokeCount == 3,
+            $"捏合没把选择搅掉（仍选中 {board.SelectedStrokeCount} 笔）");
+        SendPointer(board, UIElement.PointerUpEvent, 30, new Point(90, 900), PointerDeviceType.Touch);
+
+        // 手势结束之后，单指又回到"选择"这条路上（不然就是把手指永久禁了）。
+        SendPointer(board, UIElement.PointerDownEvent, 32, new Point(60, 60), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerMoveEvent, 32, new Point(1500, 1400), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerUpEvent, 32, new Point(1500, 1400), PointerDeviceType.Touch);
+        Check(board.AdornerFrameCorners is { Count: 4 }, "抬手之后单指拖框仍然能用（手势没把手指永久变成漫游）");
+
+        // 缩放之后橡皮半径仍按屏幕像素走：这条正面钉"EraserRadius 是世界单位"那个坑。
+        board.Surface.SetEraserRadius(20);
+        var worldAtZoom = board.Surface.Canvas.EraserRadius;
+        Check(System.Math.Abs(worldAtZoom - 10) < 0.01,
+            $"2 倍缩放下 20 屏幕像素的橡皮下发成 {worldAtZoom:0.####} 世界单位（屏幕上看着仍是 20）");
+
+        // 再捏回 1:1 —— 半径必须跟着重算回 20。这条钉的是"视口变了要重下发"那一步：
+        // 漏了它，缩放之后橡皮会一直停在旧的世界尺寸上，症状只是"橡皮忽然变笨或变肥"。
+        SendPointer(board, UIElement.PointerDownEvent, 40, new Point(450, 400), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerDownEvent, 41, new Point(850, 400), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerMoveEvent, 40, new Point(550, 400), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerMoveEvent, 41, new Point(750, 400), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerUpEvent, 40, new Point(550, 400), PointerDeviceType.Touch);
+        SendPointer(board, UIElement.PointerUpEvent, 41, new Point(750, 400), PointerDeviceType.Touch);
+        Check(System.Math.Abs(view.Viewport.Scale - 1) < 1e-6 && System.Math.Abs(board.Surface.Canvas.EraserRadius - 20) < 0.01,
+            $"捏回 1:1 之后半径自己回到 {board.Surface.Canvas.EraserRadius:0.####}（Scale={view.Viewport.Scale:0.####}）");
+
+        // 收尾：退出白板并收起，别把全屏窗口留给后面的检查
         ToolbarTools.Select(mouseId);
         ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         ToolbarTools.Select(ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id);
         Check(!CanvasSceneState.IsActive(CanvasScene.Whiteboard)
             && !toolbar.WhiteboardPresented && !toolbar.CanvasPresented,
-            "收尾：选择档验完就回到屏幕批注，两块画布都收起");
+            "收尾：变换那组验完回到屏幕批注，两块画布都收起");
         CloseWindow(toolbar);
     }
+
 
     private static void CheckPenMenu()
     {

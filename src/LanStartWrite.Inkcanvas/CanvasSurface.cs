@@ -5,6 +5,7 @@ using Dusk.Ink.Controls;
 using Dusk.Ink.Document;
 using Dusk.Ink.Model;
 using Dusk.Ink.Primitives;
+using Jalium.UI;
 using Jalium.UI.Controls;
 using Jalium.UI.Media;
 using Jalium.UI.Threading;
@@ -73,6 +74,20 @@ internal sealed class CanvasSurface
 
     /// <summary>世界 ↔ 屏幕。白板那一块的漫游、命中半径、橡皮半径换算都读它。</summary>
     internal InkCanvasView View => _canvas.View;
+
+    /// <summary>
+    /// 按屏幕位移漫游。<b>转发到引擎的公开入口</b>，与壳里那套中键拖拽走的是同一条门 ——
+    /// 所以程序化驱动（双指）与用鼠标中键拖，手感与落点换算完全一致。
+    /// </summary>
+    internal void PanByScreen(double screenDx, double screenDy) => _canvas.PanByScreen(screenDx, screenDy);
+
+    /// <summary>
+    /// 以屏幕点为锚点缩放。<b>锚点必须是手指那一点</b>：传别处的话画面会"跑偏"
+    /// （引擎文档里就写着这条）。这里额外带上上下限，是因为壳自己的入口不暴露这两个数。
+    /// </summary>
+    internal void ZoomAt(Point screenAnchor, double factor, double minScale, double maxScale) =>
+        _canvas.View.Viewport.ZoomAt(
+            new Point2D(screenAnchor.X, screenAnchor.Y), factor, minScale, maxScale);
 
     /// <summary>把这块面摆进宿主格子。摆哪儿、宿主有没有背景，是窗口的事。</summary>
     internal void AttachTo(Panel host) => host.Children.Add(_canvas);
