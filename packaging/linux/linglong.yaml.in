@@ -1,0 +1,54 @@
+# 玲珑（Linyaps）v2 应用包描述 —— 由 CI 填占位符后交给 ll-builder 构建。
+# 占位符：@APPID@ @LLVERSION@ @DEBNAME@ @DEBURL@ @DEBSHA256@
+#   用 .in 而不是直接可用的 yaml，是因为 version 与 deb 摘要每次都随发布变；
+#   真要把这份当模板本地跑，ll-builder 只认填好之后的样子。
+#
+# 路子取自官方文档 docs/pages/en/guide/building/deb_conversion.md：
+# 不把应用重编一遍，而是把已经造好的 .deb 摊进 $PREFIX（容器里就是 /opt/apps/<id>/files），
+# 再修 .desktop 的 Exec 指向容器内路径。
+version: "1"
+
+package:
+  id: @APPID@
+  name: lanstartwrite
+  # 玲珑的版本号参与更新比较，官方例子用的是四段（1.11.9.0）；三位补一段 .0。
+  version: @LLVERSION@
+  kind: app
+  description: |
+    揽星书写 —— 全屏批注与书写工具
+
+command: [/opt/apps/@APPID@/files/bin/lanstartwrite]
+
+base: org.deepin.base/25.2.1
+
+sources:
+  - kind: file
+    url: @DEBURL@
+    digest: @DEBSHA256@
+    name: @DEBNAME@
+
+build: |
+  set -e
+  SRC="/project/linglong/sources/@DEBNAME@"
+  rm -rf unpacked
+  # 首选 dpkg-deb；base 镜像里没有 dpkg 时退回 ar + tar（.deb 本来就是 ar 包着 data.tar.*）。
+  if command -v dpkg-deb >/dev/null 2>&1; then
+    dpkg-deb -R "$SRC" unpacked
+  else
+    mkdir -p unpacked/ar && ( cd unpacked/ar && ar x "$SRC" && tar -xf data.tar.* )
+    mv unpacked/ar/usr unpacked/ 2>/dev/null || true
+    mv unpacked/ar/opt unpacked/ 2>/dev/null || true
+  fi
+
+  # 载荷放 files/lib，入口自己写一层薄壳放 files/bin —— 与 deb / Flatpak 那两处的做法一致。
+  mkdir -p "$PREFIX/bin" "$PREFIX/share/applications" "$PREFIX/share/icons"
+  cp -a unpacked/opt/lanstartwrite "$PREFIX/lib/"
+  cp unpacked/usr/share/applications/*.desktop "$PREFIX/share/applications/"
+  cp -a unpacked/usr/share/icons/. "$PREFIX/share/icons/"
+  printf '#!/bin/sh\nexec "/opt/apps/@APPID@/files/lib/lanstartwrite/LanStartWrite.Inkcanvas" "$@"\n' \
+    > "$PREFIX/bin/lanstartwrite"
+  chmod 755 "$PREFIX/bin/lanstartwrite"
+
+  # 容器里入口是绝对路径：Exec 那个裸短名在沙箱 PATH 上找不到，改指 files/bin。
+  sed -i "s#^Exec=.*#Exec=/opt/apps/@APPID@/files/bin/lanstartwrite#" \
+    "$PREFIX/share/applications/@APPID@.desktop"

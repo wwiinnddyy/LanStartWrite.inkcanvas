@@ -1,0 +1,38 @@
+{
+  "app-id": "io.github.wwiinnddyy.lanstartwrite",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "23.08",
+  "sdk": "org.freedesktop.Sdk",
+  "command": "lanstartwrite",
+  "separate-locales": false,
+
+  "//finish-args": "dri + x11/wayland 是这套 GPU 渲染与覆盖层的最低集合。注意真实边界：X11 会话里批注栏能盖住别的应用；Wayland 会话里合成器不给无边框全屏输入覆盖层，屏幕批注这件事本来就做不到 —— 这不是打包能补的。不申请 --filesystem=host：偏好写在 XDG_DATA_HOME，flatpak 已把它映到 ~/.var/app/<id>/data。",
+  "finish-args": [
+    "--share=ipc",
+    "--device=dri",
+    "--socket=fallback-x11",
+    "--socket=wayland"
+  ],
+
+  "modules": [
+    {
+      "name": "lanstartwrite",
+      "buildsystem": "simple",
+      "//build-commands": "payload/ 与 meta/ 由下面 sources 的 dest 钉死，不靠 flatpak-builder 的落位习惯猜。装到 /app/lib/<短名> 再留一层 /app/bin 薄壳，是因为 .NET 的 apphost 要与它的全部 dll/native 同目录，而 .desktop 的 Exec 只写了短名。",
+      "build-commands": [
+        "mkdir -p /app/lib/lanstartwrite",
+        "cp -a payload/. /app/lib/lanstartwrite/",
+        "chmod +x /app/lib/lanstartwrite/LanStartWrite.Inkcanvas",
+        "printf '#!/bin/sh\\nexec /app/lib/lanstartwrite/LanStartWrite.Inkcanvas \"$@\"\\n' > /app/bin/lanstartwrite",
+        "chmod 755 /app/bin/lanstartwrite",
+        "install -Dm644 meta/io.github.wwiinnddyy.lanstartwrite.desktop /app/share/applications/io.github.wwiinnddyy.lanstartwrite.desktop",
+        "install -Dm644 meta/io.github.wwiinnddyy.lanstartwrite.png /app/share/icons/hicolor/256x256/apps/io.github.wwiinnddyy.lanstartwrite.png"
+      ],
+      "sources": [
+        { "type": "dir", "path": "files", "dest": "payload" },
+        { "type": "file", "path": "io.github.wwiinnddyy.lanstartwrite.desktop", "dest": "meta" },
+        { "type": "file", "path": "io.github.wwiinnddyy.lanstartwrite.png", "dest": "meta" }
+      ]
+    }
+  ]
+}

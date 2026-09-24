@@ -54,28 +54,17 @@ env:
   APPBASENAME: LanStartWrite.Inkcanvas
 
 jobs:
-  build:
-    name: 打包（${{ matrix.platform }}）
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            platform: windows-x64
-            rid: win-x64
-            target_framework: net10.0-windows
-            # 安装包在 packaging/dist 下（NSIS 脚本从自己的目录算相对路径，见该文件）。
-            artifact_glob: packaging/dist/*.exe
-          - os: ubuntu-latest
-            platform: linux-x64
-            rid: linux-x64
-            target_framework: net10.0
-            artifact_glob: dist/*.AppImage
-
+  # 版本号只在这儿算一次：build / flatpak / linglong / release 四个 job 的产物名与 tag 都取自它。
+  # 之前每个 job 自己解析一遍，tag 触发时 github.ref_name 还带着 v，产物名与 tag 会分叉。
+  resolve:
+    name: 解析版本号
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      self_contained: ${{ steps.v.outputs.self_contained }}
     steps:
-      - name: 校验并解析版本号
-        id: version
+      - name: 校验并解析
+        id: v
         shell: bash
         env:
           # 手动触发填的版本号经 env 进脚本，不直接插进 run 那一串：
@@ -101,6 +90,29 @@ jobs:
           echo "version=$raw" >> "$GITHUB_OUTPUT"
           echo "self_contained=$self_contained" >> "$GITHUB_OUTPUT"
 
+  build:
+    name: 打包（${{ matrix.platform }}）
+    runs-on: ${{ matrix.os }}
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x64
+            rid: win-x64
+            target_framework: net10.0-windows
+            # 安装包在 packaging/dist 下（NSIS 脚本从自己的目录算相对路径，见该文件）。
+            artifact_glob: packaging/dist/*.exe
+          - os: ubuntu-latest
+            platform: linux-x64
+            rid: linux-x64
+            target_framework: net10.0
+            artifact_glob: |
+              dist/*.AppImage
+              dist/*.deb
+
+    steps:
       - name: 签出本仓库
         uses: actions/checkout@v4
 
@@ -128,8 +140,8 @@ jobs:
       - name: 发布（${{ matrix.platform }}）
         shell: bash
         env:
-          VERSION: ${{ steps.version.outputs.version }}
-          SELF_CONTAINED: ${{ steps.version.outputs.self_contained }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          SELF_CONTAINED: ${{ needs.resolve.outputs.self_contained }}
           FLUENT_JALIUM: ${{ github.workspace }}/fluentjalium/src/FluentJalium/FluentJalium.csproj
         run: |
           dotnet publish src/LanStartWrite.Inkcanvas/LanStartWrite.Inkcanvas.csproj \
@@ -145,7 +157,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           # choco 装的 makensis 在本进程的 PATH 上还没有（PATH 是进程启动时那份），
           # 所以先找、找不到就装、装完按安装位置点名。
@@ -182,7 +194,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           # appimagetool 的两个硬依赖：desktop-file-validate（缺了直接退出码 1，实测红过）、
           # 以及 mksquashfs（产 AppImage 本体）。runner 镜像里前者没有，所以按需 apt 补一次。
@@ -196,36 +208,200 @@ jobs:
           fi
           echo "补齐：${missing:-都不缺}"
           # 打包工具（appimagetool）由脚本自己取：它得先解包再跑，CI 上没有 FUSE。
-          chmod +x packaging/linux/build-appimage.sh
+          chmod +x packaging/linux/build-appimage.sh packaging/linux/build-deb.sh
           packaging/linux/build-appimage.sh publish "$VERSION" dist
           ls -la dist
+
+      - name: Linux · deb
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          packaging/linux/build-deb.sh publish "$VERSION" amd64 dist
+          dpkg-deb -I dist/*.deb | sed -n '1,20p'
+          # APPID 在五个地方出现（appid 文件、.desktop 文件名与 Icon=、flatpak 清单、玲珑 yaml）——
+          # 抄不一致的症状是"装了三个各带一张默认图的同名应用"，所以扫一遍：
+          # 这一目录下任何 *.lanstartwrite 形状的名字都必须等于 appid 文件里那一个。
+          appid=$(cat packaging/linux/appid)
+          stale=$(grep -rhoE "[A-Za-z0-9_.-]+\.lanstartwrite" packaging/linux | sort -u | grep -vxF "$appid" || true)
+          if [ -n "$stale" ]; then
+            echo "::error packaging/linux 里有与 appid 不一致的标识：$stale（appid=$appid）"
+            exit 1
+          fi
+          test -f "packaging/linux/$appid.desktop" && test -f "packaging/linux/$appid.png"
+          grep -q "^Icon=$appid$" "packaging/linux/$appid.desktop"
+          echo "APPID 一致：$appid"
+
+      # deb 与 AppImage 里那份 .deb 之外，把裸发布目录也留一份：
+      # flatpak 与玲珑这两个 job 只装包，不再重跑一遍 dotnet publish（同一份产物、同一次编译）。
+      - name: 上传 Linux 发布目录（给 flatpak / 玲珑用）
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-publish-${{ needs.resolve.outputs.version }}
+          path: publish
+          if-no-files-found: error
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APPBASENAME }}-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+          name: ${{ env.APPBASENAME }}-${{ needs.resolve.outputs.version }}-${{ matrix.platform }}
           path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+  # Flatpak：清单在 packaging/linux/<appid>.json，载荷直接取 build 那个 job 的发布目录
+  # （同一份编译产物，不在这里再 publish 一遍 —— 两个 job 各编一次迟早会分出两个版本）。
+  flatpak:
+    name: Flatpak
+    needs: [build, resolve]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 签出本仓库
+        uses: actions/checkout@v4
+
+      - name: 取 Linux 发布目录
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-publish-${{ needs.resolve.outputs.version }}
+          path: publish
+
+      - name: 装工具链与运行时
+        shell: bash
+        run: |
+          set -e
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flatpak flatpak-builder bubblewrap
+          flatpak --version; flatpak-builder --version
+          flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          time flatpak install -y --user flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+
+      - name: 构建并打离线包
+        shell: bash
+        env:
+          APPID_FILE: packaging/linux/appid
+        run: |
+          set +e
+          appid=$(cat "$APPID_FILE")
+          manifest="packaging/linux/$appid.json"
+          # 清单里的 source 路径是相对清单文件算的，所以发布目录得搬到它旁边。
+          cp -a publish "$(dirname "$manifest")/files"
+          time flatpak-builder --user --assumeyes --force-clean \
+            --repo=/tmp/repo --state-dir=/tmp/fbstate /tmp/bc "$manifest"
+          echo "builder rc=$?"
+          echo "== 装进用户实例，验一下里面到底有什么 =="
+          flatpak-builder --user --install=/tmp/inst /tmp/bc "$manifest"
+          echo "install rc=$?"
+          flatpak info "$appid" 2>&1 | head -12
+          ls -la "/tmp/inst/files/$appid" 2>&1 | head -5
+          echo "== 打单文件 .flatpak =="
+          flatpak build-bundle /tmp/repo "$appid.flatpak" "$appid" 2>&1 | tail -3
+          mkdir -p dist && mv "$appid.flatpak" "dist/LanStartWrite.Inkcanvas-${{ needs.resolve.outputs.version }}-linux-x64.flatpak" 2>/dev/null
+          ls -la dist
+          if [ ! -s "dist/LanStartWrite.Inkcanvas-${{ needs.resolve.outputs.version }}-linux-x64.flatpak" ]; then
+            echo "::error 没有产出 .flatpak"
+            echo "环境硬约束：userns=$(cat /proc/sys/user/max_user_namespaces 2>&1) unprivileged_userns=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>&1)"
+            echo "bwrap 自检：$(bwrap --ro-bind / / --dev /dev --unshare-all echo ok 2>&1 | tail -1)"
+            exit 1
+          fi
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanStartWrite.Inkcanvas-${{ needs.resolve.outputs.version }}-linux-flatpak
+          path: dist/*.flatpak
+          if-no-files-found: error
+
+  # 玲珑 / Linyaps：不重编应用，把同一个 .deb 摊进容器（官方 deb_conversion 那条路）。
+  # 未知量两个：base 镜像 org.deepin.base 在海外 runner 上取不取得到；ll-builder 的容器构建
+  # 在 runner 那种受限环境里跑不跑得起来。所以下面留了 diagnostics，红也要红得能读。
+  linglong:
+    name: 玲珑（Linyaps）
+    needs: [build, resolve]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 签出本仓库
+        uses: actions/checkout@v4
+
+      - name: 取 Linux 发布目录
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-publish-${{ needs.resolve.outputs.version }}
+          path: publish
+
+      - name: 装 linglong-bin 与 linglong-builder
+        shell: bash
+        run: |
+          set -e
+          # 官方一键脚本用的就是这个 OBS（docs/pages/en/guide/start/install.md 里那份
+          # ci.deepin.com 的 xUbuntu_24.04 已经 404 了，实际目录名是 Ubuntu_24.04，且是 flat repo）。
+          echo "deb [trusted=yes] https://ppa.linyaps.org.cn/release/Ubuntu_24.04/ ./" \
+            | sudo tee /etc/apt/sources.list.d/linyaps.list
+          sudo apt-get update -qq
+          apt-cache policy linglong-bin linglong-builder | grep -aE "linglong|Candidate"
+          sudo apt-get install -y -qq linglong-bin linglong-builder
+          ll-builder --version; ll-cli --version
+
+      - name: 造 deb、填模板、构建并导出
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set +e
+          chmod +x packaging/linux/build-deb.sh
+          appid=$(cat packaging/linux/appid)
+          packaging/linux/build-deb.sh publish "$VERSION" amd64 dist
+          deb=$(ls dist/*.deb)
+          llversion=$(echo "$VERSION" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1.0/')
+          proj="/tmp/ll/$appid"; mkdir -p "$proj"
+          cp "$deb" "$proj/"
+          # url 先试 file:// 绝对路径；不行再试相对 ./ —— 文档只给了 https 的例子，本地写法没实测过。
+          fill() {
+            sed -e "s#@APPID@#$appid#g" -e "s#@LLVERSION@#$llversion#" \
+                -e "s#@DEBNAME@#$(basename "$deb")#" -e "s#@DEBSHA256@#$(sha256sum "$deb" | cut -d' ' -f1)#" \
+                -e "s#@DEBURL@#$1#" packaging/linux/linglong.yaml.in > "$proj/linglong.yaml"
+          }
+          fill "file://$(readlink -f "$deb")"
+          echo "== 填好的 linglong.yaml =="; cat "$proj/linglong.yaml"
+          cd "$proj"
+          time timeout 1500 ll-builder build; rc=$?
+          echo "build(file://) rc=$rc"
+          if [ "$rc" != 0 ]; then
+            echo "== 换相对路径重试 =="
+            fill "./$(basename "$deb")"
+            time timeout 1500 ll-builder build; rc=$?
+            echo "build(relative) rc=$rc"
+          fi
+          echo "== export =="
+          timeout 900 ll-builder export; echo "export rc=$?"
+          timeout 900 ll-builder export --uab 2>&1 | tail -3; echo "uab rc=$?"
+          find "$proj" -name "*.lca" -o -name "*.uab" | head
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          find "$proj" -name "*.lca" -o -name "*.uab" -exec cp {} "$GITHUB_WORKSPACE/out/" \; -print
+          if [ -z "$(ls -A "$GITHUB_WORKSPACE/out" 2>/dev/null)" ]; then
+            echo "::error 玲珑没产出 .lca / .uab —— 下面是环境硬约束"
+            echo "userns max=$(cat /proc/sys/user/max_user_namespaces 2>&1) unprivileged=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>&1)"
+            echo "fuse: $(ls -l /dev/fuse 2>&1 | tail -1)  crun: $(command -v crun || echo 缺)  uidmap: $(dpkg -l uidmap 2>/dev/null | tail -1)"
+            echo "repo list: $(ll-cli repo list 2>&1 | head -5)"
+            echo "base 能不能搜到: $(timeout 180 ll-cli search org.deepin.base 2>&1 | head -6)"
+            exit 1
+          fi
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanStartWrite.Inkcanvas-${{ needs.resolve.outputs.version }}-linux-linglong
+          path: out
           if-no-files-found: error
 
   release:
     name: 创建 Release
-    needs: build
+    needs: [build, flatpak, linglong, resolve]
     # 推 tag 一定发；手动触发要勾上那一格才发（不勾就只当探针跑一遍编译与打包）。
     if: ${{ github.event_name == 'push' || inputs.create_release }}
+
     runs-on: ubuntu-latest
     steps:
-      - name: 解析版本号
-        id: version
-        shell: bash
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: 下载全部构建产物
         uses: actions/download-artifact@v4
         with:
@@ -234,7 +410,7 @@ jobs:
       - name: 创建 GitHub Release（已存在就覆盖上传）
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         shell: bash
         run: |
           tag="v$VERSION"

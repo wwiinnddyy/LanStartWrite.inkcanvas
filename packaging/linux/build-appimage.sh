@@ -13,10 +13,11 @@ PUBLISH_DIR="${1:?用法: build-appimage.sh <publish 目录> <版本号> <输出
 VERSION="${2:?用法: build-appimage.sh <publish 目录> <版本号> <输出目录>}"
 OUTPUT_DIR="${3:?用法: build-appimage.sh <publish 目录> <版本号> <输出目录>}"
 
-LOWER_APPID="lanstartwrite"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+APPID="$(cat "$HERE/appid")"          # 三个格式共用的反 DNS 标识，见 packaging/linux/appid
 EXEC_NAME="LanStartWrite.Inkcanvas"
 # 目录名就是 AppImage 的 appid：appimagetool 拿它当卷标，去掉 .AppDir 后缀决定产物名。
-APPDIR="$(mktemp -d)/$LOWER_APPID.AppDir"
+APPDIR="$(mktemp -d)/$APPID.AppDir"
 
 mkdir -p "$APPDIR/usr/bin"
 
@@ -28,10 +29,10 @@ chmod +x "$APPDIR/usr/bin/$EXEC_NAME"
 #    根目录那一份不是冗余 —— appimagetool 就找 AppDir 根下的 <appid>.desktop 与 <appid>.png，
 #    只有 usr/share 那一份时它直接 "Desktop file not found, aborting"（实测红过一次）。
 mkdir -p "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
-cp "$(dirname "$0")/lanstartwrite.desktop" "$APPDIR/usr/share/applications/$LOWER_APPID.desktop"
-cp "$(dirname "$0")/$LOWER_APPID.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/$LOWER_APPID.png"
-cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/$LOWER_APPID.png" "$APPDIR/$LOWER_APPID.png"
-cp "$APPDIR/usr/share/applications/$LOWER_APPID.desktop" "$APPDIR/$LOWER_APPID.desktop"
+cp "$HERE/$APPID.desktop" "$APPDIR/usr/share/applications/$APPID.desktop"
+cp "$HERE/$APPID.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/$APPID.png"
+cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/$APPID.png" "$APPDIR/$APPID.png"
+cp "$APPDIR/usr/share/applications/$APPID.desktop" "$APPDIR/$APPID.desktop"
 
 # 3) AppRun：AppImage 的入口就是这个脚本，它进的是 usr/bin 里那个可执行文件。
 #    自己写死，而不是让工具去推导。

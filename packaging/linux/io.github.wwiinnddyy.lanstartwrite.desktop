@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=揽星书写
+Comment=全屏批注与书写工具
+# 三个格式（deb / Flatpak / 玲珑）共用这一份。文件名与 Icon= 都是反 DNS 的 APPID，
+# 各处按 <appid>.desktop / <appid>.png 落位，谁也不改写它 —— 一改就会出现
+# "菜单里是默认图" 或 "装了三个各带一张图的同名应用"。
+# Exec 用短名：deb 落在 /usr/bin、Flatpak 落在 /app/bin、AppImage 由 AppRun 接住。
+Exec=lanstartwrite
+Icon=io.github.wwiinnddyy.lanstartwrite
+Terminal=false
+Categories=Graphics;Office;
+StartupNotify=true
+StartupWMClass=LanStartWrite.Inkcanvas
