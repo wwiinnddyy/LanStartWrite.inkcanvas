@@ -5,7 +5,7 @@
 | 平台 | 产物 | 打法 |
 |---|---|---|
 | Windows | `LanStartWrite.Inkcanvas-<版本>-windows-x64-setup.exe` | NSIS（`packaging/windows/installer.nsi`） |
-| Linux | `LanStartWrite.Inkcanvas-<版本>-linux-x64.AppImage` | linuxdeploy（`packaging/linux/build-appimage.sh`） |
+| Linux | `LanStartWrite.Inkcanvas-<版本>-linux-x64.AppImage` | appimagetool（`packaging/linux/build-appimage.sh`，工具由脚本自己取并解包 —— CI 上没有 FUSE） |
 
 ## 怎么发一个版本
 
@@ -16,13 +16,14 @@
 
 - `self_contained`（默认开）：自带 .NET 运行时。关掉装包会小很多，但用户机器得装 .NET 10
   （Windows 要 Desktop Runtime；Linux 要 .NET Runtime）——AppImage 关掉就失去"开箱即跑"了。
-- `create_release`（默认开）：打完包是否建 GitHub Release 并上传产物。
+- `create_release`（默认**关**）：打完包是否建 GitHub Release 并上传产物。默认关是让它先当
+  "能不能编出来、能不能打出包"的探针反复跑；推 tag 那条路不受这一项影响，一定发。
 
 ## 两个仓库外依赖（工作流自己处理）
 
 | 依赖 | 怎么进 CI |
 |---|---|
-| FluentJalium（兄弟仓库，源码直引） | 工作流签出 `wwiinnddyy/FluentJalium`（ref 可用仓库变量 `FLUENT_JALIUM_REF` 钉住），再用 `-p:FluentJaliumProject=…` 指给编译器 |
+| FluentJalium（兄弟仓库，源码直引） | 工作流签出 `wwiinnddyy/FluentJalium` 的 **Astra** 分支（`main` 那份布局里没有 `src/FluentJalium`；ref 可用仓库变量 `FLUENT_JALIUM_REF` 钉到某个提交），再用 `-p:FluentJaliumProject=…` 指给编译器 |
 | Dusk（闭源 SDK，本机 feed 在 `../dusk-feed`） | `packaging/feed/` 里**随仓库带了一份拷贝**（NuGet.config 里第二个源，本机仍优先走 `../dusk-feed`） |
 
 ⚠️ `packaging/feed/` 里是闭源混淆包 —— 本仓库若转公开，这份拷贝必须挪走（换私有 feed 或 secret 下载）。
@@ -35,8 +36,11 @@
   都先 `OperatingSystem.IsWindows()`，非 Windows 返回"没生效 / 没有"。
   于是 Linux 上：**窗口层级不再排原生 Z 序**（模型照常运转）、**冻结模式降级为没有底图**、
   **穿透模式当前依赖 Win32 样式位与 `WM_NCHITTEST` 钩子，Linux 端暂未实现**。
-- **FluentJalium 必须多目标**（`net10.0-windows;net10.0`）：只发 windows 的话，应用在 net10.0
-  端引用它会报 NU1201。工作流里有一条兜底补丁（上游多目标之后即可删除）。
+- **FluentJalium 必须多目标**（`net10.0-windows;net10.0`）：这条不只是 Linux 那一端的事 ——
+  还原走的是整个双目标图，所以在 Windows 上 `publish -f net10.0-windows` 一样会去问
+  FluentJalium 的 net10.0 并红掉（实测：`error NU1201: Project FluentJalium is not compatible with net10.0`）。
+  工作流里那条兜底补丁因此**两端都跑**（上游多目标之后即为空操作，可删）。
+  本地现在能编过，是因为 `C:\git\Jalium\FluentJalium` 的工作副本已经多目标、但那两个提交还没推上去。
 - **Linux 产物里混着一些 Windows 原生 dll**（`jalium.native.*.dll`）：Jalium 的 build targets
   无条件拷贝所致，AppImage 里是死重（几 MB），不影响运行；该问题应报给上游。
 

@@ -12,8 +12,8 @@
 # 两个必须知道的依赖（都签出在仓库之外，见 fluentjalium 那一步）：
 #   - FluentJalium（兄弟仓库，源码直引）—— 默认签出 **Astra** 分支，不是 main：
 #     main 那份布局里根本没有 src/FluentJalium/FluentJalium.csproj（Astra 是整体替换）。
-#     钉到某个提交用仓库变量 FLUENT_JALIUM_REF。它多目标 net10.0 之前，Linux 这一端靠
-#     "补多目标"那一步（先补再 publish —— 顺序反了第一次 publish 就已经红了，兜底没机会跑）。
+#     钉到某个提交用仓库变量 FLUENT_JALIUM_REF。它多目标 net10.0 之前，两端都靠
+#     "补多目标"那一步（先补再 publish —— 还原是双目标一起走的，Windows 那端也要）。
 #   - Dusk（闭源 SDK，feed 在 ../dusk-feed）—— packaging/feed 里随仓库带了一份拷贝，
 #     CI 上没有那个本机路径，所以 restore 前先把本机源摘掉，只认随仓库的这份。
 #
@@ -124,10 +124,11 @@ jobs:
           dotnet nuget remove source dusk-sdk --configfile NuGet.config
           dotnet nuget list source --configfile NuGet.config
 
-      # 必须在 publish 之前：FluentJalium 还是单目标 net10.0-windows 时，
-      # Linux 这端第一次 publish 就会红，补在后面等于永远跑不到。
+      # 必须在 publish 之前，而且**两端都要**：应用是双目标（net10.0-windows + net10.0），
+      # 还原那一步会把两条腿一起走一遍 —— Windows 上 publish net10.0-windows 也会去问
+      # FluentJalium 的 net10.0（实测红过：NU1201 Project FluentJalium is not compatible with net10.0）。
+      # FluentJalium 远程那份还是单目标 net10.0-windows，所以这里补；上游多目标之后这一步就是空操作。
       - name: FluentJalium 尚未多目标时补上 net10.0（上游改完可删）
-        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           csproj="fluentjalium/src/FluentJalium/FluentJalium.csproj"
@@ -137,6 +138,7 @@ jobs:
             sed -i 's|<TargetFramework>net10.0-windows</TargetFramework>|<TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>|' "$csproj"
             echo "已为 FluentJalium 补上 net10.0 目标（上游多目标之后这一步就是空操作）"
           fi
+          grep -i targetframework "$csproj"
 
       - name: 发布（${{ matrix.platform }}）
         shell: bash
@@ -191,14 +193,8 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          # 不让 linuxdeploy 自己去下载 appstream 插件：图标与 .desktop 我们已经放进 AppDir 了，
-          # 多拉一个插件只会多一个能在 CI 上红的环节。
-          NO_APPSTREAM: '1'
         run: |
-          curl -L --fail -o linuxdeploy \
-            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy
-          sudo mv linuxdeploy /usr/local/bin/linuxdeploy
+          # 打包工具（appimagetool）由脚本自己取：它得先解包再跑，CI 上没有 FUSE。
           chmod +x packaging/linux/build-appimage.sh
           packaging/linux/build-appimage.sh publish "$VERSION" dist
           ls -la dist
