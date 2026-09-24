@@ -303,8 +303,9 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
 
 1. **还原走的是双目标整张图**：应用在 `net10.0-windows` + `net10.0` 两条腿上，所以在 **Windows** 上
    `publish -f net10.0-windows` 一样会去问 FluentJalium 的 net10.0 —— 单目标时报
-   `NU1201 Project FluentJalium is not compatible with net10.0`。那条"补多目标"的兜底因此**两端都跑**，
-   且必须排在 publish **之前**（补在后面永远跑不到）。
+   `NU1201 Project FluentJalium is not compatible with net10.0`（实测红过一次，两端一起红）。
+   FluentJalium 因此必须保持多目标（上游 `e1f3366` 起是；CI 里那条 sed 兜底已删），
+   且签出 ref 是 **Astra** 而不是 `main`（main 那份布局里没有 `src/FluentJalium` 这个路径）。
 2. **RID 不等于平台名**：`win-x64` / `linux-x64`，写成 `windows-x64` 还原直接失败。
 3. **CI 上没有 FUSE**：AppImage 形态的工具挂不起来，`linuxdeploy` 又不认 `--appimage-extract-and-run`
    （回 `Flag could not be matched` 然后退出码 1）。改成用底下的 `appimagetool`：
@@ -312,10 +313,14 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
    它还硬要 `desktop-file-validate`（缺了只打一行就退出码 1，runner 镜像没预装），
    且 `.desktop` / `.png` 必须有一份在 **AppDir 根**下（只在 `usr/share` 里 → `Desktop file not found`）。
 4. **`choco install nsis` 之后同一步里 `makensis` 不在 PATH 上**（PATH 是进程启动那份）→ 按安装位置点名。
-   另外 NSIS 那边：卸载页只写 `UninstPage uninstConfirm`（关键字不是 `Confirm`，而且**没有**
-   `UninstPage instfiles` 这种写法，写了在解析阶段就红）。
+   NSIS 那两条：卸载侧 `UninstPage uninstConfirm` + `UninstPage instfiles` **两条都要**
+   （关键字不是 `Confirm`；而少了 instfiles 那一页只警告不报错，卸载器一节都不跑）——
+   工作流因此把 makensis 的日志读一遍，见 `no sections will be executed` 就红。
+   **退出码 0 不等于包是对的**：这条是回读日志才发现的。
 
-实测：Windows 与 Linux 两端 `打包` 全绿，产物 32 MiB（setup.exe）+ 41 MiB（AppImage）。
+实测（run 36014243074，版本 0.0.0-test）：三个 job 全绿；产物 setup.exe 31.8 MiB（PE +
+`Nullsoft Inst` 签名、Uninstall 2 pages）、AppImage 41.6 MiB（ELF 运行时 + `AI\x02` 魔数、272 个文件、
+未压 112.9 MB → 40.7 MB）。
 
 ## Jalium.UI Framework Reference
 

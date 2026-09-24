@@ -12,8 +12,9 @@
 # 两个必须知道的依赖（都签出在仓库之外，见 fluentjalium 那一步）：
 #   - FluentJalium（兄弟仓库，源码直引）—— 默认签出 **Astra** 分支，不是 main：
 #     main 那份布局里根本没有 src/FluentJalium/FluentJalium.csproj（Astra 是整体替换）。
-#     钉到某个提交用仓库变量 FLUENT_JALIUM_REF。它多目标 net10.0 之前，两端都靠
-#     "补多目标"那一步（先补再 publish —— 还原是双目标一起走的，Windows 那端也要）。
+#     钉到某个提交用仓库变量 FLUENT_JALIUM_REF。库已是双目标（net10.0-windows + net10.0），
+#     所以不再有"补一刀"的兜底步骤 —— 哪天它退回单目标，还原会红在 NU1201（两端都会，
+#     因为还原走的是应用那张双目标图）。
 #   - Dusk（闭源 SDK，feed 在 ../dusk-feed）—— packaging/feed 里随仓库带了一份拷贝，
 #     CI 上没有那个本机路径，所以 restore 前先把本机源摘掉，只认随仓库的这份。
 #
@@ -123,22 +124,6 @@ jobs:
         run: |
           dotnet nuget remove source dusk-sdk --configfile NuGet.config
           dotnet nuget list source --configfile NuGet.config
-
-      # 必须在 publish 之前，而且**两端都要**：应用是双目标（net10.0-windows + net10.0），
-      # 还原那一步会把两条腿一起走一遍 —— Windows 上 publish net10.0-windows 也会去问
-      # FluentJalium 的 net10.0（实测红过：NU1201 Project FluentJalium is not compatible with net10.0）。
-      # FluentJalium 远程那份还是单目标 net10.0-windows，所以这里补；上游多目标之后这一步就是空操作。
-      - name: FluentJalium 尚未多目标时补上 net10.0（上游改完可删）
-        shell: bash
-        run: |
-          csproj="fluentjalium/src/FluentJalium/FluentJalium.csproj"
-          if grep -q "net10.0-windows;net10.0" "$csproj"; then
-            echo "上游已多目标，这一步什么都不做"
-          else
-            sed -i 's|<TargetFramework>net10.0-windows</TargetFramework>|<TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>|' "$csproj"
-            echo "已为 FluentJalium 补上 net10.0 目标（上游多目标之后这一步就是空操作）"
-          fi
-          grep -i targetframework "$csproj"
 
       - name: 发布（${{ matrix.platform }}）
         shell: bash

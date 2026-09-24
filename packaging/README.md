@@ -39,8 +39,7 @@
 - **FluentJalium 必须多目标**（`net10.0-windows;net10.0`）：这条不只是 Linux 那一端的事 ——
   还原走的是整个双目标图，所以在 Windows 上 `publish -f net10.0-windows` 一样会去问
   FluentJalium 的 net10.0 并红掉（实测：`error NU1201: Project FluentJalium is not compatible with net10.0`）。
-  工作流里那条兜底补丁因此**两端都跑**（上游多目标之后即为空操作，可删）。
-  本地现在能编过，是因为 `C:\git\Jalium\FluentJalium` 的工作副本已经多目标、但那两个提交还没推上去。
+  上游已于 `e1f3366` 多目标，工作流里那条 sed 兜底随之删掉；哪天它退回单目标，CI 会红在 NU1201 上。
 - **Linux 产物里混着一些 Windows 原生 dll**（`jalium.native.*.dll`）：Jalium 的 build targets
   无条件拷贝所致，AppImage 里是死重（几 MB），不影响运行；该问题应报给上游。
 
