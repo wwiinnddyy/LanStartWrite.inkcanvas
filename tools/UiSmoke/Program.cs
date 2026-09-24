@@ -4,8 +4,10 @@ using FluentJalium.Controls;
 using FluentJalium.Themes;
 using Dusk.Adapter.Jalium;
 using Dusk.Ink.Controls;
+using Dusk.Ink.Document;
 using Dusk.Ink.Input;
 using Dusk.Ink.Model;
+using Dusk.Ink.Primitives;
 using Jalium.UI;
 using Jalium.UI.Automation;
 using Jalium.UI.Controls;
@@ -94,6 +96,7 @@ internal static class Program
             CheckToolbarTouch();
             CheckToolbarTools(settings);
             CheckCanvasModes(settings);
+            CheckWhiteboardCanvas(settings);
             CheckPenMenu();
             CheckTipMenu();
             CheckTipOptions(settings);
@@ -108,6 +111,8 @@ internal static class Program
         });
         // 排在导航动画那组之前：那组里有一条本机常红的时序检查，而 Check() 一红就中断整个队列。
         steps.Enqueue(CheckInkPreferenceLands);
+        // 白板那两条读的是"下一拍才落地"的按钮状态，理由与上面那条相同（不能与发起那一拍同步断言）。
+        steps.Enqueue(CheckWhiteboardUndoLands);
         QueueNavigationAnimationChecks(settings, steps);
         // 自愈那道网得真的在跑。它由 DispatcherTimer 驱动（1.5 秒一拍），
         // 而队列每拍 320ms、前面还压着一组导航动画检查 —— 排到最后，到这里早就过了一拍。
@@ -368,13 +373,14 @@ internal static class Program
         Windows.Add(toolbar);
         toolbar.Show();
         toolbar.ForceRenderFrame();
-        // 批注栏那六颗钮用的是 Button / ToggleButton 这一族的 40x40 方格，不是 AppBarButton：
+        // 批注栏那七颗钮用的是 Button / ToggleButton 这一族的 40x40 方格，不是 AppBarButton：
         // 后者是"图标 + 下方标签"的 68x64 命令条按钮，它的 compact 触发器只收标签、内层边框仍留着
         // 22 DIP 的标签带，于是整条过长且选中实底只盖到上面一块。这两条钉的就是那两个症状。
-        // 按钮是数据驱动的，没有 x:Name 可查 —— 按项标识取。默认列表的六个标识是固定的。
-        var tools = new[] { "mouse", "pen.1", "eraser.1", "undo", "redo", "settings" };
+        // 按钮是数据驱动的，没有 x:Name 可查 —— 按项标识取。默认列表的标识是固定的；
+        // 新加的「白板」也要过这三条，它是普通 Button，长得必须和同伴一样。
+        var tools = new[] { "mouse", "whiteboard", "pen.1", "eraser.1", "undo", "redo", "settings" };
         Check(tools.All(id => toolbar.FindToolControl(id) is not null),
-            "默认工具栏那六颗钮都渲染出来了（按项标识取得到）");
+            "默认工具栏那七颗钮都渲染出来了（按项标识取得到）");
         Check(tools.All(id =>
             {
                 var button = toolbar.FindToolControl(id)!;
@@ -436,13 +442,13 @@ internal static class Program
         toolbar.Show();
         toolbar.ForceRenderFrame();
 
-        Check(ToolbarTools.Items.Count == 7, "默认工具栏是七项（六颗钮加一条分隔线）");
+        Check(ToolbarTools.Items.Count == 8, "默认工具栏是八项（七颗钮加一条分隔线）");
         Check(ToolbarTools.Items.Select(static tool => tool.Kind).SequenceEqual(new[]
             {
-                ToolbarToolKind.Mouse, ToolbarToolKind.Pen, ToolbarToolKind.Eraser,
+                ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Pen, ToolbarToolKind.Eraser,
                 ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Separator, ToolbarToolKind.Settings,
             }),
-            "默认顺序是 鼠标 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置");
+            "默认顺序是 鼠标 / 白板 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置");
         Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Mouse }, "启动时停在鼠标模式");
 
         // ---------------------------------------------------------- 两支笔
@@ -539,6 +545,9 @@ internal static class Program
             && editor.FindRowButton(firstEraser.Id, "up") is not null,
             "每一行都有『用这支』『上移』『删除』");
         Check(editor.FindRowButton("settings", "remove")?.IsEnabled == false, "固定项的『删除』是灰的");
+        Check(editor.FindRowButton("whiteboard", "remove")?.IsEnabled == false
+            && ToolbarTools.Remove("whiteboard") == false,
+            "「白板」删不掉：它是那块画布的唯一入口，删了就进不去了");
 
         var countBeforeAdd = ToolbarTools.Items.Count;
         ((Button)settings.FindName("AddPenToolButton")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -549,9 +558,9 @@ internal static class Program
         Check(editor.FindRowButton(ToolbarTools.SelectedId, "remove") is { IsEnabled: true },
             "新加的那一项能被删掉");
 
-        // 收尾：把工具栏还原成默认七项，后面的检查与存档往返都按默认形状走。
+        // 收尾：把工具栏还原成默认八项，后面的检查与存档往返都按默认形状走。
         ToolbarTools.Load(ToolbarTools.DefaultItems(), "pen.1");
-        Check(ToolbarTools.Items.Count == 7 && editor.RowCount == 7, "收尾：列表回到默认七项");
+        Check(ToolbarTools.Items.Count == 8 && editor.RowCount == 8, "收尾：列表回到默认八项");
     }
 
     /// <summary>
@@ -675,6 +684,197 @@ internal static class Program
         ToolbarTools.Select(mouse.Id);
         var settled = CanvasOptions.For(annotation);
         Check(!settled.PassThrough && !settled.Freeze, "收尾：两个开关都关回去");
+    }
+
+    /// <summary>
+    /// 往文档里落一笔。<b>不走输入路径</b>：这个运行时里合成指针点到"引擎认它是笔"还隔着
+    /// 设备类型与捕获那一层（真笔的验证在 Dusk 自己的探针里），而这里要钉的是
+    /// "文档里有东西 → 撤销的账 → 撤的是哪一块"，直接构造笔迹恰好是这条最短的硬路。
+    /// </summary>
+    private static InkId CommitStroke(CanvasSurface board, double x, double y)
+    {
+        var attributes = new DrawingAttributes
+        {
+            Kind = StrokeKind.VariableWidth,
+            Color = new InkColor(0xD1, 0x34, 0x38, 0xFF),
+            Width = 7,
+            Height = 7,
+        };
+        var stroke = new InkingStroke(InkId.NewId(), attributes, StrokeKind.VariableWidth, 3);
+        var timestamp = 1_000L;
+        foreach (var dx in new[] { 0d, 12d, 24d })
+        {
+            stroke.Append(new InkStylusPoint(x + dx, y, 0.5f, timestamp += 8));
+        }
+
+        board.Document.Commit(stroke);
+        return stroke.Id;
+    }
+
+    /// <summary>
+    /// 白板这块画布。钉的四件都是"看不见就会静悄悄"的事：
+    /// <list type="number">
+    /// <item>点「白板」真的换了<b>这一块</b>画布，并且批注那块让开；</item>
+    /// <item>两块画布各有各的文档与撤销账 —— <b>按撤销撤的是眼前这块</b>（工具栏上那些动作以前直接写
+    /// <c>_annotationOverlay?.</c>，加第二块画布时最容易漏的就是这一步，而漏了不报错）；</item>
+    /// <item>工具数据是共用的<b>一份</b>，不是切场景时复制的；</item>
+    /// <item>批注那块的视口被钉在 1:1（滚轮与中键在窗口这一层就被接下来），白板才有得漫游。</item>
+    /// </list>
+    /// </summary>
+    private static void CheckWhiteboardCanvas(SettingsWindow settings)
+    {
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        // 起点：选中那支笔 → 批注画布显形，并往它的文档里落一笔（两块画布就此各有东西可分辨）。
+        var pen = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen);
+        ToolbarTools.Select(pen.Id);
+        ToolbarTools.UpdateSelectedPen(current => current with { ColorArgb = 0xFFD13438, Thickness = 7 });
+        Check(toolbar.CanvasPresented && toolbar.Canvas is not null, "选中笔之后批注画布显形");
+        var annotation = toolbar.Canvas!.Surface;
+        CommitStroke(annotation, 60, 60);
+        Check(annotation.Document.Count == 1 && annotation.CanUndo, "批注那块落了一笔，撤销的账也记上了");
+
+        // ---------------------------------------------------------- 换到白板
+        var whiteboardButton = toolbar.FindToolControl("whiteboard");
+        Check(whiteboardButton is Button, "「白板」渲染成普通按钮：选中态只有『哪支笔』这一根轴");
+        var mouseControlBefore = toolbar.FindToolControl("mouse");
+
+        // 白板是一块不透明的全屏底，Show 出来会真的盖住这一屏 —— 那正是它要做的事，不是副作用。
+        ((Button)whiteboardButton!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(CanvasSceneState.IsActive(CanvasScene.Whiteboard), "点「白板」把眼前这块画布换成了白板");
+        Check(toolbar.WhiteboardPresented && toolbar.Whiteboard is not null, "白板真的在屏上");
+        Check(!toolbar.CanvasPresented, "批注那块让开了：两块全屏画布不叠着");
+        Check(ReferenceEquals(toolbar.FindToolControl("mouse"), mouseControlBefore),
+            "换画布只刷外观、不重建控件（同一颗实例还在 —— 重建会把键盘焦点当场丢掉）");
+
+        var board = toolbar.Whiteboard!.Surface;
+        Check(!ReferenceEquals(board, annotation) && !ReferenceEquals(board.Document, annotation.Document),
+            "两块画布各有各的面与文档");
+        Check(board.Document.Count == 0 && annotation.Document.Count == 1,
+            "墨迹不串：白板是空的，那一笔还在批注那块里");
+
+        // 工具数据共用一份：这块面当场就是那支红笔，没有"切场景时再同步一次"这一步。
+        var surface = board.Canvas;
+        Check(surface.InkAttributes.Color.R == 0xD1 && Math.Abs(surface.InkAttributes.Width - 7) < 1e-9,
+            $"白板用的就是那支笔（当场读到 R={surface.InkAttributes.Color.R}、宽 {surface.InkAttributes.Width:0} px）");
+
+        // 一块不透明的底，且等于设置里那一档。
+        var expected = CanvasOptions.For(CanvasScene.Whiteboard).BackgroundArgb;
+        var applied = toolbar.Whiteboard!.AppliedBackgroundArgb;
+        Check(applied == expected && (applied >> 24 & 0xFF) == 0xFF,
+            $"白板有一块不透明的底，就是设置里那一档（{applied:X8}）");
+
+        // 换底色当场生效（这一项不是"下次进画布才看得出来"的那类开关）。
+        var green = Argb.Pack(CanvasBackgroundPalette.Colors[2]);
+        CanvasOptions.SetBackground(CanvasScene.Whiteboard, green);
+        Check(toolbar.Whiteboard!.AppliedBackgroundArgb == green,
+            $"换底色当场落到白板上（{green:X8}），不用重进画布");
+        CanvasOptions.SetBackground(CanvasScene.Whiteboard, expected);
+
+        // ---------------------------------------------------------- 设置页那一节
+        // 色点是整块由色板生成的，所以"行数等于色板长度"这条守的是：
+        // 以后加一档（或减一档）而界面没跟上 —— 那种漏不会报错，只是那一档没人能选。
+        var swatches = (Panel)settings.FindName("WhiteboardBackgroundSwatches")!;
+        var rings = swatches.Children.OfType<RadioButton>().ToList();
+        Check(rings.Count == CanvasBackgroundPalette.Colors.Length && rings.Count == 3,
+            $"底色色点一行 {rings.Count} 颗，与色板同数");
+        Check(rings.Count(ring => ring.IsChecked == true) == 1, "恰好一颗是选中的（三档互斥）");
+        var whiteboardText = (TextBlock)settings.FindName("WhiteboardBehaviorText")!;
+        Check(whiteboardText.Text.Contains(CanvasBackgroundPalette.Names[0], StringComparison.Ordinal),
+            $"那句说明念的是当前这一档：{whiteboardText.Text}");
+
+        // ---------------------------------------------------------- 撤的是眼前这块
+        CommitStroke(board, 200, 200);
+        Check(board.Document.Count == 1 && annotation.Document.Count == 1, "白板也落了一笔（两块各有 1 笔）");
+        var undo = (Button)toolbar.FindToolControl("undo")!;
+
+        // 文档的账当场就有，按钮<b>当场没有</b> —— 这是设计而不是漏：引擎先通知后记账，
+        // 所以在通知里读到的还是"差这一笔"，刷新排到下一拍（见 OnHistoryStateChanged）。
+        // 这一条同时挡住两种错：把这笔账当场读（永远慢一笔），和把刷新接错事件（永远不亮）。
+        Check(board.CanUndo && !undo.IsEnabled,
+            "落笔这一拍：文档已经可撤销，而按钮排在下一拍（当场读会永远慢一笔）");
+
+        // 落笔这一拍先记下，按钮的状态排到下一拍再断言（见 CheckWhiteboardUndoLands）。
+        _wbToolbar = toolbar;
+        _wbBoard = board;
+        _wbAnnotation = annotation;
+
+        // **收尾必须把两块画布都收起来**：这一步之后还有窗口层级那组检查，
+        // 而它问的是"真实桌面 Z 序里谁在谁上面"——留一块全屏白板在屏上，
+        // 它读到的就是那块白板的 Z 位，报出来的"应用没退出置顶带"其实是本步的卫生问题，
+        // 不是被检查的那件事错了。（实测踩过：白板留着时 CheckWindowLayers 当场红。）
+        ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        ToolbarTools.Select(ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id);
+        Check(!toolbar.WhiteboardPresented && !toolbar.CanvasPresented,
+            "收尾：两块画布都收起了，不留全屏窗口给后面的层级检查");
+    }
+
+    private static AnnotationToolbarWindow? _wbToolbar;
+    private static CanvasSurface? _wbBoard;
+    private static CanvasSurface? _wbAnnotation;
+
+    /// <summary>
+    /// 上一拍那笔的后续断言。<b>单独排一步</b>的理由与 <see cref="CheckInkPreferenceLands"/> 一样：
+    /// 撤销按钮是 <c>Dispatcher.BeginInvoke</c> 刷的，同一拍里必然读不到。
+    /// </summary>
+    private static void CheckWhiteboardUndoLands()
+    {
+        var toolbar = _wbToolbar ?? throw new InvalidOperationException("CheckWhiteboardCanvas 没跑");
+        var board = _wbBoard!;
+        var annotation = _wbAnnotation!;
+
+        // 重新进白板（上一拍收尾时收起来了）。选中项是鼠标，所以这一步还顺带验了
+        // "点白板时空手会给一支笔" —— 不然按下去什么都不发生，是最难猜的那种没反应。
+        ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(toolbar.WhiteboardPresented && ToolbarTools.Selected is { Kind: ToolbarToolKind.Pen },
+            "再进白板：收起时手里是鼠标，进来就递一支笔（不是点下去没反应）");
+
+        var undo = (Button)toolbar.FindToolControl("undo")!;
+        Check(undo.IsEnabled, "下一拍：撤销按钮亮了（接的是眼前这块画布的账）");
+        undo.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(board.Document.Count == 0 && annotation.Document.Count == 1,
+            "按撤销撤的是眼前这一块那一笔，另一块的账一点没动");
+
+        // ---------------------------------------------------------- 批注视口钉死
+        var overlay = toolbar.Canvas!;
+        var view = annotation.View;
+        Check(Math.Abs(view.Viewport.Scale - 1) < 1e-9 && view.Viewport.OffsetX == 0 && view.Viewport.OffsetY == 0,
+            "起点：批注的视口是 1:1、原点对齐");
+
+        // 框架那条契约（tunnel 标 Handled 就不再冒泡 / 不再提升成指针事件）写在
+        // WindowInputDispatcher.RaisePointerDownPipeline 与 HandleMouseDown 里；
+        // 这里能证的是"批注窗口自己把滚轮与中键接下来并标了 Handled"，
+        // 于是引擎的 ZoomAt / PanByScreen 根本没有被叫到的那一路。
+        var wheel = new MouseWheelEventArgs(
+            UIElement.PreviewMouseWheelEvent, new Point(600, 400), 120,
+            MouseButtonState.Released, MouseButtonState.Released, MouseButtonState.Released,
+            MouseButtonState.Released, MouseButtonState.Released, ModifierKeys.None, 0);
+        overlay.RaiseEvent(wheel);
+        Check(wheel.Handled && Math.Abs(view.Viewport.Scale - 1) < 1e-9,
+            "滚轮在批注窗口这一层就被接下来，视口没动（缩放一档都没进）");
+
+        var middle = new MouseButtonEventArgs(
+            UIElement.PreviewMouseDownEvent, new Point(600, 400), MouseButton.Middle, MouseButtonState.Pressed, 1,
+            MouseButtonState.Released, MouseButtonState.Pressed, MouseButtonState.Released,
+            MouseButtonState.Released, MouseButtonState.Released, ModifierKeys.None, 0);
+        overlay.RaiseEvent(middle);
+        Check(middle.Handled && view.Viewport.OffsetX == 0, "中键漫游同样被截住");
+
+        var left = new MouseButtonEventArgs(
+            UIElement.PreviewMouseDownEvent, new Point(600, 400), MouseButton.Left, MouseButtonState.Pressed, 1,
+            MouseButtonState.Pressed, MouseButtonState.Released, MouseButtonState.Released,
+            MouseButtonState.Released, MouseButtonState.Released, ModifierKeys.None, 0);
+        overlay.RaiseEvent(left);
+        Check(!left.Handled, "左键不截：鼠标书写那条提升链还活着");
+
+        // 会话内保留：白板那笔被撤了，但白板本身与它的历史都还在（收起不等于拆掉）。
+        ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        ToolbarTools.Select(ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id);
+        Check(!CanvasSceneState.IsActive(CanvasScene.Whiteboard) && !toolbar.WhiteboardPresented,
+            "回到屏幕批注：白板收起，两块画布都留在内存里（会话内还着）");
     }
 
     private static void CheckPenMenu()
@@ -1192,50 +1392,54 @@ internal static class Program
         Check(surface is not null, "Annotation overlay installs the Dusk ink surface into InkHost");
         if (surface is null) return;
 
+        // 应用侧那块面（CanvasSurface）与引擎控件（JaliumInkCanvas）是两件事：
+        // 前者收"下发"的调用，后者是这些调用最终落到的地方 —— 两边都读才算接上了。
+        var board = overlay.Surface;
+
         Check(surface.InkAttributes.Kind == StrokeKind.VariableWidth && surface.InkAttributes.Color.A == 255,
             "Default surface is variable-width and fully opaque");
-        Check(!overlay.CanUndo && !overlay.CanRedo, "A fresh board has nothing to undo or redo");
+        Check(!board.CanUndo && !board.CanRedo, "A fresh board has nothing to undo or redo");
 
-        overlay.SetPenColor(Color.FromRgb(0xFF, 0x00, 0x00));
-        overlay.SetPenKind(PenKind.Highlighter);
+        board.SetPenColor(Color.FromRgb(0xFF, 0x00, 0x00));
+        board.SetPenKind(PenKind.Highlighter);
         Check(surface.InkAttributes.Kind == StrokeKind.Uniform
             && surface.InkAttributes.Color.A == InkBrushes.HighlighterAlpha
             && surface.InkAttributes.Color.R == 0xFF,
             "Highlighter maps to uniform geometry plus the shared highlighter alpha, keeping the picked rgb");
 
-        overlay.SetPenKind(PenKind.Laser);
+        board.SetPenKind(PenKind.Laser);
         Check(surface.InkAttributes.Kind == StrokeKind.Laser
             && surface.InkAttributes.Color.A == InkBrushes.LaserAlpha
             && surface.InkAttributes.Color.R == 0xFF,
             "Laser re-applies its own alpha without losing the picked rgb");
 
-        overlay.SetPenKind(PenKind.Pen);
-        overlay.SetPenThickness(9);
+        board.SetPenKind(PenKind.Pen);
+        board.SetPenThickness(9);
         Check(surface.InkAttributes.Width == 9 && surface.InkAttributes.Height == 9,
             "Thickness writes both axes of the live attributes instance");
 
-        overlay.SetEraseMode();
+        board.SetEraseMode();
         Check(surface.IsEraserMode && surface.EditingMode == InkEditingMode.EraseByPoint,
             "默认橡皮是面积擦（引擎的点擦）");
 
-        overlay.SetEraserMode(EraserMode.Stroke);
+        board.SetEraserMode(EraserMode.Stroke);
         Check(surface.EditingMode == InkEditingMode.EraseByStroke && surface.IsEraserMode,
             "笔迹擦落到引擎的整笔擦模式");
 
-        overlay.SetEraserMode(EraserMode.Area);
-        overlay.SetEraseMode();
+        board.SetEraserMode(EraserMode.Area);
+        board.SetEraseMode();
         Check(surface.EditingMode == InkEditingMode.EraseByPoint,
             "SetEraseMode 保持已选的擦法，不把它顶回默认");
 
-        overlay.SetEraserRadius(999);
+        board.SetEraserRadius(999);
         Check(surface.EraserRadius == 48, "擦除半径被夹到上限");
-        overlay.SetEraserRadius(double.NaN);
+        board.SetEraserRadius(double.NaN);
         Check(surface.EraserRadius == 14, "非法半径退回默认值而不是传进引擎");
 
-        overlay.ClearCanvas();
+        board.ClearCanvas();
         Check(surface.Document.Count == 0, "清空确实作用于文档承载面");
 
-        overlay.SetInkMode();
+        board.SetInkMode();
         Check(!surface.IsEraserMode, "Ink mode leaves erase");
 
         // 墨迹偏好是经 Dispatcher.BeginInvoke 落到画布的，同一拍里断言必然看不到 ——

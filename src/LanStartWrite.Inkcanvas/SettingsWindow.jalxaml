@@ -159,6 +159,18 @@
                                     </fluent:FluentSettingsRow>
                                 </Border>
                                 <TextBlock x:Name="CanvasBehaviorText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                <TextBlock Text="白板" Style="{StaticResource SectionTextStyle}" />
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="380">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="背景色" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock Text="白板那块底的颜色。三档都是浅底：深色底会把默认的黑色笔迹吃掉。换一档当场生效，不用重进画布。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <!-- 色点不在标记里写死颜色：与笔菜单同一个理由 —— 抄一份就是两张表，改了色板必然漏一处且不报错。 -->
+                                        <StackPanel x:Name="WhiteboardBackgroundSwatches" Orientation="Horizontal" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <TextBlock x:Name="WhiteboardBehaviorText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                             </StackPanel>
                             <StackPanel x:Name="ToolbarSectionPanel">
                                 <TextBlock Text="工具栏" Style="{StaticResource TitleTextBlockStyle}" />

@@ -1,5 +1,6 @@
 using Jalium.UI;
 using Jalium.UI.Controls;
+using Jalium.UI.Input;
 using Jalium.UI.Interop;
 using Jalium.UI.Media;
 using Jalium.UI.Media.Imaging;
@@ -43,44 +44,32 @@ public partial class AnnotationOverlayWindow : Window
 
         _surface = new CanvasSurface(Dispatcher);
         _surface.AttachTo(InkHost);
+
+        // 这块画布的视口<b>必须钉在 1:1</b>。引擎的滚轮缩放与中键漫游是壳里硬开的
+        // （没有公开开关），而批注的墨迹讲的是"屏幕上这一块"：视口一动，
+        // 字就与它标的那句话错位，冻结底图（按屏幕空间铺的 ImageBrush）也不再对上。
+        // 白板那一块反过来 —— 它要的就是能漫游，所以这两句只写在这里。
+        PreviewMouseWheel += (_, e) =>
+        {
+            e.Handled = true;
+        };
+        PreviewMouseDown += (_, e) =>
+        {
+            // 只截中键。左键那一路不能碰：框架是"鼠标事件未被处理才提升成指针事件"，
+            // 在这里标了 Handled 就等于把鼠标书写一起关掉。
+            if (e.ChangedButton == MouseButton.Middle) e.Handled = true;
+        };
+
         Closed += OnClosed;
     }
 
-    /// <summary>这块画布的墨迹面。窗口只管形态，凡是要读引擎真实状态的一律从这里走。</summary>
+    /// <summary>
+    /// 这块画布的墨迹面。<b>本类上不再有一行"转发给面"的包装</b> ——
+    /// 那些成员（模式、颜色、粗细、擦法、半径、清空、撤销）在 <see cref="CanvasSurface"/> 上，
+    /// 工具栏拿的是 <c>Surface</c>。留一层转发的代价不是多写几行，而是它会变成第二个真相：
+    /// 白板那一块没有这层转发，于是"在批注上好使、在白板上没人接"这类断口只会静悄悄出现。
+    /// </summary>
     internal CanvasSurface Surface => _surface;
-
-    public void SetInkMode() => _surface.SetInkMode();
-
-    public void SetEraseMode() => _surface.SetEraseMode();
-
-    /// <summary>换橡皮的擦法：面积擦＝引擎点擦，笔迹擦＝整笔摘除。</summary>
-    public void SetEraserMode(EraserMode mode) => _surface.SetEraserMode(mode);
-
-    /// <summary>橡皮半径，<b>单位是屏幕像素</b>；换成世界坐标这一步在 <see cref="CanvasSurface"/> 里做。</summary>
-    public void SetEraserRadius(double radius) => _surface.SetEraserRadius(radius);
-
-    public void ClearCanvas() => _surface.ClearCanvas();
-
-    public void SetPenKind(PenKind kind) => _surface.SetPenKind(kind);
-
-    public void SetPenColor(Color color) => _surface.SetPenColor(color);
-
-    public void SetPenThickness(double thickness) => _surface.SetPenThickness(thickness);
-
-    public bool CanUndo => _surface.CanUndo;
-
-    public bool CanRedo => _surface.CanRedo;
-
-    public void Undo() => _surface.Undo();
-
-    public void Redo() => _surface.Redo();
-
-    /// <summary>文档变了（因而可撤销/可重做的东西也变了）。宿主工具栏据此刷按钮状态。</summary>
-    public event Action? HistoryStateChanged
-    {
-        add => _surface.HistoryStateChanged += value;
-        remove => _surface.HistoryStateChanged -= value;
-    }
 
     /// <summary>
     /// 穿透：画布<b>留在屏上</b>，但鼠标与触摸直接落到它下面的窗口上。

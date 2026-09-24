@@ -297,8 +297,9 @@ internal static class AppPreferences
     /// <list type="number">
     /// <item>丢坏项：标识为空 / 类型不认识 / 标识重复；</item>
     /// <item>固定项去重：鼠标模式、撤销、重做、设置各只留第一个；</item>
-    /// <item>固定项补齐：缺了就补回一个 —— <b>少了鼠标模式用户出不去批注，少了设置就再也改不了工具栏</b>，
-    /// 所以这四个不是"用户数据"，是这套界面的门槛；</item>
+    /// <item>固定项补齐：缺了就补回一个 —— <b>少了鼠标模式用户出不去这块画布，少了白板就再也进不去那块，
+    /// 少了设置就再也改不了工具栏</b>，所以这几个不是"用户数据"，是这套界面的门槛；
+    /// 补的时候落在它该在的那一格（见下面那段注释）；</item>
     /// <item>数据规范化：区间钳制、非有限值退回默认、与类型无关的字段一律清回默认值
     /// （免得它们变成第二个真相）。</item>
     /// </list>
@@ -337,19 +338,36 @@ internal static class AppPreferences
 
             var fallback = ToolbarTools.DefaultItems().Find(item => item.Kind == kind)!;
             if (!ids.Add(fallback.Id)) continue; // 标识被别人占了：宁可不补，也不造一个重复标识
-            kept.Add(fallback);
+
+            // 补齐落在它该在的那一格，而不是一律追加到尾巴：白板与鼠标是"进 / 出这块画布"的一对，
+            // 旧档补出来就该挨着它。追加到尾巴的话，同一份设置在"首启"与"升级后"长得不一样，
+            // 而这种差别只会以"我的按钮顺序怎么变了"的形式被用户看见。
+            var at = kind == ToolbarToolKind.Whiteboard
+                ? IndexAfterKind(kept, ToolbarToolKind.Mouse)
+                : kept.Count;
+            kept.Insert(at, fallback);
         }
 
         return new ToolbarToolCollection { Items = kept };
     }
 
+    /// <summary>某一类项在那一格之后；这一类不在列表里时返回末尾。</summary>
+    private static int IndexAfterKind(List<ToolbarTool> items, ToolbarToolKind kind)
+    {
+        for (var i = 0; i < items.Count; i++)
+            if (items[i].Kind == kind) return i + 1;
+
+        return items.Count;
+    }
+
     /// <summary>
-    /// 四个"界面门槛"项：鼠标模式（退出批注）、撤销、重做、设置（唯一能改工具栏的入口）。
-    /// 它们各只允许有一个，而且不许缺失。
+    /// 五个"界面门槛"项：鼠标模式（退出这块画布）、白板（进那块画布的唯一入口）、
+    /// 撤销、重做、设置（唯一能改工具栏的入口）。它们各只允许有一个，而且不许缺失。
     /// </summary>
     private static readonly ToolbarToolKind[] FixedKinds =
     [
-        ToolbarToolKind.Mouse, ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Settings,
+        ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard,
+        ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Settings,
     ];
 
     private static bool IsFixedKind(ToolbarToolKind kind)

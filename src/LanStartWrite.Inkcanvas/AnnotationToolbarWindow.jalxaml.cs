@@ -31,6 +31,7 @@ public partial class AnnotationToolbarWindow : Window
     private bool _toolSync;
     private bool _isClosing;
     private AnnotationOverlayWindow? _annotationOverlay;
+    private WhiteboardWindow? _whiteboard;
     private SettingsWindow? _settingsWindow;
     private PenSecondaryMenuWindow? _penMenuWindow;
     private bool _penMenuVisible;
@@ -90,6 +91,28 @@ public partial class AnnotationToolbarWindow : Window
     /// 给验收读穿透位与冻结底图 —— 这两件事都只有画布自己知道。</summary>
     internal AnnotationOverlayWindow? Canvas => _annotationOverlay;
 
+    /// <summary>白板此刻在不在屏上。与 <see cref="_canvasPresented"/> 各记各的：
+    /// 两块画布不会同时在屏，但"谁在屏上"这件事不能共用一个布尔 ——
+    /// 切场景时一边隐藏会把另一边的状态一起抹掉。</summary>
+    private bool _whiteboardPresented;
+
+    /// <summary>验收读它：白板在不在屏上。</summary>
+    internal bool WhiteboardPresented => _whiteboardPresented;
+
+    /// <summary>本窗口持有的那块白板（可能是 <c>null</c>：它也是懒创建的）。</summary>
+    internal WhiteboardWindow? Whiteboard => _whiteboard;
+
+    /// <summary>
+    /// <b>此刻该被写的那块面</b>：白板在眼前就是白板那块，否则是批注那块；没建起来时是 <c>null</c>。
+    /// <para>
+    /// 工具栏上那些"写到画布去"的动作（撤销、重做、清空、把选中项的数据下发）一律经它，
+    /// 不再各自写 <c>_annotationOverlay?.</c> —— 那样做的话，白板在眼前时按撤销
+    /// 会安静地撤掉<b>另一块画布</b>的历史，而这既不报错也看不出来。
+    /// </para>
+    /// </summary>
+    private CanvasSurface? ActiveSurface =>
+        CanvasSceneState.IsActive(CanvasScene.Whiteboard) ? _whiteboard?.Surface : _annotationOverlay?.Surface;
+
     /// <summary>工具栏上某一项的按钮控件；没有这一项时返回 <c>null</c>。</summary>
     internal FrameworkElement? FindToolControl(string id) => _toolControls.GetValueOrDefault(id);
 
@@ -116,6 +139,7 @@ public partial class AnnotationToolbarWindow : Window
         ToolbarTools.LayoutChanged += SyncToolControls;
         ToolbarTools.SelectionChanged += OnToolSelectionChanged;
         CanvasOptions.Changed += OnCanvasOptionsChanged;
+        CanvasSceneState.Changed += OnCanvasSceneChanged;
         AppPreferences.Changed += OnPreferencesChanged;
         LocationChanged += (_, _) =>
         {
@@ -139,6 +163,7 @@ public partial class AnnotationToolbarWindow : Window
             ToolbarTools.LayoutChanged -= SyncToolControls;
             ToolbarTools.SelectionChanged -= OnToolSelectionChanged;
             CanvasOptions.Changed -= OnCanvasOptionsChanged;
+            CanvasSceneState.Changed -= OnCanvasSceneChanged;
             AppPreferences.Changed -= OnPreferencesChanged;
             _penMenuWindow?.Close();
             _penMenuWindow = null;
@@ -149,10 +174,11 @@ public partial class AnnotationToolbarWindow : Window
             _settingsWindow?.Close();
             _settingsWindow = null;
             DisposeAnnotationOverlay();
+            DisposeWhiteboard();
         };
 
         SyncToolControls();
-        SyncAnnotationOverlay();
+        SyncCanvasOverlay();
     }
 
     /// <summary>
@@ -222,16 +248,17 @@ public partial class AnnotationToolbarWindow : Window
     /// </summary>
     private void SyncSelectedToolToCanvas()
     {
-        if (_annotationOverlay is null || !_canvasPresented) return;
+        if (ActiveSurface is not { } surface) return;
+        if (!_canvasPresented && !_whiteboardPresented) return;
         if (ToolbarTools.Selected is not { } tool) return;
 
         switch (tool.Kind)
         {
             case ToolbarToolKind.Pen:
-                ApplyPenToolToOverlay(tool);
+                ApplyPenTool(surface, tool);
                 break;
             case ToolbarToolKind.Eraser:
-                ApplyEraserToolToOverlay(tool);
+                ApplyEraserTool(surface, tool);
                 break;
         }
     }
@@ -294,13 +321,16 @@ public partial class AnnotationToolbarWindow : Window
         switch (tool.Kind)
         {
             case ToolbarToolKind.Undo:
-                action.Click += (_, _) => { _annotationOverlay?.Undo(); };
+                action.Click += (_, _) => { ActiveSurface?.Undo(); };
                 break;
             case ToolbarToolKind.Redo:
-                action.Click += (_, _) => { _annotationOverlay?.Redo(); };
+                action.Click += (_, _) => { ActiveSurface?.Redo(); };
                 break;
             case ToolbarToolKind.Settings:
                 action.Click += SettingsToolbarButton_OnClick;
+                break;
+            case ToolbarToolKind.Whiteboard:
+                action.Click += (_, _) => ToggleCanvasScene(CanvasScene.Whiteboard);
                 break;
         }
 
@@ -352,13 +382,32 @@ public partial class AnnotationToolbarWindow : Window
     }
 
     /// <summary>
+    /// 文档变了 → 刷撤销/重做。<b>这里必须排队一拍，不能当场读</b>。
+    /// <para>
+    /// 引擎的次序是"先通知、后记账"：<c>InkDocument.Commit</c> 里 <c>RaiseChanged</c> 在
+    /// <c>Record</c> 之前（:172 与 :175），<c>Remove</c> 与 <c>Clear</c> 同形。
+    /// 当场读 <c>CanUndo</c> 读到的永远是"还差这一笔"的那一瞬 ——
+    /// 症状很具体：<b>写完第一笔，撤销钮还是灰的，写第二笔时才亮</b>。
+    /// 这一条是验收里直接往文档落笔时抓出来的（<c>CheckWhiteboardUndoLands</c>）。
+    /// </para>
+    /// <para>同一个"下一拍才落地"的形状在 <c>CanvasSurface</c> 的笔锋注入那边也有，理由一致。</para>
+    /// </summary>
+    private void OnHistoryStateChanged()
+    {
+        Dispatcher.BeginInvoke(SyncUndoRedoState);
+    }
+
+    /// <summary>
     /// 撤销/重做的可用性只读引擎的账（<c>InkHistory.CanUndo/CanRedo</c>），本端不再自己数笔数。
     /// 画布还没建起来时没有历史可谈，两个按钮都 disabled。
+    /// <para>读的是 <see cref="ActiveSurface"/> —— 眼前那块画布的账。</para>
     /// </summary>
     private void SyncUndoRedoState()
     {
-        var canUndo = _annotationOverlay?.CanUndo == true;
-        var canRedo = _annotationOverlay?.CanRedo == true;
+        // 撤销/重做的可用性只读引擎的账，读的还是<b>眼前那块画布</b>的那本账。
+        var surface = ActiveSurface;
+        var canUndo = surface?.CanUndo == true;
+        var canRedo = surface?.CanRedo == true;
 
         foreach (var tool in ToolbarTools.Items)
         {
@@ -403,7 +452,7 @@ public partial class AnnotationToolbarWindow : Window
     private void OnToolSelectionChanged()
     {
         SyncCheckedTool();
-        SyncAnnotationOverlay();
+        SyncCanvasOverlay();
     }
 
     /// <summary>
@@ -472,18 +521,212 @@ public partial class AnnotationToolbarWindow : Window
             HidePenSecondaryMenu();
             HideEraserSecondaryMenu();
         };
-        _annotationOverlay.HistoryStateChanged += SyncUndoRedoState;
+        _annotationOverlay.Surface.HistoryStateChanged += OnHistoryStateChanged;
     }
 
     private void DisposeAnnotationOverlay()
     {
         if (_annotationOverlay is null)
             return;
-        _annotationOverlay.HistoryStateChanged -= SyncUndoRedoState;
+        _annotationOverlay.Surface.HistoryStateChanged -= OnHistoryStateChanged;
         _annotationOverlay.Close();
         _annotationOverlay = null;
         _canvasPresented = false;
         SyncUndoRedoState();
+    }
+
+    // ------------------------------------------------------------ 白板那块画布
+    //
+    // 与批注那一对（Ensure / Dispose / Present / Conceal）同形，但刻意<b>不共用状态</b>：
+    // 两块画布各有各的"在不在屏上"，共用一个布尔的话，切场景时一边隐藏会把另一边的一起抹掉，
+    // 而"该截屏的时候没截"这类判断正是读这个布尔读出来的。
+
+    private void EnsureWhiteboard()
+    {
+        if (_whiteboard is not null) return;
+        _whiteboard = new WhiteboardWindow();
+        _whiteboard.PreviewPointerDown += (_, _) =>
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+        };
+        _whiteboard.Surface.HistoryStateChanged += OnHistoryStateChanged;
+    }
+
+    private void DisposeWhiteboard()
+    {
+        if (_whiteboard is null) return;
+        _whiteboard.Surface.HistoryStateChanged -= OnHistoryStateChanged;
+        _whiteboard.Close();
+        _whiteboard = null;
+        _whiteboardPresented = false;
+        SyncUndoRedoState();
+    }
+
+    private void PresentWhiteboard()
+    {
+        if (_whiteboard is null) return;
+        _whiteboard.Show();
+        _whiteboardPresented = true;
+    }
+
+    private void ConcealWhiteboard()
+    {
+        if (_whiteboard is null) return;
+        _whiteboard.Hide();
+        _whiteboardPresented = false;
+    }
+
+    /// <summary>
+    /// 换了一块画布。<b>一边让开、另一边按当前选中项重新决定要不要显形</b>，
+    /// 顺带把按钮的外观刷一遍（"选择"那颗的图标与说明是按场景的）。
+    /// <para>
+    /// 这里只刷外观、不重建控件：重建会丢掉键盘焦点（拖滑杆每一步都会走到重建那条路上，
+    /// 那条判断在 <see cref="SyncToolControls"/> 的结构签名里）。
+    /// </para>
+    /// </summary>
+    private void OnCanvasSceneChanged(CanvasScene scene)
+    {
+        if (_isClosing) return;
+
+        if (scene == CanvasScene.Whiteboard)
+        {
+            // 批注让开：两块全屏画布叠着没有意义，而"墨迹在各自的历史里"这件事不受影响 ——
+            // 隐藏不等于拆销，两边回来时都还是自己那一屏。
+            _annotationOverlay?.SetClickThrough(false);
+            ConcealCanvas();
+        }
+        else
+        {
+            ConcealWhiteboard();
+        }
+
+        RefreshToolVisuals();
+        SyncCanvasOverlay();
+    }
+
+    /// <summary>
+    /// 只刷每颗按钮的外观（图标 / 色标 / 名称 / 说明）。
+    /// <para>
+    /// <b>换场景为什么要走这一趟而不是重建</b>：按钮的身份是"那一项"，场景改的是"它此刻是什么意思"。
+    /// 重建会连控件一起换掉，键盘焦点当场没了 —— 而这正是结构签名 <c>{Id}:{Kind}</c>
+    /// 不含场景的那个理由：结构没变，变的只是画上去的样子。
+    /// </para>
+    /// </summary>
+    private void RefreshToolVisuals()
+    {
+        foreach (var tool in ToolbarTools.Items)
+        {
+            if (_toolControls.TryGetValue(tool.Id, out var control)) RefreshToolVisual(tool, control);
+        }
+    }
+
+    /// <summary>
+    /// <b>当前那块画布</b>该怎么样：白板在眼前就走白板那套，否则走屏幕批注那套。
+    /// <para>
+    /// 两条路都是"必经之路"——选中项变了、画布设置变了、场景变了、启动时都走这里。
+    /// 场景这一层放在外面而不是塞进 <see cref="SyncAnnotationOverlay"/> 的分支里，
+    /// 是因为两边的"鼠标那颗钮"意思根本不同（批注里是"把桌面还回去"，白板里是"选择"），
+    /// 混在一个 switch 里迟早写成一堆 <c>if (白板)</c>。
+    /// </para>
+    /// </summary>
+    private void SyncCanvasOverlay()
+    {
+        if (_isClosing) return;
+
+        if (CanvasSceneState.IsActive(CanvasScene.Whiteboard))
+        {
+            SyncWhiteboardOverlay();
+            return;
+        }
+
+        SyncAnnotationOverlay();
+    }
+
+    /// <summary>
+    /// 白板这一套：<b>没有穿透、没有冻结</b>（那就是一块盖住桌面的底，没有"透出去"这回事）。
+    /// <para>
+    /// 「选择」（现在还是鼠标那颗的位子）暂时收起白板 —— 等它真的会选笔迹了，
+    /// 它在白板里的意思就换成"留下这块底、只是不写"。
+    /// </para>
+    /// </summary>
+    private void SyncWhiteboardOverlay()
+    {
+        if (_settingsWindow is not null)
+        {
+            // 设置开着时白板<b>留在屏上</b>：底色那一项是当场生效的，
+            // 藏起来的话用户换了档却什么都看不见，那这条设置就等于没做。
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+            SyncUndoRedoState();
+            return;
+        }
+
+        var tool = ToolbarTools.Selected;
+        if (tool is null || tool.Kind == ToolbarToolKind.Mouse)
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+            ConcealWhiteboard();
+            SyncUndoRedoState();
+            return;
+        }
+
+        switch (tool.Kind)
+        {
+            case ToolbarToolKind.Pen:
+                HideEraserSecondaryMenu();
+                EnsureWhiteboard();
+                _whiteboard!.Surface.SetInkMode();
+                ApplyPenTool(_whiteboard.Surface, tool);
+                PresentWhiteboard();
+                SyncUndoRedoState();
+                KeepToolbarForeground();
+                break;
+
+            case ToolbarToolKind.Eraser:
+                HidePenSecondaryMenu();
+                EnsureWhiteboard();
+                _whiteboard!.Surface.SetEraseMode();
+                ApplyEraserTool(_whiteboard.Surface, tool);
+                PresentWhiteboard();
+                SyncUndoRedoState();
+                KeepToolbarForeground();
+                break;
+
+            default:
+                // 撤销 / 重做 / 分隔线 / 白板 / 设置不是"工具"：它们不改变当前在写还是在擦。
+                SyncUndoRedoState();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 把"当前那块画布"该显的显、该藏的藏。<b>进白板时批注让开，进批注时白板让开</b>，
+    /// 所以这里不再自己判选中项是哪一类之外的事。
+    /// </summary>
+    private void ToggleCanvasScene(CanvasScene scene)
+    {
+        if (CanvasSceneState.Active == scene)
+        {
+            // 再点一次 = 回去。白板那颗是开关，不是一根单向的门。
+            CanvasSceneState.Active = scene == CanvasScene.Whiteboard
+                ? CanvasScene.ScreenAnnotation
+                : CanvasScene.Whiteboard;
+            return;
+        }
+
+        CanvasSceneState.Active = scene;
+
+        // 进白板时如果手里空着（选中的是"鼠标 / 选择"），先递一支笔过去：
+        // 用户点"白板"是要写，不是要看一块空底；点开之后什么都没发生的那种"没反应"最难猜。
+        if (scene == CanvasScene.Whiteboard && ToolbarTools.Selected?.Kind == ToolbarToolKind.Mouse)
+        {
+            var firstPen = ToolbarTools.Items
+                .FirstOrDefault(static item => item.Kind == ToolbarToolKind.Pen)
+                ?? ToolbarTools.Items.FirstOrDefault(static item => item.Kind == ToolbarToolKind.Eraser);
+            if (firstPen is not null) ToolbarTools.Select(firstPen.Id);
+        }
     }
 
     /// <summary>
@@ -524,8 +767,8 @@ public partial class AnnotationToolbarWindow : Window
             case ToolbarToolKind.Pen:
                 HideEraserSecondaryMenu();
                 EnsureAnnotationOverlay();
-                _annotationOverlay!.SetInkMode();
-                ApplyPenToolToOverlay(tool);
+                _annotationOverlay!.Surface.SetInkMode();
+                ApplyPenTool(_annotationOverlay.Surface, tool);
                 PrepareCanvasForDrawing();
                 PresentCanvas();
                 SyncUndoRedoState();
@@ -535,8 +778,8 @@ public partial class AnnotationToolbarWindow : Window
             case ToolbarToolKind.Eraser:
                 HidePenSecondaryMenu();
                 EnsureAnnotationOverlay();
-                _annotationOverlay!.SetEraseMode();
-                ApplyEraserToolToOverlay(tool);
+                _annotationOverlay!.Surface.SetEraseMode();
+                ApplyEraserTool(_annotationOverlay.Surface, tool);
                 PrepareCanvasForDrawing();
                 PresentCanvas();
                 SyncUndoRedoState();
@@ -655,19 +898,17 @@ public partial class AnnotationToolbarWindow : Window
     /// </summary>
     private void KeepToolbarForeground() => Activate();
 
-    private void ApplyPenToolToOverlay(ToolbarTool tool)
+    private void ApplyPenTool(CanvasSurface surface, ToolbarTool tool)
     {
-        if (_annotationOverlay is null) return;
-        _annotationOverlay.SetPenKind(tool.PenKind);
-        _annotationOverlay.SetPenColor(Argb.Unpack(tool.ColorArgb));
-        _annotationOverlay.SetPenThickness(tool.Thickness);
+        surface.SetPenKind(tool.PenKind);
+        surface.SetPenColor(Argb.Unpack(tool.ColorArgb));
+        surface.SetPenThickness(tool.Thickness);
     }
 
-    private void ApplyEraserToolToOverlay(ToolbarTool tool)
+    private void ApplyEraserTool(CanvasSurface surface, ToolbarTool tool)
     {
-        if (_annotationOverlay is null) return;
-        _annotationOverlay.SetEraserMode(tool.EraseMode);
-        _annotationOverlay.SetEraserRadius(tool.EraserRadius);
+        surface.SetEraserMode(tool.EraseMode);
+        surface.SetEraserRadius(tool.EraserRadius);
     }
 
     // ------------------------------------------------------------------ 二级菜单
@@ -796,7 +1037,7 @@ public partial class AnnotationToolbarWindow : Window
         _eraserMenuWindow.EraserRadiusChanged += radius => ToolbarTools.UpdateSelectedEraser(tool => tool with { EraserRadius = radius });
         _eraserMenuWindow.ClearRequested += () =>
         {
-            _annotationOverlay?.ClearCanvas();
+            ActiveSurface?.ClearCanvas();
             SyncUndoRedoState();
         };
         _eraserMenuWindow.Closed += (_, _) =>
@@ -995,7 +1236,7 @@ public partial class AnnotationToolbarWindow : Window
         {
             _settingsWindow = null;
             if (_isClosing) return;
-            SyncAnnotationOverlay();
+            SyncCanvasOverlay();
         };
 
         w.Show();

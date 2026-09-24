@@ -345,6 +345,7 @@ internal static class ToolbarTools
         ToolbarToolKind.Undo => "撤销",
         ToolbarToolKind.Redo => "重做",
         ToolbarToolKind.Settings => "设置",
+        ToolbarToolKind.Whiteboard => "白板",
         _ => "分隔线",
     };
 
@@ -356,10 +357,17 @@ internal static class ToolbarTools
 
     // ------------------------------------------------------------------ 内部
 
-    /// <summary>默认工具栏 = 今天这一条：鼠标 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置。</summary>
+    /// <summary>
+    /// 默认工具栏 = 今天这一条：鼠标 / 白板 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置。
+    /// <para>
+    /// 白板紧跟在鼠标后面：这两颗是一对（一个出这块画布、一个进那块）。
+    /// 存档里补齐固定项时用的是同一个位置，所以"首启"与"从旧档升级"看到的是同一条顺序。
+    /// </para>
+    /// </summary>
     internal static List<ToolbarTool> DefaultItems() =>
     [
         new ToolbarTool { Id = "mouse", Kind = ToolbarToolKind.Mouse, Name = "鼠标模式" },
+        new ToolbarTool { Id = "whiteboard", Kind = ToolbarToolKind.Whiteboard, Name = "白板" },
         DefaultPen() with { Id = "pen.1", Name = "笔" },
         DefaultEraser() with { Id = "eraser.1", Name = "橡皮" },
         new ToolbarTool { Id = "undo", Kind = ToolbarToolKind.Undo, Name = "撤销" },

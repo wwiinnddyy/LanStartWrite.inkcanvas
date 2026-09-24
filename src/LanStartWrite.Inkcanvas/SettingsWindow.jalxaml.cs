@@ -173,25 +173,78 @@ public partial class SettingsWindow : Window
         BindSwitch((FluentToggleSwitch)FreezeSwitch!, "冻结模式", value =>
             CanvasOptions.SetFreeze(CanvasScene.ScreenAnnotation, value));
 
+        BuildBackgroundSwatches();
+
         CanvasOptions.Changed += SyncCanvasSection;
         SyncCanvasSection();
     }
+
+    /// <summary>
+    /// 白板底色那三颗。<b>整块由 <see cref="CanvasBackgroundPalette"/> 生成</b>，
+    /// 标记里只有一个空容器 —— 与笔菜单那九格同一个理由：颜色抄进标记就是两张表，
+    /// 改色板时必漏一处，而漏了没有任何东西会报错。
+    /// <para>样式靠具名点键：隐式样式按精确类型查，别指望 <c>RadioButton</c> 在这里命中
+    /// 那套色板格子（库的隐式行是普通单选圈）。</para>
+    /// </summary>
+    private void BuildBackgroundSwatches()
+    {
+        var host = (StackPanel)WhiteboardBackgroundSwatches!;
+        var colors = CanvasBackgroundPalette.Colors;
+        _backgroundRings = new RadioButton[colors.Length];
+
+        for (var i = 0; i < colors.Length; i++)
+        {
+            var index = i;
+            var ring = new RadioButton
+            {
+                GroupName = "CanvasBackground",
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            ring.SetResourceReference(StyleProperty, "PenColorSwatchStyle");
+            ring.Background = new SolidColorBrush(colors[index]);
+            var name = CanvasBackgroundPalette.Names[index];
+            ring.ToolTip = name;
+            AutomationProperties.SetName(ring, name);
+            ring.Checked += (_, _) =>
+            {
+                if (_sync) return;
+                CanvasOptions.SetBackground(CanvasScene.Whiteboard, Argb.Pack(colors[index]));
+            };
+
+            _backgroundRings[index] = ring;
+            host.Children.Add(ring);
+        }
+    }
+
+    private RadioButton[] _backgroundRings = [];
 
     private void SyncCanvasSection(CanvasScene scene) => SyncCanvasSection();
 
     private void SyncCanvasSection()
     {
         var annotation = CanvasOptions.For(CanvasScene.ScreenAnnotation);
+        var whiteboard = CanvasOptions.For(CanvasScene.Whiteboard);
 
         _sync = true;
         try
         {
             ((FluentToggleSwitch)PassThroughSwitch!).IsChecked = annotation.PassThrough;
             ((FluentToggleSwitch)FreezeSwitch!).IsChecked = annotation.Freeze;
+
+            var selected = CanvasBackgroundPalette.NearestIndex(whiteboard.BackgroundArgb);
+            for (var i = 0; i < _backgroundRings.Length; i++)
+                _backgroundRings[i].IsChecked = i == selected;
         }
         finally { _sync = false; }
 
         ((TextBlock)CanvasBehaviorText!).Text = CanvasBehaviorSummary(annotation);
+
+        // 底色与那两个开关不是一类：它<b>当场生效</b>，所以这一句念的是"现在是什么"，
+        // 而不是"下次进画布会怎样"。
+        ((TextBlock)WhiteboardBehaviorText!).Text =
+            $"现在的背景：{CanvasBackgroundPalette.Names[CanvasBackgroundPalette.NearestIndex(whiteboard.BackgroundArgb)]}。"
+            + (CanvasSceneState.IsActive(CanvasScene.Whiteboard) ? "白板正在屏上，改一档立刻看得见。" : "");
     }
 
     /// <summary>把两个开关翻译成人话。<b>不是装饰</b>：这两个开关生效的时机在别处

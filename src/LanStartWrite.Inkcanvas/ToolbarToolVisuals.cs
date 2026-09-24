@@ -27,17 +27,22 @@ internal static class ToolbarToolVisuals
     private static readonly FontFamily FluentIconFont = new("Segoe Fluent Icons");
 
     /// <summary>
-    /// 图标码点。<b>六颗钮六个形状，不再按笔型 / 擦法细分</b>。
+    /// 图标码点。<b>一颗钮一个形状，不按笔型 / 擦法细分</b>。
     /// <para>
     /// 试过按用途细分（荧光笔用 Highlight、激光笔与笔迹擦用"实心"变体 E829 / E82C），
     /// 两个问题：实心那几个在 40×40 的小格里读起来就是一团黑（用户原话"有的按钮它是黑色的"），
     /// 而擦法之间的差别本来就该靠<b>名字与菜单</b>说清，不该靠把图标换成另一团黑。
-    /// 所以回到原来的六个码点：一支笔就是一支笔的形状，两支笔靠色标区分。
     /// </para>
     /// <para>
     /// 码点取自 FluentJalium 的实测表且 <c>ink &gt; 0</c>；<b>这个运行时里没有激光笔与
     /// 整笔擦的专用字形</b>（<c>StrokeErase</c> / <c>PointErase</c> / <c>Marker</c> 那批 ink = 0，
     /// <c>Laser</c> 这个名字压根不存在），这也是当初误入"实心变体"那条路的起点。
+    /// </para>
+    /// <para>
+    /// <b>同一颗钮在两块画布上可以换一个形状</b>（鼠标那颗在白板里的意思是"选择墨迹"，
+    /// 于是它用 SelectAll E8B3）—— 这类"按场景换呈现、不换身份"的判断一律放在这里，
+    /// 不由批注栏与设置页各判一次。理由与"码点只有一份"是同一条：
+    /// 两处各写一遍，改了一处另一处不跟着改，症状是"列表里是选择、工具栏上还是鼠标"。
     /// </para>
     /// </summary>
     internal static ushort GlyphFor(ToolbarTool tool) => tool.Kind switch
@@ -48,6 +53,7 @@ internal static class ToolbarToolVisuals
         ToolbarToolKind.Undo => 0xE7A7,        // Undo
         ToolbarToolKind.Redo => 0xE7A6,        // Redo
         ToolbarToolKind.Settings => 0xE713,    // Setting
+        ToolbarToolKind.Whiteboard => 0xE786,  // Slideshow，ink=389
         _ => 0xE76D,
     };
 

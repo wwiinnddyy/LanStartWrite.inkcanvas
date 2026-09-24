@@ -30,4 +30,15 @@ internal enum ToolbarToolKind
 
     /// <summary>纯视觉分隔线。可以有多项，没有数据。</summary>
     Separator = 6,
+
+    /// <summary>
+    /// 进 / 出白板这块画布。工具栏里固定有且只有一个 —— 它是这块画布的唯一入口，
+    /// 让人删掉就等于把门从里面锁上（与 <see cref="Settings"/> 同一条理由）。
+    /// <para>
+    /// <b>它不是"选中的工具"</b>：点它换的是"眼前是哪块画布"，不动当前选中的笔或橡皮，
+    /// 所以它渲染成一颗普通按钮，而不是 <c>RadioToolToggleButton</c> ——
+    /// 选中态只有一根轴（<see cref="ToolbarTools.SelectedId"/>），再挂一根就是第二个真相。
+    /// </para>
+    /// </summary>
+    Whiteboard = 7,
 }

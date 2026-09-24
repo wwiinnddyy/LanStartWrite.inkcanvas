@@ -1,0 +1,24 @@
+<Window xmlns="http://schemas.jalium.ui/2024"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LanStartWrite.Inkcanvas.WhiteboardWindow"
+        Title=""
+        WindowState="Maximized"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        IsShowTitleBar="False"
+        IsShowMinimizeButton="False"
+        IsShowMaximizeButton="False"
+        IsShowCloseButton="False"
+        HasSystemMenu="False"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        AllowsTransparency="False"
+        SystemBackdrop="None"
+        ResizeMode="NoResize">
+    <!--
+      与批注那块画布同一形状、同一层，区别只在这一块是有底的：
+      AllowsTransparency=False，而那块底由 code-behind 从画布设置里铺上来。
+      墨迹面不在标记里声明：AGENTS 的规矩是 .jalxaml 里不出现 Dusk 的类型名。
+    -->
+    <Grid x:Name="InkHost" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+</Window>
