@@ -6,13 +6,22 @@
 #
 # 怎么触发：
 #   1. Actions 页手动触发（workflow_dispatch），填版本号（如 1.2.0，不带 v 前缀）；
-#   2. 或推送 v 开头的 tag（v1.2.0 → 版本号取 1.2.0）。
+#      默认不建 Release（勾上才建），所以可以先拿它当"能不能编出来"的探针反复跑；
+#   2. 或推送 v 开头的 tag（v1.2.0 → 版本号取 1.2.0），那条路一定会建 Release。
 #
 # 两个必须知道的依赖（都签出在仓库之外，见 fluentjalium 那一步）：
-#   - FluentJalium（兄弟仓库，源码直引）—— 签出 ref 可用仓库变量 FLUENT_JALIUM_REF 覆盖；
-#     它多目标 net10.0 之前，Linux 这一端靠工作流里的兜底补丁（上游改完即可删）。
+#   - FluentJalium（兄弟仓库，源码直引）—— 默认签出 **Astra** 分支，不是 main：
+#     main 那份布局里根本没有 src/FluentJalium/FluentJalium.csproj（Astra 是整体替换）。
+#     钉到某个提交用仓库变量 FLUENT_JALIUM_REF。它多目标 net10.0 之前，Linux 这一端靠
+#     "补多目标"那一步（先补再 publish —— 顺序反了第一次 publish 就已经红了，兜底没机会跑）。
 #   - Dusk（闭源 SDK，feed 在 ../dusk-feed）—— packaging/feed 里随仓库带了一份拷贝，
-#     所以 CI 不依赖那台机器的本地路径；Dusk 升版本时记得同步 packaging/feed。
+#     CI 上没有那个本机路径，所以 restore 前先把本机源摘掉，只认随仓库的这份。
+#
+# 三处单位/命名坑，都是踩过一次才知道的：
+#   - RID 是 win-x64 / linux-x64，不是 windows-x64 / linux-x64（矩阵里 platform 只当名字用）。
+#   - choco 装的 makensis 在**同一步**里不会出现在 PATH 上（PATH 是进程启动时那份），
+#     所以要按安装位置点名。
+#   - installer.nsi 的 OutFile 是 ..\dist\ —— 相对它自己算，所以工作目录必须是 packaging/windows。
 
 name: release
 
@@ -30,7 +39,7 @@ on:
       create_release:
         description: '打完包后创建 GitHub Release 并上传产物'
         type: boolean
-        default: true
+        default: false
   push:
     tags:
       - 'v*'
@@ -41,32 +50,40 @@ permissions:
 env:
   CONFIGURATION: Release
   DOTNET_VERSION: '10.0.x'
+  APPBASENAME: LanStartWrite.Inkcanvas
 
 jobs:
   build:
-    name: 打包（${{ matrix.os }}）
+    name: 打包（${{ matrix.platform }}）
     runs-on: ${{ matrix.os }}
-      strategy:
-        fail-fast: false
-        matrix:
-          include:
-            - os: windows-latest
-              platform: windows-x64
-              target_framework: net10.0-windows
-              # 安装包在 packaging/dist 下（NSIS 脚本从自己的目录算相对路径，见该文件）。
-              artifact_glob: packaging/dist/*.exe
-            - os: ubuntu-latest
-              platform: linux-x64
-              target_framework: net10.0
-              artifact_glob: dist/*.AppImage
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows-x64
+            rid: win-x64
+            target_framework: net10.0-windows
+            # 安装包在 packaging/dist 下（NSIS 脚本从自己的目录算相对路径，见该文件）。
+            artifact_glob: packaging/dist/*.exe
+          - os: ubuntu-latest
+            platform: linux-x64
+            rid: linux-x64
+            target_framework: net10.0
+            artifact_glob: dist/*.AppImage
 
     steps:
       - name: 校验并解析版本号
         id: version
         shell: bash
+        env:
+          # 手动触发填的版本号经 env 进脚本，不直接插进 run 那一串：
+          # workflow 的 run 块是先展开再交给 shell 的，把外部输入拼进脚本文本里就是脚本注入的面。
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_SELF_CONTAINED: ${{ inputs.self_contained }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            raw="${{ inputs.version }}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            raw="$INPUT_VERSION"
           else
             raw="${GITHUB_REF_NAME#v}"
           fi
@@ -77,7 +94,7 @@ jobs:
           # 自带运行时是默认（AppImage 的"开箱即跑"与安装器的零依赖都靠它）；
           # 只有手动触发、且显式取消勾选时才退回 framework-dependent（装包小，但要求机器装了 .NET 10）。
           self_contained="true"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.self_contained }}" = "false" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_SELF_CONTAINED" = "false" ]; then
             self_contained="false"
           fi
           echo "version=$raw" >> "$GITHUB_OUTPUT"
@@ -87,18 +104,39 @@ jobs:
         uses: actions/checkout@v4
 
       # FluentJalium 是兄弟仓库、源码直引（见 csproj 的 FluentJaliumProject 属性）。
-      # ref 默认 main，可用仓库变量 FLUENT_JALIUM_REF 钉到某个提交。
+      # 默认 Astra；要钉某个提交就用仓库变量 FLUENT_JALIUM_REF。
       - name: 签出 FluentJalium
         uses: actions/checkout@v4
         with:
           repository: wwiinnddyy/FluentJalium
-          ref: ${{ vars.FLUENT_JALIUM_REF || 'main' }}
+          ref: ${{ vars.FLUENT_JALIUM_REF || 'Astra' }}
           path: fluentjalium
 
       - name: 安装 .NET SDK
         uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # NuGet.config 里排在前面的 dusk-sdk 是本机路径（../dusk-feed），CI 上没有。
+      # 摘掉它，还原只可能从随仓库那份 packaging/feed 里拿到 Dusk —— 拿不到就当场红，
+      # 而不是留一句"源不存在"的警告让人去猜是哪个 feed 供的包。
+      - name: 只认随仓库那份 Dusk feed
+        shell: bash
+        run: |
+          dotnet nuget remove source dusk-sdk --configfile NuGet.config
+          dotnet nuget list source --configfile NuGet.config
+
+      # 必须在 publish 之前：FluentJalium 还是单目标 net10.0-windows 时，
+      # Linux 这端第一次 publish 就会红，补在后面等于永远跑不到。
+      - name: FluentJalium 尚未多目标时补上 net10.0（上游改完可删）
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          csproj="fluentjalium/src/FluentJalium/FluentJalium.csproj"
+          if grep -q "net10.0-windows;net10.0" "$csproj"; then
+            echo "上游已多目标，这一步什么都不做"
+          else
+            sed -i 's|<TargetFramework>net10.0-windows</TargetFramework>|<TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>|' "$csproj"
+            echo "已为 FluentJalium 补上 net10.0 目标（上游多目标之后这一步就是空操作）"
+          fi
 
       - name: 发布（${{ matrix.platform }}）
         shell: bash
@@ -108,33 +146,13 @@ jobs:
           FLUENT_JALIUM: ${{ github.workspace }}/fluentjalium/src/FluentJalium/FluentJalium.csproj
         run: |
           dotnet publish src/LanStartWrite.Inkcanvas/LanStartWrite.Inkcanvas.csproj \
-            -c ${{ env.CONFIGURATION }} \
-            -f ${{ matrix.target_framework }} \
-            -r ${{ matrix.platform }} \
+            -c "$CONFIGURATION" \
+            -f "${{ matrix.target_framework }}" \
+            -r "${{ matrix.rid }}" \
             --self-contained "$SELF_CONTAINED" \
             -p:Version="$VERSION" \
             -p:FluentJaliumProject="$FLUENT_JALIUM" \
             -o publish
-
-      - name: FluentJalium 尚未多目标时补上 net10.0（上游改完可删）
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          SELF_CONTAINED: ${{ steps.version.outputs.self_contained }}
-          FLUENT_JALIUM: ${{ github.workspace }}/fluentjalium/src/FluentJalium/FluentJalium.csproj
-        run: |
-          csproj="fluentjalium/src/FluentJalium/FluentJalium.csproj"
-          if ! grep -q "net10.0-windows;net10.0" "$csproj"; then
-            sed -i 's|<TargetFramework>net10.0-windows</TargetFramework>|<TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>|' "$csproj"
-            echo "已为 FluentJalium 补上 net10.0 目标（上游多目标之后这一步就是空操作）"
-            dotnet publish src/LanStartWrite.Inkcanvas/LanStartWrite.Inkcanvas.csproj \
-              -c ${{ env.CONFIGURATION }} -f net10.0 -r linux-x64 \
-              --self-contained "$SELF_CONTAINED" \
-              -p:Version="$VERSION" \
-              -p:FluentJaliumProject="$FLUENT_JALIUM" \
-              -o publish
-          fi
 
       - name: Windows · NSIS 安装包
         if: matrix.os == 'windows-latest'
@@ -142,26 +160,40 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-            choco install nsis -y --no-progress
+          # choco 装的 makensis 在本进程的 PATH 上还没有（PATH 是进程启动时那份），
+          # 所以先找、找不到就装、装完按安装位置点名。
+          $makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $makensis) {
+            choco install nsis -y --no-progress | Out-Null
+            $candidates = @(
+              "$env:ProgramFiles\NSIS\makensis.exe",
+              "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+            )
+            $makensis = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           }
-          # installer.nsi 是 UTF-8 BOM 的：makensis 靠 BOM 认出中文（英文机器上尤其要紧）。
+          if (-not $makensis) { Write-Error "makensis 没找到（choco 装完了也不在预期位置）"; exit 1 }
+          Write-Host "makensis: $makensis"
+
           # 版本资源要四段数字，预发布后缀进不去 —— 从 VERSION 抠出三段数字补 .0。
           $version4 = if ($env:VERSION -match '^(\d+\.\d+\.\d+)') { $Matches[1] + '.0' } else { '0.0.0.0' }
           # 在脚本自己的目录里跑：installer.nsi 的 OutFile 是 ..\dist\，相对它才算得对。
           Set-Location packaging/windows
-          New-Item -ItemType Directory -Force dist | Out-Null
-          makensis /DVERSION=$env:VERSION `
-                   /DVERSION4=$version4 `
-                   /DBINDIR="$env:GITHUB_WORKSPACE\publish" `
-                   installer.nsi
+          New-Item -ItemType Directory -Force ../dist | Out-Null
+          & $makensis "/DVERSION=$env:VERSION" `
+                       "/DVERSION4=$version4" `
+                       "/DBINDIR=$env:GITHUB_WORKSPACE\publish" `
+                       installer.nsi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem ../dist | Format-Table Name, Length
 
       - name: Linux · AppImage
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          # 不让 linuxdeploy 自己去下载 appstream 插件：图标与 .desktop 我们已经放进 AppDir 了，
+          # 多拉一个插件只会多一个能在 CI 上红的环节。
+          NO_APPSTREAM: '1'
         run: |
           curl -L --fail -o linuxdeploy \
             https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
@@ -169,47 +201,60 @@ jobs:
           sudo mv linuxdeploy /usr/local/bin/linuxdeploy
           chmod +x packaging/linux/build-appimage.sh
           packaging/linux/build-appimage.sh publish "$VERSION" dist
+          ls -la dist
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: LanStartWrite.Inkcanvas-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+          name: ${{ env.APPBASENAME }}-${{ steps.version.outputs.version }}-${{ matrix.platform }}
           path: ${{ matrix.artifact_glob }}
           if-no-files-found: error
 
   release:
     name: 创建 Release
     needs: build
+    # 推 tag 一定发；手动触发要勾上那一格才发（不勾就只当探针跑一遍编译与打包）。
     if: ${{ github.event_name == 'push' || inputs.create_release }}
     runs-on: ubuntu-latest
     steps:
       - name: 解析版本号
         id: version
         shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            raw="${{ inputs.version }}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
           else
-            raw="${GITHUB_REF_NAME#v}"
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           fi
-          echo "version=$raw" >> "$GITHUB_OUTPUT"
+
       - name: 下载全部构建产物
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: 创建 GitHub Release
+      - name: 创建 GitHub Release（已存在就覆盖上传）
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           tag="v$VERSION"
-          files=$(find artifacts -type f)
-          echo "本次上传："; echo "$files"
+          mapfile -t files < <(find artifacts -type f)
+          echo "本次上传："; printf '  %s\n' "${files[@]}"
+          if [ "${#files[@]}" = 0 ]; then echo "::error::一个产物都没找到"; exit 1; fi
 
-          gh release create "$tag" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "揽星书写 $VERSION" \
-            --generate-notes \
-            $files
+          # 同一个版本重跑（改了打包脚本再发一次）不该红在"Release 已存在"上。
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+            gh release edit "$tag" --latest
+          else
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "揽星书写 $VERSION" \
+              --latest \
+              --generate-notes \
+              "${files[@]}"
+          fi
+          gh release view "$tag" --json tagName,assets -q '.tagName, (.assets[].name)[]'
