@@ -267,5 +267,7 @@ jobs:
               --generate-notes \
               "${files[@]}"
           fi
+          # 自检读回来的是真实状态：资产名一条条打出来。
+          # （jq 里 `.assets[].name` 已经是字符串，别再跟一个 `[]` —— 那会去 iterate 一个字符串。）
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
-            --json tagName,assets -q '.tagName, (.assets[].name)[]'
+            --json tagName,assets -q '.tagName, .assets[].name'
