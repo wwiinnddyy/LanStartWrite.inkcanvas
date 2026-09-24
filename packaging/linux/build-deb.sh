@@ -24,7 +24,10 @@ EXEC_NAME="LanStartWrite.Inkcanvas"
 MAINTAINER="wwiinnddyy <wwiinnddyy@users.noreply.github.com>"
 
 command -v dpkg-deb >/dev/null || { echo "::error::没有 dpkg-deb（装 dpkg-dev）"; exit 1; }
-[ -x "$PUBLISH_DIR/$EXEC_NAME" ] || { echo "::error::$PUBLISH_DIR/$EXEC_NAME 不在或不可执行 —— 发布目录是不是发错平台了？"; exit 1; }
+# 只要求"在"，不要求已经 +x：actions/download-artifact 回来时 Unix 模式位是丢的，
+# 而下面本来就要把 apphost 的 +x 显式设回去 —— 在这儿卡住只会让玲珑那一步拿到一个空 deb。
+[ -f "$PUBLISH_DIR/$EXEC_NAME" ] \
+  || { echo "::error::$PUBLISH_DIR/$EXEC_NAME 不在发布目录里 —— 平台发错了？"; exit 1; }
 
 ROOT="$(mktemp -d)/$PKG"
 mkdir -p "$ROOT/DEBIAN" "$ROOT/opt/$PKG" "$ROOT/usr/bin" \

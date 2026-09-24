@@ -306,8 +306,15 @@ jobs:
           # "App dir '/tmp/bc' is not empty"（第一趟失败留下的状态），还白花一倍时间。
           time flatpak-builder --user --assumeyes --force-clean             --repo=/tmp/repo --state-dir=/tmp/fbstate --install=/tmp/inst /tmp/bc "$manifest"
           echo "builder rc=$?"
-          echo "== 造出来的 flatpak 树里到底有什么 =="
-          ls -la /tmp/bc/files/app/bin /tmp/bc/files/app/lib/lanstartwrite 2>&1 | head -12
+          echo "== 装进去的东西 =="
+          # --install 的落位层级不靠猜（上一轮这里 ls 了一个不存在的路径，
+          # ls 失败却没人看退出码 —— job 照样绿，等于什么都没验）。find 出来并断言非空。
+          for want in lanstartwrite LanStartWrite.Inkcanvas "$appid.desktop" "$appid.png"; do
+            hit=$(find /tmp/inst -name "$want" -print -quit 2>/dev/null)
+            echo "  $want -> ${hit:-<没找到>}"
+            [ -n "$hit" ] || { echo "::error 沙箱树里没有 $want"; exit 1; }
+          done
+          du -sh /tmp/inst 2>/dev/null
           echo "== 打单文件 .flatpak =="
           flatpak build-bundle /tmp/repo "/tmp/$appid.flatpak" "$appid" 2>&1 | tail -3
           out="dist/LanStartWrite.Inkcanvas-$VERSION-linux-x64.flatpak"
@@ -363,6 +370,10 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
+          # 官方默认 5 秒：export 成 UAB 要从 mirror-repo-linglong.deepin.com 取
+          # cn.org.linyaps.builder.utils，在墨西哥区的 runner 上 5 秒不够，
+          # 报的是 "Timeout was reached / cannot send request to remote server"。
+          LINGLONG_CONNECT_TIMEOUT: '120'
         run: |
           set +e
           repo="$GITHUB_WORKSPACE"
@@ -370,6 +381,13 @@ jobs:
           chmod +x packaging/linux/build-deb.sh
           packaging/linux/build-deb.sh publish "$VERSION" amd64 dist
           deb=$(readlink -f dist/*.deb)
+          # 上一轮这里静默拿到空串（deb 没造出来 → url 成了光秃秃的 "file://"，
+          # 报错报在 "Source 0 downloading" 上，看着像 file:// 这条路不通，其实根本没试到）。
+          if [ ! -f "$deb" ]; then
+            echo "::error::deb 没造出来，后面全是假错误"
+            ls -la dist 2>&1
+            exit 1
+          fi
           sha=$(sha256sum "$deb" | cut -d' ' -f1)
           # 玲珑的版本号参与更新比较，官方例子用四段：三位补一段 .0。
           llversion=$(echo "$VERSION" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1.0/')
