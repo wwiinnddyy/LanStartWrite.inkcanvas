@@ -229,12 +229,23 @@ jobs:
             set -e
             apt-get update -qq >/dev/null
             apt-get install -y -qq desktop-file-utils ./dist/*.deb >/dev/null && echo "apt install：OK"
-            echo "落位："; dpkg -L lanstartwrite | sed "s|^|  |"
+            echo "落位：$(dpkg -L lanstartwrite | wc -l) 条路径，关键的几条："
+            dpkg -L lanstartwrite | grep -E "lanstartwrite$|LanStartWrite.Inkcanvas$|applications|apps/" | sed "s|^|  |"
             test -x /usr/bin/lanstartwrite || { echo "没有 /usr/bin/lanstartwrite"; exit 1; }
+            test -x /opt/lanstartwrite/LanStartWrite.Inkcanvas || { echo "apphost 在包里丢了 +x"; exit 1; }
             desktop-file-validate "/usr/share/applications/$APPID.desktop" && echo "desktop-file-validate：OK"
-            echo "== 没解析出来的动态库（空才对；非空说明 Depends 少写）=="
-            ldd /opt/lanstartwrite/LanStartWrite.Inkcanvas /opt/lanstartwrite/*.so 2>/dev/null \
-              | grep "not found" | sort -u | sed "s|^|  MISSING |" || echo "  （无）"
+            # 缺库当场判，不能只打一行警告 —— 那是训练人忽略它。实测唯一一条是
+            # liblttng-ust.so.0：coreclr 的 LTTng 追踪 provider（libcoreclrtraceptprovider.so）要它，
+            # Ubuntu 24.04 只提供 .so.1，缺了只是没有 LTTng 追踪，运行时自己降级。
+            # 所以它进白名单，而不是给 deb 写一条根本装不上的 Depends；白名单外的缺库一律红。
+            echo "== 动态库解析 =="
+            ldd /opt/lanstartwrite/LanStartWrite.Inkcanvas /opt/lanstartwrite/*.so \
+                /opt/lanstartwrite/lib/*.so 2>/dev/null | grep "not found" \
+              | awk "{print \$1}" | sort -u > /tmp/miss || true
+            printf "liblttng-ust.so.0\n" > /tmp/allow
+            extra=$(comm -23 /tmp/miss /tmp/allow)
+            if [ -n "$extra" ]; then echo "非预期缺库：$extra"; exit 1; fi
+            echo "  缺库只有白名单里的：$(tr "\n" " " < /tmp/miss)（清单见 packaging/README.md）"
           '
           # APPID 在五个地方出现（appid 文件、.desktop 文件名与 Icon=、flatpak 清单、玲珑 yaml）——
           # 抄不一致的症状是"装了三个各带一张默认图的同名应用"，所以扫一遍：
