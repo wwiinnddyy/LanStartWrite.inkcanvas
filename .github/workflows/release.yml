@@ -194,6 +194,12 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # appimagetool（continuous 那一支）硬要 desktop-file-validate，缺了就打出这行然后退出码 1：
+          # "desktop-file-validate command is missing, please install it"。runner 镜像里没预装。
+          command -v desktop-file-validate >/dev/null || {
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends desktop-file-utils
+          }
           # 打包工具（appimagetool）由脚本自己取：它得先解包再跑，CI 上没有 FUSE。
           chmod +x packaging/linux/build-appimage.sh
           packaging/linux/build-appimage.sh publish "$VERSION" dist

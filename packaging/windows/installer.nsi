@@ -50,8 +50,10 @@ VIAddVersionKey /LANG=2052 "LegalCopyright" "GPL-3.0"
 
 Page Directory
 Page InstFiles
-UninstPage Confirm
-UninstPage InstFiles
+; 卸载侧只有这一条：UninstPage 的关键字是 uninstConfirm（不是 Confirm），
+; 而"正在卸载"那一页是卸载器自带的、没有 UninstPage instfiles 这种写法 —— 写了会在
+; 脚本解析阶段就红（实测：Usage: UninstPage ... / Error in script on line 53）。
+UninstPage UninstConfirm
 
 !macro Files
   ; /r 整个目录：publish 产物里 dll/exe/资源一大把，逐个列举只会与发布清单脱节。

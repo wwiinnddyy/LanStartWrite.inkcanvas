@@ -1,6 +1,5 @@
 [Desktop Entry]
 Type=Application
-Version=1.0
 Name=揽星书写
 Comment=全屏批注与书写工具
 # AppImage 真正的入口是 AppRun（见 build-appimage.sh），这份 .desktop 管的是系统集成

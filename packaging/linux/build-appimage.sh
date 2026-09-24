@@ -4,7 +4,8 @@
 #   ./packaging/linux/build-appimage.sh <publish 目录> <版本号> <输出目录>
 #
 # 依赖：appimagetool（本脚本自己下到 RUNNER_TEMP 里，且以"解包后直接跑里面的二进制"的方式用 ——
-# CI 机器上没有 FUSE，AppImage 挂不起来）。
+# CI 机器上没有 FUSE，AppImage 挂不起来），以及 desktop-file-validate
+# （appimagetool 缺了它就直接退出码 1；工作流里 apt 装上）。
 
 set -euo pipefail
 
