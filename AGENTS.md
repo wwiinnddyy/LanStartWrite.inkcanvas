@@ -214,6 +214,14 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
 14. **工具栏的设置独立成页**（设置页导航六项：外观 / 墨迹 / 画布 / 工具栏 / 窗口与交互 / 关于）：
     「始终置顶工具栏」与「工具栏按钮」都搬了过去。用户点名的不是"多一个分组"，
     而是"工具栏这件事有自己的入口" —— 它会越长越多（对齐、吸附、透明度…），一开始就该有自己的页。
+15. **出现位置是算出来的，不是写死的**（`ToolbarPlacement`，在 `Program.cs` 里 Show 之前一次）：
+    主屏**工作区**下方居中、可见表面底边离任务栏 12 DIP。三件事分开看：
+    工作区读 `Jalium.UI.SystemParameters.WorkArea`（**已实测是 DIP**，与 `Window.Left` 同坐标系，
+    所以这里一次换算都没有 —— 单位换错不报错，只是栏跑到屏外）；
+    宽高读构造函数里 `FitSizeToContent` 量出来的实测值（栏宽随按钮数走，标记里的 300 早就不成立）；
+    标记里那对 `Left="120" Top="120"` 只剩兜底。另外 `FitSizeToContent` 在宽度变化时**守住中心**
+    而不是把右缘推出去 —— 用户摆的是一条居中的栏，加第二支笔就整条往右挪半颗钮，"居中"当场失真。
+    已知边界：`WorkArea` 说的是主屏（任务栏在副屏时会落在主屏下方）。
 
 ### 验收
 
@@ -221,6 +229,9 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
 **两支笔的颜色 / 粗细 / 笔锋互不影响**（含"手调之后切走再切回，那一支的形状还在"）、两把橡皮同理、
 固定项删不掉、删掉选中项之后选中态落回一个能用的工具、以及设置页那份列表的**行数必须等于数据项数**。
 `CheckToolbarTouch` 另外钉住六颗钮仍是 40×40、焦点环仍在、"选中铺 accent / 未选透明 / 图标继承 on-accent 墨色"。
+`CheckToolbarPlacement` 钉摆位：算术（合成工作区，不碰真屏幕）、接线（摆的是实测宽高、加一颗钮之后中心不跑）、
+单位（框架那份 `WorkArea` 与 `GetMonitorInfo` 的物理矩形 ÷ 该屏 DPI 对得上）。本机 2560×1516 @175% 实测：
+工作区 1462.86×866.29 DIP，395×68 的栏落在 (534, 792)，可见表面底边 854 —— 离任务栏 12 DIP。
 
 
 ## Critical: 画布按场景配（穿透模式 / 冻结模式）
@@ -284,6 +295,27 @@ UiSmoke 现状：**216 条全绿**（`dotnet build tools/UiSmoke/UiSmoke.csproj 
    而这里只影响观感）。
 7. 截不到（句柄没建出来、矩形为空、DIB 分配失败）就**没有底图**：画布回到透明，功能降级但不崩。
 
+
+## Critical: 两端安装包走 CI，细节看 `packaging/README.md`
+
+`.github/workflows/release.yml` 产 Windows（NSIS 安装包）+ Linux（AppImage），并可选建 GitHub Release。
+这一节只记"红一轮才知道"的四条，改工作流前先读它们：
+
+1. **还原走的是双目标整张图**：应用在 `net10.0-windows` + `net10.0` 两条腿上，所以在 **Windows** 上
+   `publish -f net10.0-windows` 一样会去问 FluentJalium 的 net10.0 —— 单目标时报
+   `NU1201 Project FluentJalium is not compatible with net10.0`。那条"补多目标"的兜底因此**两端都跑**，
+   且必须排在 publish **之前**（补在后面永远跑不到）。
+2. **RID 不等于平台名**：`win-x64` / `linux-x64`，写成 `windows-x64` 还原直接失败。
+3. **CI 上没有 FUSE**：AppImage 形态的工具挂不起来，`linuxdeploy` 又不认 `--appimage-extract-and-run`
+   （回 `Flag could not be matched` 然后退出码 1）。改成用底下的 `appimagetool`：
+   `--appimage-extract` 解包（不需要 FUSE）→ 点名跑 `extracted/usr/bin/appimagetool`。
+   它还硬要 `desktop-file-validate`（缺了只打一行就退出码 1，runner 镜像没预装），
+   且 `.desktop` / `.png` 必须有一份在 **AppDir 根**下（只在 `usr/share` 里 → `Desktop file not found`）。
+4. **`choco install nsis` 之后同一步里 `makensis` 不在 PATH 上**（PATH 是进程启动那份）→ 按安装位置点名。
+   另外 NSIS 那边：卸载页只写 `UninstPage uninstConfirm`（关键字不是 `Confirm`，而且**没有**
+   `UninstPage instfiles` 这种写法，写了在解析阶段就红）。
+
+实测：Windows 与 Linux 两端 `打包` 全绿，产物 32 MiB（setup.exe）+ 41 MiB（AppImage）。
 
 ## Jalium.UI Framework Reference
 

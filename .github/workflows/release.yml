@@ -253,9 +253,12 @@ jobs:
           if [ "${#files[@]}" = 0 ]; then echo "::error::一个产物都没找到"; exit 1; fi
 
           # 同一个版本重跑（改了打包脚本再发一次）不该红在"Release 已存在"上。
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${files[@]}" --clobber
-            gh release edit "$tag" --latest
+          # 每条 gh 都要带 --repo：这个 job 没有 checkout 步骤，工作目录不是 git 仓库，
+          # gh 靠 .git 猜仓库时直接 "failed to run git: fatal: not a git repository"（实测红过一次，
+          # 而那一步之前 Release 与两个产物其实已经建好了）。
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$tag" --latest --repo "$GITHUB_REPOSITORY"
           else
             gh release create "$tag" \
               --repo "$GITHUB_REPOSITORY" \
@@ -264,4 +267,5 @@ jobs:
               --generate-notes \
               "${files[@]}"
           fi
-          gh release view "$tag" --json tagName,assets -q '.tagName, (.assets[].name)[]'
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,assets -q '.tagName, (.assets[].name)[]'
