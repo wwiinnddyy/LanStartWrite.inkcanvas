@@ -93,7 +93,7 @@ This project uses **Jalium.UI** framework. All UI code, markup, and patterns mus
 7. **量导航面板宽度要先关掉动画。** `PART_PaneRoot` 的宽度带 0.2 秒过渡（读 `SplitViewPaneAnimationOpenDuration`），"下一拍就该读到 48"是道时序题 —— 实测三轮里红过一次。现在那三步在 `ReduceMotion=true` 下量，两态真的换了与否由 `IsCompact` 与 `PART_Label` 折叠那两条管。
 8. **库没有的就继续自实现**（用户定的范围）：九色画笔色板 `PenColorSwatchStyle`、两个实体浮层表面 token（`ToolbarSurfaceBrush` 白 / `#2C2C2C`，`FlyoutSurfaceBrush` `#F9F9F9` / `#2C2C2C`；WinUI 的对应物 `FlyoutPresenterBackground` 是亚克力，本应用刻意不用，所以也不能借那个键名）、`FlyoutPlacement` 的原生坐标定位、`RadioToolToggleButton.Reactivated`、四个窗口的分工（Design.MD §1）。应用侧的 `HelperTextStyle` / `SectionTextStyle` / `SettingsCardStyle` 是**基于库的键往上加**的三行扩展（库按 WinUI 原样发布尺度，不替宿主定辅助文字颜色与卡片行距），不是第二套尺度。
 
-UiSmoke 现状：**305 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/UiSmoke.csproj -c Debug -p:OutputPath=bin/Verify/` 后直接跑 `tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe`）。
+UiSmoke 现状：**323 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/UiSmoke.csproj -c Debug -p:OutputPath=bin/Verify/` 后直接跑 `tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe`）。
 导航动画那组里 `Retargeted animation settles...` / `A live intermediate frame...` 两条会**自己红**（2026-09-25 实测：改动前后都会 3 次里红 1 次，量的是库的动画时钟，不是白板的账），
 而 `Check()` 一红就中断整条队列 —— 所以**基线要复跑两三次再取数**，单看一次的红绿不可信。注意本应用的 `.exe` 若在运行中会锁住 `bin/Debug`，构建一律带 `-p:OutputPath` 绕开。**跑之前先看 exe 的时间戳** —— 跑一份旧 exe 会安静地验一套旧检查，数字看着还挺像样（踩过一次：46 条全绿其实是几个月前的产物）。另外 Main 一进来就把 `ReduceMotion` 设成 true：第一拍就要量导航面板宽度，而面板打开带 0.2 秒过渡 —— 320ms 的第一拍实测仍会抖（6 个导航项那次就是它红的）；导航动画那组需要动的时候自己会再打开。
 
@@ -380,18 +380,20 @@ UiSmoke 现状：**305 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/Ui
 仍需真手确认（写进 `tools/UiSmoke/README.md`，不假装验过）：物理双指的识别时序与手感、
 大选择集逐帧实墨跟随时是否掉帧、笔在白板上的落笔手感、白板压得住真正常驻置顶的应用吗。
 
-## Critical: 安装包走 CI（Windows 1 件 + Linux 4 件），细节看 `packaging/README.md`
+## Critical: 安装包走 CI（Windows 1 件 + Linux 每种架构 2 件），细节看 `packaging/README.md`
 
-`.github/workflows/release.yml` 一次跑五个 job：`resolve`（版本号只算一次）→ `build`（矩阵：Windows
-NSIS / Linux AppImage + deb）→ `flatpak`、`linglong`（都只装包，取 `linux-publish-*` 那份产物，不重编）
-→ `release`。下面这些是"红一轮才知道"的，改工作流前先读：
+`.github/workflows/release.yml` 一次跑五个 job：`resolve`（版本号只算一次）→ `build`（矩阵三条腿：
+Windows NSIS / Linux x64 / Linux arm64，后两条各出 deb + AppImage）→ `flatpak`、`linglong`
+（都只装包，取 `linux-publish-x64-*` 那份产物，不重编）→ `release`。下面这些是"红一轮才知道"的，改工作流前先读：
 
 1. **还原走的是双目标整张图**：应用在 `net10.0-windows` + `net10.0` 两条腿上，所以在 **Windows** 上
    `publish -f net10.0-windows` 一样会去问 FluentJalium 的 net10.0 —— 单目标时报
    `NU1201 Project FluentJalium is not compatible with net10.0`（实测红过一次，两端一起红）。
    FluentJalium 因此必须保持多目标（上游 `e1f3366` 起是；CI 里那条 sed 兜底已删），
    且签出 ref 是 **Astra** 而不是 `main`（main 那份布局里没有 `src/FluentJalium` 这个路径）。
-2. **RID 不等于平台名**：`win-x64` / `linux-x64`，写成 `windows-x64` 还原直接失败。
+2. **RID 不等于平台名**：`win-x64` / `linux-x64` / `linux-arm64`，写成 `windows-x64` 还原直接失败。
+   dpkg 那一套又是另一种拼法（`amd64` / `arm64`），AppImage 内部还要再换成 `x86_64` / `aarch64` ——
+   所以矩阵里 `rid` / `deb_arch` / `arch` 是三个键，别合并成一个。
 3. **CI 上没有 FUSE**：AppImage 形态的工具挂不起来，`linuxdeploy` 又不认 `--appimage-extract-and-run`
    （回 `Flag could not be matched` 然后退出码 1）。改成用底下的 `appimagetool`：
    `--appimage-extract` 解包（不需要 FUSE）→ 点名跑 `extracted/usr/bin/appimagetool`。
@@ -403,8 +405,9 @@ NSIS / Linux AppImage + deb）→ `flatpak`、`linglong`（都只装包，取 `l
    工作流因此把 makensis 的日志读一遍，见 `no sections will be executed` 就红。
    **退出码 0 不等于包是对的**：这条是回读日志才发现的。
 
-5. **Linux 四件共用一次 `dotnet publish`**：`flatpak` 与 `linglong` 两个 job 下载 `linux-publish-*`
-   那个中间产物，只装包不再编第二遍（各编一次迟早分出两个版本）。那个中间产物**不许**进 Release。
+5. **Linux 每种架构的两个包共用该架构那一次 `dotnet publish`**：`flatpak` 与 `linglong` 两个 job
+   下载 `linux-publish-x64-*` 那个中间产物，只装包不再编第二遍（各编一次迟早分出两个版本）。
+   中间产物**不许**进 Release。名字必须带架构 —— upload-artifact v4 要求一次运行里产物名唯一。
 6. **`download-artifact` 丢 Unix 的 +x 位**：所以每个装包脚本自己 `chmod +x` 那个 apphost，
    而 `build-deb.sh` 的入口守门只断言"文件在"。曾经过早上用 `test -x`：deb 静默变空串，
    错误报在玲珑的"取源失败"上，跟根因隔了三层。
@@ -422,10 +425,25 @@ NSIS / Linux AppImage + deb）→ `flatpak`、`linglong`（都只装包，取 `l
    `desktop-file-validate` + 白名单外的缺库即红。实测唯一缺的是 `liblttng-ust.so.0`
    （coreclr 的 LTTng provider，24.04 只给 `.so.1`，缺了只是没追踪）—— 所以它进白名单，
    不是往 `Depends` 里写一条装不上的包；`Depends` 实测只需 `libc6, libstdc++6`。
+   **那条"唯一"是 x64 的账**，arm64 那一腿第一次跑要么相同、要么在这一步红并打出库名。
+10. **Linux 腿的 `if` 一律看 `matrix.kind`，不看 `matrix.os`**：加了 `ubuntu-24.04-arm` 之后，
+    "这是不是一台 Linux"用 os 等值判断会静默失配 —— AppImage / deb 两步整步不跑，
+    而绿会一路留到"上传构建产物"那步才因 `if-no-files-found: error` 红，报得像打包坏了。
+11. **16K 页对齐是一条门禁，不是口头承诺**：每个 Linux 腿在打包前跑
+    `python3 packaging/linux/check-page-align.py publish --require-machine <名> --require-align <字节>`。
+    arm64 要求 ≥16384（arm64 内核有 4K/16K/64K 三档，`p_align` 停在 4K 的包在页大于 4K 的内核上
+    **装得上、跑不起来**，错在 exec / dlopen，CI 里零征兆）。**门槛按架构分档，不许一刀切**：
+    实测 x64 那份产物 23 个 ELF 全是 `p_align = 0x1000`，抬到 16K 得到 23 条红 —— 而 arm64 那份
+    实测是 `0x10000`（64K），比 16K 高一档。脚本纯 stdlib（本机没有 readelf，同一份要在本机与
+    runner 上都能跑），四条红路各验过：改 `p_align`、换机器类型、空目录、抬门槛；
+    **"一个 ELF 都没扫到"也算红**，目录写错的绿比没检查更坏。
 
 实测（run 36030896388，v1.0.1，五个 job 全绿，Release 上正好五件资产）：setup.exe 32 MiB、
 deb 35 MiB（296 条落位、apt install OK、desktop-file-validate OK）、AppImage 42 MiB、
 flatpak 32 MiB（沙箱内自检 `/app/bin/lanstartwrite` 与 apphost 均可执行）、玲珑 uab 65 MiB。
+**arm64 那一腿还没有 CI 实测数**（本地只验到"`publish -r linux-arm64` 编得出来 + 23 个 ELF 全
+aarch64 且 `0x10000` 对齐"这一层）：第一次跑要盯 `ubuntu-24.04-arm` 标签可用性、那台 runner 上
+有没有 docker、以及 arm64 的缺库清单是否只有白名单那一条。
 
 ## Jalium.UI Framework Reference
 

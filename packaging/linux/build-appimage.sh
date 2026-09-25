@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 把 dotnet publish 的产物组装成 AppDir，再用 appimagetool 打成 AppImage。
 # 由 .github/workflows/release.yml 调用：
-#   ./packaging/linux/build-appimage.sh <publish 目录> <版本号> <输出目录>
+#   ./packaging/linux/build-appimage.sh <publish 目录> <版本号> <输出目录> <架构>
+# 架构写 x64 / arm64（与产物名里那一段同一个拼法），脚本内部再换成 appimagetool 认的
+# x86_64 / aarch64 —— 它按这个挑要嵌进去的 runtime 文件。
 #
 # 依赖：appimagetool（本脚本自己下到 RUNNER_TEMP 里，且以"解包后直接跑里面的二进制"的方式用 ——
 # CI 机器上没有 FUSE，AppImage 挂不起来），以及 desktop-file-validate
@@ -9,9 +11,17 @@
 
 set -euo pipefail
 
-PUBLISH_DIR="${1:?用法: build-appimage.sh <publish 目录> <版本号> <输出目录>}"
-VERSION="${2:?用法: build-appimage.sh <publish 目录> <版本号> <输出目录>}"
-OUTPUT_DIR="${3:?用法: build-appimage.sh <publish 目录> <版本号> <输出目录>}"
+PUBLISH_DIR="${1:?用法: build-appimage.sh <publish 目录> <版本号> <输出目录> <架构>}"
+VERSION="${2:?用法: build-appimage.sh <publish 目录> <版本号> <输出目录> <架构>}"
+OUTPUT_DIR="${3:?用法: build-appimage.sh <publish 目录> <版本号> <输出目录> <架构>}"
+ARCH_LABEL="${4:?缺少架构（x64 / arm64）}"
+
+case "$ARCH_LABEL" in
+  x64)   TOOL_ARCH=x86_64 ;;
+  arm64) TOOL_ARCH=aarch64 ;;
+  *) echo "::error::不认识的架构：$ARCH_LABEL（只认 x64 / arm64）"; exit 1 ;;
+esac
+
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APPID="$(cat "$HERE/appid")"          # 三个格式共用的反 DNS 标识，见 packaging/linux/appid
@@ -49,10 +59,14 @@ chmod +x "$APPDIR/AppRun"
 #    CI 镜像里没有 libfuse2，所以不能以 AppImage 的形态跑它：先 --appimage-extract 解包
 #    （解包不需要 FUSE），再点名跑解出来的那个二进制。解包结果按 RUNNER_TEMP 缓存，重跑不重复下载。
 TOOL_HOME="${APPIMAGETOOL_HOME:-${RUNNER_TEMP:-/tmp}/appimagetool}"
+# 下载的是**打包装机用的工具**，它的架构跟 runner 走（uname -m），不跟被打包的目标架构走 ——
+# 两者在 CI 里恰好相同（每种架构在自己的 runner 上原地打），但拼错的话 arm64 那台会去挂一个
+# x86_64 的二进制，报的是 "cannot execute binary file"，看着像 appimagetool 坏了。
+HOST_ARCH="$(uname -m)"
 if [ ! -d "$TOOL_HOME/extracted" ]; then
   mkdir -p "$TOOL_HOME"
   curl -L --fail -o "$TOOL_HOME/tool.AppImage" \
-    https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+    "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${HOST_ARCH}.AppImage"
   chmod +x "$TOOL_HOME/tool.AppImage"
   # 解包落在当前目录的 squashfs-root/，所以进去再解。
   ( cd "$TOOL_HOME" && ./tool.AppImage --appimage-extract >/dev/null && mv squashfs-root extracted )
@@ -71,13 +85,13 @@ echo "appimagetool: $APPMAGETOOL"
 mkdir -p "$OUTPUT_DIR"
 cd "$OUTPUT_DIR"
 # appimagetool 必读 ARCH（它按这个挑 runtime 文件），不给就直接退出。
-ARCH=x86_64 "$APPMAGETOOL" "$APPDIR"
+ARCH="$TOOL_ARCH" "$APPMAGETOOL" "$APPDIR"
 
 # 产物名按 .desktop 与目录名推，这里统一改成"应用-版本-平台"。
 produced=0
 for f in *.AppImage; do
   [ -e "$f" ] || continue
-  mv "$f" "LanStartWrite.Inkcanvas-${VERSION}-linux-x64.AppImage"
+  mv "$f" "LanStartWrite.Inkcanvas-${VERSION}-linux-${ARCH_LABEL}.AppImage"
   produced=1
 done
 if [ "$produced" != 1 ]; then
@@ -85,4 +99,4 @@ if [ "$produced" != 1 ]; then
   exit 1
 fi
 
-echo "AppImage 生成完毕：$OUTPUT_DIR/LanStartWrite.Inkcanvas-${VERSION}-linux-x64.AppImage"
+echo "AppImage 生成完毕：$OUTPUT_DIR/LanStartWrite.Inkcanvas-${VERSION}-linux-${ARCH_LABEL}.AppImage"

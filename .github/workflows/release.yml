@@ -1,8 +1,10 @@
 # 揽星书写 · Release 工作流
 #
-# 产物（Windows 用 NSIS 安装包，Linux 用 AppImage）：
+# 产物（Windows 一个 NSIS 安装包；Linux 每种架构一个 deb 与一个 AppImage）：
 #   LanStartWrite.Inkcanvas-<版本>-windows-x64-setup.exe
-#   LanStartWrite.Inkcanvas-<版本>-linux-x64.AppImage
+#   LanStartWrite.Inkcanvas-<版本>-linux-x64.{deb,AppImage}
+#   LanStartWrite.Inkcanvas-<版本>-linux-arm64.{deb,AppImage}
+# 另有 Flatpak 与玲珑两件，目前只出 x64（arm64 那两条各有一个没验过的量，见 packaging/README.md）。
 #
 # 怎么触发：
 #   1. Actions 页手动触发（workflow_dispatch），填版本号（如 1.2.0，不带 v 前缀）；
@@ -19,7 +21,8 @@
 #     CI 上没有那个本机路径，所以 restore 前先把本机源摘掉，只认随仓库的这份。
 #
 # 三处单位/命名坑，都是踩过一次才知道的：
-#   - RID 是 win-x64 / linux-x64，不是 windows-x64 / linux-x64（矩阵里 platform 只当名字用）。
+#   - RID 是 win-x64 / linux-x64 / linux-arm64，不是 windows-x64（矩阵里 platform 只当名字用）。
+#     dpkg 那边又是另一套拼法：amd64 / arm64 —— 所以矩阵里 rid 与 deb_arch 是两个键，别合。
 #   - choco 装的 makensis 在**同一步**里不会出现在 PATH 上（PATH 是进程启动时那份），
 #     所以要按安装位置点名。
 #   - installer.nsi 的 OutFile 是 ..\dist\ —— 相对它自己算，所以工作目录必须是 packaging/windows。
@@ -99,15 +102,38 @@ jobs:
       matrix:
         include:
           - os: windows-latest
+            kind: windows
             platform: windows-x64
             rid: win-x64
             target_framework: net10.0-windows
             # 安装包在 packaging/dist 下（NSIS 脚本从自己的目录算相对路径，见该文件）。
             artifact_glob: packaging/dist/*.exe
+          # Linux 两种架构：kind 取代了原来"按 os 判这是不是一台 Linux"的写法，
+          # 因为 ubuntu-24.04-arm 也是 Linux，而 matrix.os 那个等值判断一加上 arm 就静默失配
+          # （AppImage / deb 两步会整步不跑，产物少两件却全绿 —— 上传那一步没文件才会红）。
+          # arch 进产物名与中间产物名，deb_arch 是 dpkg 那一套拼法。
           - os: ubuntu-latest
+            kind: linux
             platform: linux-x64
+            arch: x64
+            deb_arch: amd64
             rid: linux-x64
             target_framework: net10.0
+            # 16K 只是 arm64 的要求：x86_64 的主流内核就是 4K，抬到 16K 会得到一条没人满足的红。
+            min_page_size: 4096
+            elf_machine: x86_64
+            artifact_glob: |
+              dist/*.AppImage
+              dist/*.deb
+          - os: ubuntu-24.04-arm
+            kind: linux
+            platform: linux-arm64
+            arch: arm64
+            deb_arch: arm64
+            rid: linux-arm64
+            target_framework: net10.0
+            min_page_size: 16384
+            elf_machine: aarch64
             artifact_glob: |
               dist/*.AppImage
               dist/*.deb
@@ -154,7 +180,7 @@ jobs:
             -o publish
 
       - name: Windows · NSIS 安装包
-        if: matrix.os == 'windows-latest'
+        if: matrix.kind == 'windows'
         shell: pwsh
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
@@ -190,8 +216,21 @@ jobs:
           if ($fatal) { Write-Error "NSIS 警告：$($fatal[0].Line)"; exit 1 }
           Get-ChildItem ../dist | Format-Table Name, Length
 
+      # ELF 门禁：产物里的原生代码得声明它能在多大的页内核上被映射。
+      # 判在打包之前，所以 deb 与 AppImage 拿到的是同一个结论；arm64 那条要求 ≥16K，
+      # 是因为 arm64 内核有 4K / 16K / 64K 三种编译档位，而 p_align 停在 4K 的包一旦落到
+      # 页比 4K 大的内核上就是"装得上、跑不起来"—— 报在 exec 阶段，CI 里什么都看不到。
+      # 脚本纯 stdlib（本机没有 readelf，同一份要在本机与 runner 上都能跑），四条红路都验过能红。
+      - name: Linux · ELF 机器类型与页对齐
+        if: matrix.kind == 'linux'
+        shell: bash
+        run: |
+          python3 packaging/linux/check-page-align.py publish \
+            --require-machine "${{ matrix.elf_machine }}" \
+            --require-align "${{ matrix.min_page_size }}"
+
       - name: Linux · AppImage
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.kind == 'linux'
         shell: bash
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
@@ -209,21 +248,23 @@ jobs:
           echo "补齐：${missing:-都不缺}"
           # 打包工具（appimagetool）由脚本自己取：它得先解包再跑，CI 上没有 FUSE。
           chmod +x packaging/linux/build-appimage.sh packaging/linux/build-deb.sh
-          packaging/linux/build-appimage.sh publish "$VERSION" dist
+          packaging/linux/build-appimage.sh publish "$VERSION" dist "${{ matrix.arch }}"
           ls -la dist
 
       - name: Linux · deb
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.kind == 'linux'
         shell: bash
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
         run: |
-          packaging/linux/build-deb.sh publish "$VERSION" amd64 dist
+          packaging/linux/build-deb.sh publish "$VERSION" "${{ matrix.deb_arch }}" dist
           dpkg-deb -I dist/*.deb | sed -n '1,20p'
 
           # 造出来 ≠ 装得上。控制环境里真 apt 一次：装、落位、.desktop 合法、以及
           # "动态库有没有没解析出来的" —— 后者是 Depends 有没有少写的实测答案，
           # 不是照抄别人的 deb 猜的。
+          # 这一步不需要 --platform：arm64 那台 runner 上 `ubuntu:24.04` 解出来的就是 arm64 镜像，
+          # 装的就是刚造的那个 arm64 deb —— 交叉架构的模拟（qemu + binfmt）在这里用不上。
           appid=$(cat packaging/linux/appid)
           docker run --rm -e APPID="$appid" -v "$GITHUB_WORKSPACE:/w" -w /w ubuntu:24.04 bash -c '
             set -e
@@ -238,6 +279,8 @@ jobs:
             # liblttng-ust.so.0：coreclr 的 LTTng 追踪 provider（libcoreclrtraceptprovider.so）要它，
             # Ubuntu 24.04 只提供 .so.1，缺了只是没有 LTTng 追踪，运行时自己降级。
             # 所以它进白名单，而不是给 deb 写一条根本装不上的 Depends；白名单外的缺库一律红。
+            # （那条"实测唯一"是 x64 的账。arm64 第一次跑要么相同、要么在这里红并把库名打出来 —— 
+            #  两种都比你提前替它猜一个结论强。）
             echo "== 动态库解析 =="
             ldd /opt/lanstartwrite/LanStartWrite.Inkcanvas /opt/lanstartwrite/*.so \
                 /opt/lanstartwrite/lib/*.so 2>/dev/null | grep "not found" \
@@ -262,11 +305,13 @@ jobs:
 
       # deb 与 AppImage 里那份 .deb 之外，把裸发布目录也留一份：
       # flatpak 与玲珑这两个 job 只装包，不再重跑一遍 dotnet publish（同一份产物、同一次编译）。
+      # 名字必须带架构：upload-artifact v4 要求产物名在一次运行里唯一（它把产物当不可变对象，
+      # 撞名就要么红要么得开 overwrite）—— 而这里要的就是两份各自独立、消费方点名可取的产物。
       - name: 上传 Linux 发布目录（给 flatpak / 玲珑用）
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.kind == 'linux'
         uses: actions/upload-artifact@v4
         with:
-          name: linux-publish-${{ needs.resolve.outputs.version }}
+          name: linux-publish-${{ matrix.arch }}-${{ needs.resolve.outputs.version }}
           path: publish
           if-no-files-found: error
 
@@ -279,6 +324,9 @@ jobs:
 
   # Flatpak：清单在 packaging/linux/<appid>.json，载荷直接取 build 那个 job 的发布目录
   # （同一份编译产物，不在这里再 publish 一遍 —— 两个 job 各编一次迟早会分出两个版本）。
+  # 只出 x64：aarch64 需要 org.freedesktop.Platform/Sdk 的 aarch64 运行时（flathub 有）
+  # 加一台 arm runner，两件事这一轮都没验过，所以不猜 —— 想扩就把 runs-on 与下面那个
+  # flatpak install 的架构一起换，再确认沙箱自检在 arm 上跑得起来。
   flatpak:
     name: Flatpak
     needs: [build, resolve]
@@ -290,7 +338,7 @@ jobs:
       - name: 取 Linux 发布目录
         uses: actions/download-artifact@v4
         with:
-          name: linux-publish-${{ needs.resolve.outputs.version }}
+          name: linux-publish-x64-${{ needs.resolve.outputs.version }}
           path: publish
 
       - name: 装工具链与运行时
@@ -351,6 +399,8 @@ jobs:
   # 玲珑 / Linyaps：不重编应用，把同一个 .deb 摊进容器（官方 deb_conversion 那条路）。
   # 未知量两个：base 镜像 org.deepin.base 在海外 runner 上取不取得到；ll-builder 的容器构建
   # 在 runner 那种受限环境里跑不跑得起来。所以下面留了 diagnostics，红也要红得能读。
+  # 只出 x64：玲珑的 arm64 base / 工具链在不在 ppa.linyaps.org.cn 那个 OBS 里，**未查证**
+  # （不是"没有"）—— 要扩先查 tool / base 仓库里有没有 aarch64 那一支，再动下面写死的 amd64。
   linglong:
     name: 玲珑（Linyaps）
     needs: [build, resolve]
@@ -362,7 +412,7 @@ jobs:
       - name: 取 Linux 发布目录
         uses: actions/download-artifact@v4
         with:
-          name: linux-publish-${{ needs.resolve.outputs.version }}
+          name: linux-publish-x64-${{ needs.resolve.outputs.version }}
           path: publish
 
       - name: 装 linglong-bin、linglong-box 与 linglong-builder
