@@ -106,7 +106,7 @@ internal static class ToolbarToolVisuals
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 0, size * 0.1),
-            Background = new SolidColorBrush(Argb.Unpack(tool.ColorArgb)),
+            Background = new SolidColorBrush(Argb.Unpack(tool.ColorFor(CanvasSceneState.Active))),
             IsHitTestVisible = false,
         };
         content.Children.Add(chip);

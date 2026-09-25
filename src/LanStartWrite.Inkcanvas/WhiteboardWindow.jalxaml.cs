@@ -5,6 +5,7 @@ using Dusk.Ink.Primitives;
 using Jalium.UI;
 using Jalium.UI.Automation;
 using Jalium.UI.Controls;
+using Jalium.UI.Controls.Primitives;
 using Jalium.UI.Input;
 using Jalium.UI.Media;
 
@@ -41,9 +42,13 @@ public partial class WhiteboardWindow : Window
     private const double HandleSlopScreen = 4;
 
     private readonly List<WhiteboardPage> _pages = [];
+    private readonly List<Button> _thumbnailCards = [];
     private readonly SelectionAdorner _adorner = new();
     private readonly TouchGestureTracker _gestures = new();
     private CanvasSurface _surface = null!;
+    private Popup _thumbnailPopup = null!;
+    private ScrollViewer _thumbnailScroll = null!;
+    private StackPanel _thumbnailList = null!;
     private int _activePageIndex;
 
     /// <summary>捏合的上下限：拉到 0.2 倍看得见整版板书，拉到 8 倍够写最细的字。</summary>
@@ -113,6 +118,18 @@ public partial class WhiteboardWindow : Window
 
     internal int ActivePageIndex => _activePageIndex;
 
+    internal bool ThumbnailPopupOpen => _thumbnailPopup.IsOpen;
+
+    internal int ThumbnailCardCount => _thumbnailCards.Count;
+
+    internal IReadOnlyList<Button> ThumbnailCards => _thumbnailCards;
+
+    internal ScrollViewer ThumbnailScroll => _thumbnailScroll;
+
+    internal UIElement ThumbnailPlacementTarget => _thumbnailPopup.PlacementTarget!;
+
+    internal PlacementMode ThumbnailPlacement => _thumbnailPopup.Placement;
+
     internal event Action? ActivePageChanged;
 
     internal event Action? HistoryStateChanged;
@@ -123,6 +140,7 @@ public partial class WhiteboardWindow : Window
         ShowActivated = false;
         SystemBackdrop = WindowBackdropType.None;
         InitializeComponent();
+        CreateThumbnailPopup();
         BindPageIcon(PreviousPageButton);
         BindPageIcon(NextPageButton);
         BindPageIcon(AddPageButton);
@@ -152,6 +170,7 @@ public partial class WhiteboardWindow : Window
         // 输入：<b>handledEventsToo = true</b>。引擎在选择态虽然什么都不写，
         // 但它仍然会把指针事件标成已处理（OnPointerDownHandler 末尾那一句），
         // 不带着一句就永远收不到落点 —— 而"收不到"没有任何症状，只是选择不动。
+        InkHost.AddHandler(PreviewPointerDownEvent, new PointerDownEventHandler(OnPreviewPointerDown), true);
         InkHost.AddHandler(PointerDownEvent, new PointerDownEventHandler(OnPointerDown), true);
         InkHost.AddHandler(PointerMoveEvent, new PointerMoveEventHandler(OnPointerMove), true);
         InkHost.AddHandler(PointerUpEvent, new PointerUpEventHandler(OnPointerUp), true);
@@ -160,12 +179,134 @@ public partial class WhiteboardWindow : Window
         // Delete 摘掉选中的那些笔迹（整批一步撤销）。只在白板里有意义：批注那块没有"选中"这件事。
         PreviewKeyDown += (_, e) =>
         {
-            if (PageControlHost.IsKeyboardFocusWithin) return;
+            if (PageControlHost.IsKeyboardFocusWithin || _thumbnailPopup.IsOpen) return;
             if (e.Key != Key.Delete || !_surface.IsSelectMode) return;
             e.Handled = DeleteSelection();
         };
 
         Closed += OnClosed;
+    }
+
+    private void CreateThumbnailPopup()
+    {
+        _thumbnailList = new StackPanel();
+        _thumbnailScroll = new ScrollViewer
+        {
+            Content = _thumbnailList,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            PanningMode = PanningMode.VerticalOnly,
+            CanContentScroll = false,
+        };
+
+        var surface = new Border
+        {
+            Width = 208,
+            MaxHeight = 520,
+            Padding = new Thickness(8),
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = default,
+        };
+        surface.SetResourceReference(Border.BackgroundProperty, "FlyoutSurfaceBrush");
+        surface.SetResourceReference(Border.BorderBrushProperty, "CardStrokeColorDefaultBrush");
+        surface.Child = _thumbnailScroll;
+
+        _thumbnailPopup = new Popup
+        {
+            PlacementTarget = PageControlHost,
+            Placement = PlacementMode.Top,
+            HorizontalOffset = 0,
+            VerticalOffset = -8,
+            IsLightDismissEnabled = true,
+            StaysOpen = false,
+            ShouldConstrainToRootBounds = true,
+            Child = surface,
+        };
+        ((Grid)Content!).Children.Add(_thumbnailPopup);
+    }
+
+    private void ToggleThumbnailMenu()
+    {
+        if (_thumbnailPopup.IsOpen)
+        {
+            _thumbnailPopup.IsOpen = false;
+            return;
+        }
+
+        RebuildThumbnailCards();
+        _thumbnailPopup.IsOpen = true;
+        ScrollToActiveThumbnail();
+    }
+
+    private void RebuildThumbnailCards()
+    {
+        _thumbnailList.Children.Clear();
+        _thumbnailCards.Clear();
+        var pageCount = _pages.Count;
+        var background = Argb.Unpack(CanvasOptions.For(CanvasScene.Whiteboard).BackgroundArgb);
+
+        for (var index = 0; index < pageCount; index++)
+        {
+            var pageIndex = index;
+            var page = _pages[index];
+            page.Thumbnail.PageBackground = background;
+            page.Thumbnail.Width = 180;
+            page.Thumbnail.Height = 96;
+
+            var content = new Grid();
+            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(96) });
+            content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(24) });
+            content.Children.Add(page.Thumbnail);
+            var label = new TextBlock
+            {
+                Text = $"第 {index + 1} 页",
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            label.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorPrimaryBrush");
+            Grid.SetRow(label, 1);
+            content.Children.Add(label);
+
+            var card = new Button
+            {
+                Content = content,
+                Width = 192,
+                Height = 128,
+                Margin = new Thickness(0, 0, 0, 8),
+                Padding = new Thickness(4),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                VerticalContentAlignment = VerticalAlignment.Stretch,
+            };
+            card.SetResourceReference(Control.BackgroundProperty, "SubtleFillColorTransparentBrush");
+            card.Click += (_, _) =>
+            {
+                ActivatePage(pageIndex);
+                _thumbnailPopup.IsOpen = false;
+            };
+            AutomationProperties.SetName(card, $"第 {pageIndex + 1} 页，共 {pageCount} 页");
+            _thumbnailCards.Add(card);
+            _thumbnailList.Children.Add(card);
+        }
+
+        UpdateThumbnailSelection();
+    }
+
+    private void UpdateThumbnailSelection()
+    {
+        for (var index = 0; index < _thumbnailCards.Count; index++)
+            _thumbnailCards[index].SetResourceReference(
+                Control.BackgroundProperty,
+                index == _activePageIndex ? "AccentFillColorDefaultBrush" : "SubtleFillColorTransparentBrush");
+    }
+
+    private void ScrollToActiveThumbnail()
+    {
+        if (_activePageIndex < 0 || _activePageIndex >= _thumbnailCards.Count) return;
+        var card = _thumbnailCards[_activePageIndex];
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_thumbnailPopup.IsOpen) _thumbnailScroll.ScrollToElement(card);
+        });
     }
 
     /// <summary>这块画布的墨迹面。工具栏要写的一切（模式、颜色、粗细、擦法、撤销）都从这里走。</summary>
@@ -203,6 +344,11 @@ public partial class WhiteboardWindow : Window
 
         CreatePage();
         ActivatePage(_pages.Count - 1);
+        if (_thumbnailPopup.IsOpen)
+        {
+            RebuildThumbnailCards();
+            ScrollToActiveThumbnail();
+        }
     }
 
     private void ActivateRelativePage(int offset) => ActivatePage(_activePageIndex + offset);
@@ -226,6 +372,8 @@ public partial class WhiteboardWindow : Window
 
         ApplyBackground();
         UpdatePageControl();
+        UpdateThumbnailSelection();
+        ScrollToActiveThumbnail();
         ActivePageChanged?.Invoke();
         HistoryStateChanged?.Invoke();
     }
@@ -265,9 +413,11 @@ public partial class WhiteboardWindow : Window
     /// </summary>
     private void ApplyBackground()
     {
-        var brush = new SolidColorBrush(Argb.Unpack(CanvasOptions.For(CanvasScene.Whiteboard).BackgroundArgb));
+        var color = Argb.Unpack(CanvasOptions.For(CanvasScene.Whiteboard).BackgroundArgb);
+        var brush = new SolidColorBrush(color);
         InkHost.Background = brush;
         Background = brush;
+        foreach (var page in _pages) page.Thumbnail.PageBackground = color;
     }
 
     private void OnCanvasOptionsChanged(CanvasScene scene)
@@ -374,6 +524,18 @@ public partial class WhiteboardWindow : Window
     {
         var scale = _surface.View.Viewport.Scale;
         return new Point2D(screenDx / scale, screenDy / scale);
+    }
+
+    private void OnPreviewPointerDown(object sender, PointerDownEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Mouse) return;
+        if (_surface.IsSelectMode || _drag != Drag.None || _gestures.IsActive) return;
+        if (Local(e) is not { } screen) return;
+        var world = ToWorld(screen);
+        if (_surface.Document.HitTestCircle(world, _surface.View.ScreenLengthToWorld(PickToleranceScreen)).Count > 0) return;
+
+        ToggleThumbnailMenu();
+        e.Handled = true;
     }
 
     private void OnPointerDown(object sender, PointerDownEventArgs e)
@@ -796,7 +958,14 @@ public partial class WhiteboardWindow : Window
         UnsubscribeSurface(_surface);
 
         // 墨迹控件必须显式拆：Jalium 不代调，而它挂着整棵墨迹视觉树（见 AGENTS）。
-        foreach (var page in _pages) page.Surface.Dispose();
+        _thumbnailPopup.IsOpen = false;
+        _thumbnailList.Children.Clear();
+        _thumbnailCards.Clear();
+        foreach (var page in _pages)
+        {
+            page.Thumbnail.Dispose();
+            page.Surface.Dispose();
+        }
         _pages.Clear();
     }
 }

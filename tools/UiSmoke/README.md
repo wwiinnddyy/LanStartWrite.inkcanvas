@@ -183,13 +183,15 @@ This starts the real application windows with a fresh `preview-state/preferences
 next to the test executable. It neither edits the normal profile nor closes an already
 running annotation session. Close the preview toolbar to end the preview.
 
-The suite is 343 checks on the current tree (the count grows with every wiring surface
+The suite is 361 checks on the current tree (the count grows with every wiring surface
 that gets a guard, and the number printed on a run is only the part that ran before the
 first failure), including responsive settings-row reflow without control replacement,
 independent navigation selection/focus, native system-color hydration, initial framework
 theme selection, single Click/Command gesture dispatch, cancelled gestures, toolbar
 contact capture and release, no visible hover descriptions across settings and tool
-surfaces, SVG eraser preview state/radius for mouse and touch, batched preference-to-ink
+surfaces, scene-isolated pen colors, whiteboard exit returning to mouse mode, whiteboard
+thumbnail popup ordering/navigation/scrolling without intercepting pen/touch input, SVG
+eraser preview state/radius for mouse and touch, batched preference-to-ink
 synchronization, the eraser secondary menu (both erase modes, the radius clamp, and the
 two-click clear-all), the 笔锋 chain end to end, the 窗口层级 chain against the real
 desktop Z-order, the 画布 per-scene modes, whiteboard page creation/switching, and the

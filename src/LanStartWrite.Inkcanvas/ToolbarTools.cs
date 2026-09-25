@@ -215,6 +215,14 @@ internal static class ToolbarTools
     internal static bool UpdateSelectedPen(Func<ToolbarTool, ToolbarTool> edit) =>
         Selected is { Kind: ToolbarToolKind.Pen } pen && Update(pen.Id, edit);
 
+    internal static bool UpdateSelectedPenColor(uint color)
+    {
+        var scene = CanvasSceneState.Active;
+        return Selected is { Kind: ToolbarToolKind.Pen } pen && Update(pen.Id, tool => scene == CanvasScene.Whiteboard
+            ? tool with { WhiteboardColorArgb = color }
+            : tool with { ScreenAnnotationColorArgb = color });
+    }
+
     /// <summary>改<b>当前选中那把橡皮</b>的数据；选中的不是橡皮就什么都不做。</summary>
     internal static bool UpdateSelectedEraser(Func<ToolbarTool, ToolbarTool> edit) =>
         Selected is { Kind: ToolbarToolKind.Eraser } eraser && Update(eraser.Id, edit);
@@ -232,7 +240,7 @@ internal static class ToolbarTools
                 var parts = new List<string>
                 {
                     PenKindName(tool.PenKind),
-                    InkPalette.NearestName(tool.ColorArgb),
+                    InkPalette.NearestName(tool.ColorFor(CanvasSceneState.Active)),
                     $"{Math.Round(tool.Thickness):0} px",
                 };
                 if (!tool.TipEnabled) parts.Add("无笔锋");
@@ -281,6 +289,9 @@ internal static class ToolbarTools
     {
         var name = (tool.Name ?? string.Empty).Trim();
         if (name.Length > MaxToolNameLength) name = name[..MaxToolNameLength];
+        var legacyColor = tool.ColorArgb == 0xFF00B7C3
+            ? Argb.Pack(InkPalette.Colors[5])
+            : tool.ColorArgb;
 
         switch (tool.Kind)
         {
@@ -288,6 +299,9 @@ internal static class ToolbarTools
                 return tool with
                 {
                     Name = name.Length > 0 ? name : "笔",
+                    ColorArgb = ToolbarTool.DefaultColorArgb,
+                    ScreenAnnotationColorArgb = tool.ScreenAnnotationColorArgb ?? legacyColor,
+                    WhiteboardColorArgb = tool.WhiteboardColorArgb ?? legacyColor,
                     Thickness = double.IsFinite(tool.Thickness)
                         ? Math.Clamp(Math.Round(tool.Thickness), 1, 24)
                         : 4,
@@ -387,6 +401,8 @@ internal static class ToolbarTools
             Kind = ToolbarToolKind.Pen,
             Name = "笔",
             ColorArgb = ToolbarTool.DefaultColorArgb,
+            ScreenAnnotationColorArgb = ToolbarTool.DefaultColorArgb,
+            WhiteboardColorArgb = ToolbarTool.DefaultColorArgb,
             Thickness = 4,
             PenKind = PenKind.Pen,
             TipPresetId = "standard",

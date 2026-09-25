@@ -598,6 +598,12 @@ public partial class AnnotationToolbarWindow : Window
     {
         if (_isClosing) return;
 
+        if (scene != CanvasScene.Whiteboard && ToolbarTools.Selected?.Kind != ToolbarToolKind.Mouse)
+        {
+            var mouse = ToolbarTools.Items.FirstOrDefault(static item => item.Kind == ToolbarToolKind.Mouse);
+            if (mouse is not null) ToolbarTools.Select(mouse.Id);
+        }
+
         if (scene == CanvasScene.Whiteboard)
         {
             // 批注让开：两块全屏画布叠着没有意义，而"墨迹在各自的历史里"这件事不受影响 ——
@@ -764,7 +770,12 @@ public partial class AnnotationToolbarWindow : Window
     {
         if (CanvasSceneState.Active == scene)
         {
-            // 再点一次 = 回去。白板那颗是开关，不是一根单向的门。
+            if (scene == CanvasScene.Whiteboard)
+            {
+                var mouse = ToolbarTools.Items.FirstOrDefault(static item => item.Kind == ToolbarToolKind.Mouse);
+                if (mouse is not null) ToolbarTools.Select(mouse.Id);
+            }
+
             CanvasSceneState.Active = scene == CanvasScene.Whiteboard
                 ? CanvasScene.ScreenAnnotation
                 : CanvasScene.Whiteboard;
@@ -956,7 +967,7 @@ public partial class AnnotationToolbarWindow : Window
     private void ApplyPenTool(CanvasSurface surface, ToolbarTool tool)
     {
         surface.SetPenKind(tool.PenKind);
-        surface.SetPenColor(Argb.Unpack(tool.ColorArgb));
+        surface.SetPenColor(Argb.Unpack(tool.ColorFor(CanvasSceneState.Active)));
         surface.SetPenThickness(tool.Thickness);
     }
 
@@ -981,7 +992,7 @@ public partial class AnnotationToolbarWindow : Window
 
         _penMenuWindow = new PenSecondaryMenuWindow { Owner = this };
         _penMenuWindow.DismissRequested += () => { HidePenSecondaryMenu(); Activate(); FocusSelectedTool(); };
-        _penMenuWindow.PenColorChanged += color => ToolbarTools.UpdateSelectedPen(tool => tool with { ColorArgb = Argb.Pack(color) });
+        _penMenuWindow.PenColorChanged += color => ToolbarTools.UpdateSelectedPenColor(Argb.Pack(color));
         _penMenuWindow.PenThicknessChanged += thickness => ToolbarTools.UpdateSelectedPen(tool => tool with { Thickness = thickness });
         _penMenuWindow.PenKindChanged += kind => ToolbarTools.UpdateSelectedPen(tool => tool with { PenKind = kind });
         // 笔锋档位：先让引擎套用那一档（它会发通知），通知再把结果写回这支笔 ——
@@ -1006,7 +1017,7 @@ public partial class AnnotationToolbarWindow : Window
             return;
         }
 
-        _penMenuWindow.SetCurrentState(Argb.Unpack(pen.ColorArgb), pen.Thickness, pen.PenKind);
+        _penMenuWindow.SetCurrentState(Argb.Unpack(pen.ColorFor(CanvasSceneState.Active)), pen.Thickness, pen.PenKind);
     }
 
     private void SyncEraserSecondaryMenu()

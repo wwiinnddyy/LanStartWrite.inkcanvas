@@ -11,6 +11,7 @@ using Dusk.Ink.Primitives;
 using Jalium.UI;
 using Jalium.UI.Automation;
 using Jalium.UI.Controls;
+using Jalium.UI.Controls.Primitives;
 using Jalium.UI.Input;
 using Jalium.UI.Interop;
 using Jalium.UI.Media;
@@ -101,6 +102,7 @@ internal static class Program
             CheckNavigation(settings);
             CheckToolbarTouch();
             CheckToolbarTools(settings);
+            CheckScenePenColors();
             CheckCanvasModes(settings);
             CheckWhiteboardCanvas(settings);
             CheckPenMenu();
@@ -501,22 +503,27 @@ internal static class Program
         // ---------------------------------------------------------- 两支笔
         var firstPen = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen);
         ToolbarTools.Select(firstPen.Id);
-        ToolbarTools.UpdateSelectedPen(pen => pen with { ColorArgb = 0xFFD13438, Thickness = 9 });
-        Check(ToolbarTools.Find(firstPen.Id) is { Thickness: 9, ColorArgb: 0xFFD13438 },
+        ToolbarTools.UpdateSelectedPen(pen => pen with { Thickness = 9 });
+        ToolbarTools.UpdateSelectedPenColor(0xFFD13438);
+        Check(ToolbarTools.Find(firstPen.Id) is { Thickness: 9 }
+            && ToolbarTools.Find(firstPen.Id)!.ColorFor(CanvasScene.ScreenAnnotation) == 0xFFD13438,
             "选中一支笔之后，改的是它自己的颜色与粗细");
 
         var secondPen = ToolbarTools.Add(ToolbarToolKind.Pen);
         Check(secondPen is not null && secondPen.Id != firstPen.Id, "能再加一支笔");
         if (secondPen is null) return;
-        Check(ToolbarTools.Find(secondPen.Id)!.ColorArgb == 0xFFD13438,
+        Check(ToolbarTools.Find(secondPen.Id)!.ColorFor(CanvasScene.ScreenAnnotation) == 0xFFD13438,
             "新加的那支笔复制的是当前那支的数据，不是一支空白笔");
         Check(toolbar.FindToolControl(secondPen.Id) is not null, "新加的那支笔在工具栏上真多出了一格");
 
         ToolbarTools.Select(secondPen.Id);
-        ToolbarTools.UpdateSelectedPen(pen => pen with { ColorArgb = 0xFF0078D4, Thickness = 3 });
+        ToolbarTools.UpdateSelectedPen(pen => pen with { Thickness = 3 });
+        ToolbarTools.UpdateSelectedPenColor(0xFF0078D4);
         ToolbarTools.Select(firstPen.Id);
-        Check(ToolbarTools.Find(firstPen.Id) is { Thickness: 9, ColorArgb: 0xFFD13438 }
-            && ToolbarTools.Find(secondPen.Id) is { Thickness: 3, ColorArgb: 0xFF0078D4 },
+        Check(ToolbarTools.Find(firstPen.Id) is { Thickness: 9 }
+            && ToolbarTools.Find(firstPen.Id)!.ColorFor(CanvasScene.ScreenAnnotation) == 0xFFD13438
+            && ToolbarTools.Find(secondPen.Id) is { Thickness: 3 }
+            && ToolbarTools.Find(secondPen.Id)!.ColorFor(CanvasScene.ScreenAnnotation) == 0xFF0078D4,
             "两支笔的颜色与粗细互不影响");
 
         // 笔锋也各归各的：手调一支，切走再切回来，那一支的形状必须还在。
@@ -551,7 +558,8 @@ internal static class Program
         var surface = inkHost.Children.OfType<JaliumInkCanvas>().Single();
 
         ToolbarTools.Select(firstPen.Id);
-        ToolbarTools.UpdateSelectedPen(pen => pen with { Thickness = 11, ColorArgb = 0xFF107C10 });
+        ToolbarTools.UpdateSelectedPen(pen => pen with { Thickness = 11 });
+        ToolbarTools.UpdateSelectedPenColor(0xFF107C10);
         Check(Math.Abs(surface.InkAttributes.Width - 11) < 1e-9
             && surface.InkAttributes.Color.G == 0x7C && surface.InkAttributes.Color.A == 255,
             "菜单里改粗细 / 颜色当场落到画布（不用切工具再切回来）");
@@ -608,6 +616,43 @@ internal static class Program
         // 收尾：把工具栏还原成默认八项，后面的检查与存档往返都按默认形状走。
         ToolbarTools.Load(ToolbarTools.DefaultItems(), "pen.1");
         Check(ToolbarTools.Items.Count == 8 && editor.RowCount == 8, "收尾：列表回到默认八项");
+    }
+
+    private static void CheckScenePenColors()
+    {
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        var selectedId = ToolbarTools.SelectedId;
+        var pen = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen);
+        var whiteboardButton = (Button)toolbar.FindToolControl("whiteboard")!;
+        ToolbarTools.Select(pen.Id);
+        ToolbarTools.UpdateSelectedPenColor(0xFFD13438);
+        Check(ToolbarTools.Find(pen.Id)!.ColorFor(CanvasScene.ScreenAnnotation) == 0xFFD13438,
+            "Screen annotation pen color is stored on the pen tool");
+
+        whiteboardButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(CanvasSceneState.IsActive(CanvasScene.Whiteboard), "Entering whiteboard for scene-color isolation");
+        ToolbarTools.UpdateSelectedPenColor(0xFFFFFFFF);
+        Check(ToolbarTools.Find(pen.Id)!.ColorFor(CanvasScene.Whiteboard) == 0xFFFFFFFF
+            && ToolbarTools.Find(pen.Id)!.ColorFor(CanvasScene.ScreenAnnotation) == 0xFFD13438,
+            "Whiteboard and screen annotation colors are stored independently");
+
+        whiteboardButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(!CanvasSceneState.IsActive(CanvasScene.Whiteboard)
+            && ToolbarTools.Selected is { Kind: ToolbarToolKind.Mouse },
+            "Leaving whiteboard returns to mouse mode");
+        Check(ToolbarTools.Find(pen.Id)!.ColorFor(CanvasScene.ScreenAnnotation) == 0xFFD13438
+            && ToolbarTools.Find(pen.Id)!.ColorFor(CanvasScene.Whiteboard) == 0xFFFFFFFF,
+            "Leaving whiteboard preserves both scene colors");
+
+        whiteboardButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(ToolbarTools.Selected?.Id == pen.Id, "Re-entering whiteboard selects the pen again");
+        whiteboardButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        ToolbarTools.Select(selectedId);
+        CloseWindow(toolbar);
     }
 
     /// <summary>
@@ -778,7 +823,8 @@ internal static class Program
         // 起点：选中那支笔 → 批注画布显形，并往它的文档里落一笔（两块画布就此各有东西可分辨）。
         var pen = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen);
         ToolbarTools.Select(pen.Id);
-        ToolbarTools.UpdateSelectedPen(current => current with { ColorArgb = 0xFFD13438, Thickness = 7 });
+        ToolbarTools.UpdateSelectedPen(current => current with { Thickness = 7 });
+        ToolbarTools.UpdateSelectedPenColor(0xFFD13438);
         Check(toolbar.CanvasPresented && toolbar.Canvas is not null, "选中笔之后批注画布显形");
         var annotation = toolbar.Canvas!.Surface;
         CommitStroke(annotation, 60, 60);
@@ -803,10 +849,13 @@ internal static class Program
         Check(board.Document.Count == 0 && annotation.Document.Count == 1,
             "墨迹不串：白板是空的，那一笔还在批注那块里");
 
-        // 工具数据共用一份：这块面当场就是那支红笔，没有"切场景时再同步一次"这一步。
         var surface = board.Canvas;
-        Check(surface.InkAttributes.Color.R == 0xD1 && Math.Abs(surface.InkAttributes.Width - 7) < 1e-9,
-            $"白板用的就是那支笔（当场读到 R={surface.InkAttributes.Color.R}、宽 {surface.InkAttributes.Width:0} px）");
+        var penColor = Argb.Unpack(ToolbarTools.Selected!.ColorFor(CanvasScene.Whiteboard));
+        Check(surface.InkAttributes.Color.R == penColor.R
+            && surface.InkAttributes.Color.G == penColor.G
+            && surface.InkAttributes.Color.B == penColor.B
+            && Math.Abs(surface.InkAttributes.Width - 7) < 1e-9,
+            $"白板使用当前场景的笔色（读到 R={surface.InkAttributes.Color.R}、宽 {surface.InkAttributes.Width:0} px）");
 
         // 一块不透明的底，且等于设置里那一档。
         var expected = CanvasOptions.For(CanvasScene.Whiteboard).BackgroundArgb;
@@ -854,7 +903,8 @@ internal static class Program
         // 它读到的就是那块白板的 Z 位，报出来的"应用没退出置顶带"其实是本步的卫生问题，
         // 不是被检查的那件事错了。（实测踩过：白板留着时 CheckWindowLayers 当场红。）
         ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        ToolbarTools.Select(ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id);
+        Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Mouse },
+            "退出白板后默认切回鼠标模式");
         Check(!toolbar.WhiteboardPresented && !toolbar.CanvasPresented,
             "收尾：两块画布都收起了，不留全屏窗口给后面的层级检查");
     }
@@ -919,9 +969,9 @@ internal static class Program
 
         // 会话内保留：白板那笔被撤了，但白板本身与它的历史都还在（收起不等于拆掉）。
         ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        ToolbarTools.Select(ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id);
-        Check(!CanvasSceneState.IsActive(CanvasScene.Whiteboard) && !toolbar.WhiteboardPresented,
-            "回到屏幕批注：白板收起，两块画布都留在内存里（会话内还着）");
+        Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Mouse }
+            && !CanvasSceneState.IsActive(CanvasScene.Whiteboard) && !toolbar.WhiteboardPresented,
+            "回到屏幕批注：白板收起并切回鼠标模式，两块画布都留在内存里（会话内还着）");
 
         // 用完就收：这两块全屏窗口一直挂着会给后面的检查加重排负担
         // （导航动画那组读的是中间帧，屏幕上多一块全屏面就是多一次合成）。
@@ -947,7 +997,7 @@ internal static class Program
     /// <para>落笔不这么做：引擎认不认一根"笔"还隔着设备类型与捕获那一层，那是 Dusk 自己探针的事。
     /// 但挑、框、挪走的就是这些事件，所以这条合成路正好是要钉的那一条。</para>
     /// </summary>
-    private static void SendPointer(Window target, RoutedEvent routed, uint id, Point position, PointerDeviceType device)
+    private static PointerEventArgs SendPointer(Window target, RoutedEvent routed, uint id, Point position, PointerDeviceType device)
     {
         var point = new PointerPoint(id, position, device, true, new PointerPointProperties(), 1_000);
         PointerEventArgs args = routed == UIElement.PointerMoveEvent
@@ -965,6 +1015,7 @@ internal static class Program
             _ => target,
         };
         routeTarget.RaiseEvent(args);
+        return args;
     }
 
     /// <summary>白板上某一笔现在的第一个点（用来判断"整块挪了多少"与"撤销有没有原样回来"）。</summary>
@@ -999,6 +1050,8 @@ internal static class Program
             && pageHost.VerticalAlignment == VerticalAlignment.Bottom
             && pageHost.ActualHeight == 56,
             "页面控件是白板窗口左下角的 56 DIP Fluent 浮层");
+        Check(ReferenceEquals(board.ThumbnailPlacementTarget, pageHost) && board.ThumbnailPlacement == PlacementMode.Top,
+            "缩略图菜单锚定在左下角页面控件上方");
         Check(previousButton.Parent is Grid && addButton.Parent is Border
             && !ReferenceEquals(previousButton.Parent, addButton.Parent),
             "页面导航与独立新增区域是分开的两个表面");
@@ -1015,6 +1068,18 @@ internal static class Program
             "初始只有一页，页码显示为 1 / 1");
         Check(!previousButton.IsEnabled && !nextButton.IsEnabled,
             "第一页的上一页与下一页都禁用");
+
+        SendPointer(board, UIElement.PreviewPointerDownEvent, 60, new Point(800, 800), PointerDeviceType.Mouse);
+        Check(board.ThumbnailPopupOpen && board.ThumbnailCardCount == 1 && firstSurface.Document.Count == 0,
+            "点击白板空白处打开缩略图菜单，不落墨");
+        Check(board.ThumbnailScroll.VerticalScrollBarVisibility == ScrollBarVisibility.Auto,
+            "缩略图菜单使用垂直滚动容器");
+        SendPointer(board, UIElement.PreviewPointerDownEvent, 60, new Point(800, 800), PointerDeviceType.Mouse);
+        Check(!board.ThumbnailPopupOpen, "再次点击白板空白处关闭缩略图菜单");
+        var penPreview = SendPointer(board, UIElement.PreviewPointerDownEvent, 62, new Point(900, 900), PointerDeviceType.Pen);
+        var touchPreview = SendPointer(board, UIElement.PreviewPointerDownEvent, 63, new Point(1000, 1000), PointerDeviceType.Touch);
+        Check(!penPreview.Handled && !touchPreview.Handled && !board.ThumbnailPopupOpen,
+            "笔和触摸不会被缩略图菜单拦截");
 
         CommitStroke(firstSurface, 220, 220);
         addButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -1050,6 +1115,17 @@ internal static class Program
             "新页继续追加到末尾");
         Check(thirdSurface.Document.Count == 0 && firstSurface.Document.Count == 1 && secondSurface.Document.Count == 1,
             "第三页为空，旧两页内容仍在");
+
+        SendPointer(board, UIElement.PreviewPointerDownEvent, 61, new Point(1500, 1500), PointerDeviceType.Mouse);
+        Check(board.ThumbnailPopupOpen && board.ThumbnailCardCount == 3
+            && board.ThumbnailCards.Select(card => AutomationProperties.GetName(card)).SequenceEqual(
+                ["第 1 页，共 3 页", "第 2 页，共 3 页", "第 3 页，共 3 页"]),
+            "缩略图按页面顺序显示，新页追加在下面");
+        board.ThumbnailCards[1].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(board.ActivePageIndex == 1 && !board.ThumbnailPopupOpen,
+            "点击缩略图跳转到对应页面并关闭菜单");
+        board.ThumbnailCards[0].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(board.ActivePageIndex == 0, "再次点击缩略图可以回到第一页");
 
         previousButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         previousButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -1430,10 +1506,16 @@ internal static class Program
             "Pen kind radio renders the FluentJalium RadioButton template");
         Check(Descendants((UIElement)menu.FindName("PenTipPresetComboBox")!).OfType<FrameworkElement>().Any(part => part.Name == "HighlightBackground"),
             "Pen tip preset combo renders the FluentJalium ComboBox template");
+        Check(InkPalette.Names[5] == "白色"
+            && InkPalette.Colors[5].R == 255 && InkPalette.Colors[5].G == 255 && InkPalette.Colors[5].B == 255,
+            "The former cyan palette entry is now white");
+        ((RadioButton)menu.FindName("PenColorRing6")!).IsChecked = true;
+        Check(menu.SelectedColor.R == 255 && menu.SelectedColor.G == 255 && menu.SelectedColor.B == 255 && notifications == 1,
+            "White palette selection invokes one color change");
         ((RadioButton)menu.FindName("PenColorRing7")!).IsChecked = true;
-        Check(menu.SelectedColor.B == 0xD4 && notifications == 1, "Palette selection invokes one color change");
+        Check(menu.SelectedColor.B == 0xD4 && notifications == 2, "Palette selection invokes one color change");
         ((Slider)menu.FindName("PenThicknessSlider")!).Value = 6;
-        Check(menu.SelectedThickness == 6 && notifications == 2, "Menu slider updates selected thickness");
+        Check(menu.SelectedThickness == 6 && notifications == 3, "Menu slider updates selected thickness");
     }
 
     /// <summary>下拉项的标识表：预设库原序 + 末尾一个空串（「自定义」）。</summary>
@@ -1723,7 +1805,11 @@ internal static class Program
         Check(storedItems.Any(static tool => tool.Kind == ToolbarToolKind.Pen && tool.TipValues is { Values.Length: 18 }),
             "笔锋的全量取值（含三个速度参数）挂在那一支笔上一起落盘");
         Check(storedItems.Any(static tool => tool.Kind == ToolbarToolKind.Eraser),
-            "橡皮的擦法与半径也挂在那一把橡皮上");
+            "橡皮的擦法与半径也挂在这一把橡皮上");
+        Check(storedItems.Any(static tool => tool.Kind == ToolbarToolKind.Pen
+            && tool.ScreenAnnotationColorArgb is not null
+            && tool.WhiteboardColorArgb is not null),
+            "每支笔的批注/白板颜色分别随工具项存档");
         var storedPresets = AppPreferences.Current.TipCustomPresets.Items ?? [];
         Check(storedPresets.Count == InkTipOptions.CustomPresetRecords.Count,
             "「我的笔锋」随偏好落盘");

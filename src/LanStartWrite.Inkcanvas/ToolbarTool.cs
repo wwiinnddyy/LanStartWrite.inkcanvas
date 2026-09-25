@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Jalium.UI.Media;
 
 namespace LanStartWrite.Inkcanvas;
@@ -40,8 +41,18 @@ internal sealed record ToolbarTool
 
     // ---------------------------------------------------------------- 笔
 
-    /// <summary>笔色（ARGB）。透明度在应用侧按笔型另算（荧光笔半透明、激光笔更透）。</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public uint ColorArgb { get; init; } = DefaultColorArgb;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public uint? ScreenAnnotationColorArgb { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public uint? WhiteboardColorArgb { get; init; }
+
+    internal uint ColorFor(CanvasScene scene) => scene == CanvasScene.Whiteboard
+        ? WhiteboardColorArgb ?? ColorArgb
+        : ScreenAnnotationColorArgb ?? ColorArgb;
 
     /// <summary>笔宽（设备无关单位）。</summary>
     public double Thickness { get; init; } = 4;

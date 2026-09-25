@@ -17,7 +17,7 @@ internal static class InkPalette
         Color.FromRgb(0xF2, 0x6B, 0x1F), // 3
         Color.FromRgb(0xF2, 0xC8, 0x11), // 4
         Color.FromRgb(0x10, 0x7C, 0x10), // 5
-        Color.FromRgb(0x00, 0xB7, 0xC3), // 6
+        Color.FromRgb(0xFF, 0xFF, 0xFF), // 6
         Color.FromRgb(0x00, 0x78, 0xD4), // 7
         Color.FromRgb(0x87, 0x64, 0xB8), // 8
         Color.FromRgb(0x73, 0x73, 0x73), // 9
@@ -25,7 +25,7 @@ internal static class InkPalette
 
     /// <summary>与 <see cref="Colors"/> 同序的名字，供工具提示与列表摘要使用。</summary>
     internal static readonly string[] Names =
-        ["黑色", "红色", "橙色", "黄色", "绿色", "青色", "蓝色", "紫色", "灰色"];
+        ["黑色", "红色", "橙色", "黄色", "绿色", "白色", "蓝色", "紫色", "灰色"];
 
     /// <summary>找与 <paramref name="argb"/> 最接近的那一格，返回它的下标。</summary>
     internal static int NearestIndex(uint argb)
