@@ -7,11 +7,10 @@ internal sealed class EraserPreviewAdorner : FrameworkElement
 {
     private static readonly SvgImage EraserImage = SvgImage.FromSvgString(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\">" +
-        "<path d=\"M13 20L39 8L53 14L27 27Z\" fill=\"#F2C078\" stroke=\"#20252B\" stroke-width=\"3\" stroke-linejoin=\"round\"/>" +
-        "<path d=\"M13 20L27 27L27 47L13 40Z\" fill=\"#B97845\" stroke=\"#20252B\" stroke-width=\"3\" stroke-linejoin=\"round\"/>" +
-        "<path d=\"M27 27L53 14L53 34L27 47Z\" fill=\"#D99A5B\" stroke=\"#20252B\" stroke-width=\"3\" stroke-linejoin=\"round\"/>" +
-        "<path d=\"M31 29L49 20\" fill=\"none\" stroke=\"#FFF0C7\" stroke-width=\"3\" stroke-linecap=\"round\" opacity=\".8\"/>" +
-        "<path d=\"M12 49L51 33\" fill=\"none\" stroke=\"#20252B\" stroke-width=\"5\" stroke-linecap=\"round\" opacity=\".85\"/>" +
+        "<path d=\"M12 39L34 17Q36 15 38 17L51 30Q53 32 51 34L29 56L12 39Z\" fill=\"#F8FAFC\" stroke=\"#1F2937\" stroke-width=\"3\" stroke-linejoin=\"round\"/>" +
+        "<path d=\"M12 39L29 56L22 61L6 45L12 39Z\" fill=\"#CBD5E1\" stroke=\"#1F2937\" stroke-width=\"3\" stroke-linejoin=\"round\"/>" +
+        "<path d=\"M34 17L42 9Q44 7 46 9L58 21Q60 23 58 25L51 32L34 17Z\" fill=\"#94A3B8\" stroke=\"#1F2937\" stroke-width=\"3\" stroke-linejoin=\"round\"/>" +
+        "<path d=\"M19 38L35 22\" fill=\"none\" stroke=\"#FFFFFF\" stroke-width=\"3\" stroke-linecap=\"round\" opacity=\".9\"/>" +
         "</svg>");
 
     private static readonly Brush RangeFill = new SolidColorBrush(Color.FromArgb(0x38, 0x0A, 0x78, 0xD4));
@@ -37,9 +36,10 @@ internal sealed class EraserPreviewAdorner : FrameworkElement
             return;
         }
 
+        bool changed = !_visible || _center != center || !_radius.Equals(radius);
         _center = center;
         _radius = radius;
-        if (!_visible)
+        if (changed)
         {
             _visible = true;
             InvalidateVisual();

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Jalium.UI;
 using Jalium.UI.Controls;
 using Jalium.UI.Interop;
@@ -39,9 +40,36 @@ internal static class Program
         window.Show();
         window.Activate();
 
+        using var trayIcon = new TrayIconService(
+            window,
+            window.OpenSettings,
+            RestartApplication,
+            () => app.Shutdown());
+
         var exitCode = app.Run();
         AppPreferences.Flush();
         Environment.Exit(exitCode);
+    }
+
+    private static void RestartApplication()
+    {
+        AppPreferences.Flush();
+        var path = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true,
+            });
+            Application.Current?.Shutdown();
+        }
+        catch (Exception exception)
+        {
+            Trace.WriteLine(exception);
+        }
     }
 
 }

@@ -179,17 +179,25 @@ For an interactive toolbar/settings preview with **isolated preferences**, run:
 & ./tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe --preview
 ```
 
+For a repeatable synthetic platform stress run against the live window and its actual backend, use:
+
+```powershell
+& ./tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe --ink-perf
+```
+
+The output is diagnostic wall-clock data, not a pass/fail threshold.
+
 This starts the real application windows with a fresh `preview-state/preferences.json`
 next to the test executable. It neither edits the normal profile nor closes an already
 running annotation session. Close the preview toolbar to end the preview.
 
-The suite is 361 checks on the current tree (the count grows with every wiring surface
+The suite is 362 checks on the current tree (the count grows with every wiring surface
 that gets a guard, and the number printed on a run is only the part that ran before the
 first failure), including responsive settings-row reflow without control replacement,
 independent navigation selection/focus, native system-color hydration, initial framework
 theme selection, single Click/Command gesture dispatch, cancelled gestures, toolbar
 contact capture and release, no visible hover descriptions across settings and tool
-surfaces, scene-isolated pen colors, whiteboard exit returning to mouse mode, whiteboard
+surfaces, scene-isolated pen colors, whiteboard exit returning to mouse mode, page-number-only
 thumbnail popup ordering/navigation/scrolling without intercepting pen/touch input, SVG
 eraser preview state/radius for mouse and touch, batched preference-to-ink
 synchronization, the eraser secondary menu (both erase modes, the radius clamp, and the

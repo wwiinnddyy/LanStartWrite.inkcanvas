@@ -18,7 +18,6 @@ internal sealed class WhiteboardThumbnail : FrameworkElement
         IsHitTestVisible = false;
         HorizontalAlignment = HorizontalAlignment.Stretch;
         VerticalAlignment = VerticalAlignment.Stretch;
-        _document.Changed += OnDocumentChanged;
     }
 
     internal Color PageBackground
@@ -35,6 +34,8 @@ internal sealed class WhiteboardThumbnail : FrameworkElement
     protected override Size MeasureOverride(Size availableSize) => new(0, 0);
 
     protected override Size ArrangeOverride(Size finalSize) => finalSize;
+
+    internal void Refresh() => InvalidateVisual();
 
     protected override void OnRender(DrawingContext context)
     {
@@ -75,10 +76,6 @@ internal sealed class WhiteboardThumbnail : FrameworkElement
             }
         }
     }
-
-    internal void Dispose() => _document.Changed -= OnDocumentChanged;
-
-    private void OnDocumentChanged(object? sender, InkDocumentChangedEventArgs e) => InvalidateVisual();
 
     private static Point Map(double x, double y, Rect2D bounds, double scale, double offsetX, double offsetY) =>
         new(x * scale + offsetX, y * scale + offsetY);

@@ -159,6 +159,7 @@ public partial class WhiteboardWindow : Window
         // 所有输入都还是白板窗口自己按坐标判的。
         InkHost.Children.Add(_adorner);
 
+        PageNumberText.MouseLeftButtonUp += (_, _) => ToggleThumbnailMenu();
         PreviousPageButton.Click += (_, _) => ActivateRelativePage(-1);
         NextPageButton.Click += (_, _) => ActivateRelativePage(1);
         AddPageButton.Click += (_, _) => AddPage();
@@ -170,7 +171,6 @@ public partial class WhiteboardWindow : Window
         // 输入：<b>handledEventsToo = true</b>。引擎在选择态虽然什么都不写，
         // 但它仍然会把指针事件标成已处理（OnPointerDownHandler 末尾那一句），
         // 不带着一句就永远收不到落点 —— 而"收不到"没有任何症状，只是选择不动。
-        InkHost.AddHandler(PreviewPointerDownEvent, new PointerDownEventHandler(OnPreviewPointerDown), true);
         InkHost.AddHandler(PointerDownEvent, new PointerDownEventHandler(OnPointerDown), true);
         InkHost.AddHandler(PointerMoveEvent, new PointerMoveEventHandler(OnPointerMove), true);
         InkHost.AddHandler(PointerUpEvent, new PointerUpEventHandler(OnPointerUp), true);
@@ -252,6 +252,7 @@ public partial class WhiteboardWindow : Window
             page.Thumbnail.PageBackground = background;
             page.Thumbnail.Width = 180;
             page.Thumbnail.Height = 96;
+            page.Thumbnail.Refresh();
 
             var content = new Grid();
             content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(96) });
@@ -442,6 +443,9 @@ public partial class WhiteboardWindow : Window
     /// </summary>
     private void OnDocumentChanged(object? sender, Dusk.Ink.Document.InkDocumentChangedEventArgs e)
     {
+        if (_thumbnailPopup.IsOpen && _activePageIndex >= 0 && _activePageIndex < _pages.Count)
+            _pages[_activePageIndex].Thumbnail.Refresh();
+
         if (IsTransforming)
         {
             // 挪 / 缩 / 转本身就是引擎重写点数据的一串 Modified 变更：
@@ -524,18 +528,6 @@ public partial class WhiteboardWindow : Window
     {
         var scale = _surface.View.Viewport.Scale;
         return new Point2D(screenDx / scale, screenDy / scale);
-    }
-
-    private void OnPreviewPointerDown(object sender, PointerDownEventArgs e)
-    {
-        if (e.Pointer.PointerDeviceType != PointerDeviceType.Mouse) return;
-        if (_surface.IsSelectMode || _drag != Drag.None || _gestures.IsActive) return;
-        if (Local(e) is not { } screen) return;
-        var world = ToWorld(screen);
-        if (_surface.Document.HitTestCircle(world, _surface.View.ScreenLengthToWorld(PickToleranceScreen)).Count > 0) return;
-
-        ToggleThumbnailMenu();
-        e.Handled = true;
     }
 
     private void OnPointerDown(object sender, PointerDownEventArgs e)
@@ -963,7 +955,6 @@ public partial class WhiteboardWindow : Window
         _thumbnailCards.Clear();
         foreach (var page in _pages)
         {
-            page.Thumbnail.Dispose();
             page.Surface.Dispose();
         }
         _pages.Clear();

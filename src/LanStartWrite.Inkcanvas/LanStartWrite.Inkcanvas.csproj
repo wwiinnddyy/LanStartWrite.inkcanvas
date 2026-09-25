@@ -34,7 +34,7 @@
   <ItemGroup>
     <PackageReference Include="Jalium.UI" Version="26.10.9" />
     <!-- 闭源 SDK：单个混淆过的 Dusk.dll，来自 ../dusk-feed（见 NuGet.config）。 -->
-    <PackageReference Include="Dusk" Version="1.0.1" />
+    <PackageReference Include="Dusk" Version="1.0.3" />
     <!--
       Fluent 控件层：FluentJalium（Astra），源码直引。
       库自己只依赖 Jalium.UI.Controls + .Xaml（都是 TFM 无关的 net10.0 程序集），

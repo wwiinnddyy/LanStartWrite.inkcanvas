@@ -884,6 +884,8 @@ public partial class AnnotationToolbarWindow : Window
     {
         if (_annotationOverlay is null) return;
 
+        _annotationOverlay.Surface.SetInkMode();
+
         if (!CanvasOptions.For(CanvasScene.ScreenAnnotation).PassThrough)
         {
             _annotationOverlay.SetClickThrough(false);
@@ -1279,6 +1281,11 @@ public partial class AnnotationToolbarWindow : Window
     {
         _ = sender;
         _ = e;
+        OpenSettings();
+    }
+
+    internal void OpenSettings()
+    {
         if (_settingsWindow is not null)
         {
             _settingsWindow.Activate();

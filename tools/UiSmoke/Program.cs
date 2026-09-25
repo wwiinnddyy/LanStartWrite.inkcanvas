@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using FluentJalium.Controls;
@@ -33,7 +35,10 @@ internal static class Program
         var path = Path.Combine(AppContext.BaseDirectory, preview ? "preview-state" : "test-state", "preferences.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, JsonSerializer.Serialize(new PreferenceSnapshot()));
-        RenderContext.GetOrCreateCurrent(RenderBackend.Auto).DefaultRenderingEngine = RenderingEngine.Impeller;
+        var renderContext = RenderContext.GetOrCreateCurrent(RenderBackend.Auto);
+        renderContext.DefaultRenderingEngine = RenderingEngine.Impeller;
+        var adapter = renderContext.GetAdapterInfo();
+        Console.WriteLine($"[render] backend={renderContext.Backend} engine={renderContext.DefaultRenderingEngine} adapter={adapter?.Name ?? "unavailable"} type={adapter?.AdapterType.ToString() ?? "unavailable"}");
         Jalium.UI.Markup.ThemeLoader.Initialize();
         var app = new Application();
         AppPreferences.Initialize(path);
@@ -54,6 +59,12 @@ internal static class Program
             toolbar.Show();
             try { return app.Run(); }
             finally { AppPreferences.Flush(); }
+        }
+        if (args.Contains("--ink-perf", StringComparer.OrdinalIgnoreCase))
+        {
+            RunInkPerf();
+            AppPreferences.Flush();
+            return 0;
         }
         var settings = new SettingsWindow
         {
@@ -112,6 +123,7 @@ internal static class Program
             CheckTipEditor(settings);
             CheckEraserMenu();
             CheckEraserPreview();
+            CheckTrayMenu();
             CheckFlyoutPlacement();
             CheckToolbarPlacement();
             CheckPreferences(path);
@@ -778,6 +790,53 @@ internal static class Program
         Check(!settled.PassThrough && !settled.Freeze, "收尾：两个开关都关回去");
     }
 
+    private static void RunInkPerf()
+    {
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        var pen = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen);
+        ToolbarTools.Select(pen.Id);
+        ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var whiteboard = toolbar.Whiteboard!;
+        var surface = whiteboard.Surface;
+        var target = whiteboard.RenderTarget;
+        var renderThread = typeof(Window).GetField("_renderThread", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(whiteboard) as Thread;
+        Console.WriteLine($"[ink-perf] targetBackend={target?.Backend.ToString() ?? "none"} targetEngine={target?.RenderingEngine.ToString() ?? "none"} partial={target?.SupportsPartialPresentation.ToString() ?? "none"} renderThread={renderThread?.Name ?? "inline"}");
+        var pointerId = 900u;
+
+        foreach (int count in new[] { 100, 500, 1000 })
+        {
+            surface.Document.Clear();
+            for (int i = 0; i < count; i++)
+            {
+                CommitStroke(surface, 40 + (i % 50) * 18, 40 + (i / 50) * 18);
+            }
+
+            whiteboard.ForceRenderFrame();
+            surface.Canvas.Metrics.Reset();
+            var down = SendPointer(surface.Canvas, UIElement.PointerDownEvent, pointerId, new Point(100, 100), PointerDeviceType.Pen);
+            var input = Stopwatch.StartNew();
+            for (int i = 0; i < 120; i++)
+            {
+                SendPointer(surface.Canvas, UIElement.PointerMoveEvent, pointerId,
+                    new Point(700 + i % 30, 500 + i * 0.25), PointerDeviceType.Pen);
+            }
+            input.Stop();
+            var frame = Stopwatch.StartNew();
+            whiteboard.ForceRenderFrame();
+            frame.Stop();
+            var metrics = surface.Canvas.Metrics;
+            SendPointer(surface.Canvas, UIElement.PointerUpEvent, pointerId, new Point(730, 530), PointerDeviceType.Pen);
+            Console.WriteLine($"[ink-perf] strokes={count} downHandled={down.Handled} input120={input.Elapsed.TotalMilliseconds:F2}ms frame={frame.Elapsed.TotalMilliseconds:F2}ms inputToRender={metrics.LastInputToRenderMs:F2}ms avg={metrics.AverageInputToRenderMs:F2}ms peak={metrics.PeakInputToRenderMs:F2}ms");
+        }
+
+        ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        CloseWindow(toolbar);
+    }
+
     /// <summary>
     /// 往文档里落一笔。<b>不走输入路径</b>：这个运行时里合成指针点到"引擎认它是笔"还隔着
     /// 设备类型与捕获那一层（真笔的验证在 Dusk 自己的探针里），而这里要钉的是
@@ -997,7 +1056,7 @@ internal static class Program
     /// <para>落笔不这么做：引擎认不认一根"笔"还隔着设备类型与捕获那一层，那是 Dusk 自己探针的事。
     /// 但挑、框、挪走的就是这些事件，所以这条合成路正好是要钉的那一条。</para>
     /// </summary>
-    private static PointerEventArgs SendPointer(Window target, RoutedEvent routed, uint id, Point position, PointerDeviceType device)
+    private static PointerEventArgs SendPointer(UIElement target, RoutedEvent routed, uint id, Point position, PointerDeviceType device)
     {
         var point = new PointerPoint(id, position, device, true, new PointerPointProperties(), 1_000);
         PointerEventArgs args = routed == UIElement.PointerMoveEvent
@@ -1069,13 +1128,23 @@ internal static class Program
         Check(!previousButton.IsEnabled && !nextButton.IsEnabled,
             "第一页的上一页与下一页都禁用");
 
-        SendPointer(board, UIElement.PreviewPointerDownEvent, 60, new Point(800, 800), PointerDeviceType.Mouse);
+        var blankMouse = SendPointer(board, UIElement.PreviewPointerDownEvent, 60, new Point(800, 800), PointerDeviceType.Mouse);
+        Check(!blankMouse.Handled && !board.ThumbnailPopupOpen,
+            "点击白板空白处不会打开缩略图菜单");
+        void ClickPageNumber()
+        {
+            pageText.RaiseEvent(new MouseButtonEventArgs(
+                UIElement.MouseLeftButtonUpEvent, new Point(20, 20), MouseButton.Left, MouseButtonState.Released, 1,
+                MouseButtonState.Released, MouseButtonState.Released, MouseButtonState.Released,
+                MouseButtonState.Released, MouseButtonState.Released, ModifierKeys.None, 0));
+        }
+        ClickPageNumber();
         Check(board.ThumbnailPopupOpen && board.ThumbnailCardCount == 1 && firstSurface.Document.Count == 0,
-            "点击白板空白处打开缩略图菜单，不落墨");
+            "点击左下角页码打开缩略图菜单，不落墨");
         Check(board.ThumbnailScroll.VerticalScrollBarVisibility == ScrollBarVisibility.Auto,
             "缩略图菜单使用垂直滚动容器");
-        SendPointer(board, UIElement.PreviewPointerDownEvent, 60, new Point(800, 800), PointerDeviceType.Mouse);
-        Check(!board.ThumbnailPopupOpen, "再次点击白板空白处关闭缩略图菜单");
+        ClickPageNumber();
+        Check(!board.ThumbnailPopupOpen, "再次点击页码关闭缩略图菜单");
         var penPreview = SendPointer(board, UIElement.PreviewPointerDownEvent, 62, new Point(900, 900), PointerDeviceType.Pen);
         var touchPreview = SendPointer(board, UIElement.PreviewPointerDownEvent, 63, new Point(1000, 1000), PointerDeviceType.Touch);
         Check(!penPreview.Handled && !touchPreview.Handled && !board.ThumbnailPopupOpen,
@@ -1116,7 +1185,7 @@ internal static class Program
         Check(thirdSurface.Document.Count == 0 && firstSurface.Document.Count == 1 && secondSurface.Document.Count == 1,
             "第三页为空，旧两页内容仍在");
 
-        SendPointer(board, UIElement.PreviewPointerDownEvent, 61, new Point(1500, 1500), PointerDeviceType.Mouse);
+        ClickPageNumber();
         Check(board.ThumbnailPopupOpen && board.ThumbnailCardCount == 3
             && board.ThumbnailCards.Select(card => AutomationProperties.GetName(card)).SequenceEqual(
                 ["第 1 页，共 3 页", "第 2 页，共 3 页", "第 3 页，共 3 页"]),
@@ -1954,6 +2023,9 @@ internal static class Program
     [DllImport("user32.dll")]
     private static extern int GetDpiForWindow(IntPtr window);
 
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
+
     // 批注板墨迹层已换成闭源 SDK（Dusk）。这里不测真笔输入，只钉住"应用的五个命令确实
     // 落到引擎属性上"，以及"设置页仅存的那一项墨迹偏好真的还在生效"——
     // 这两条一旦断（feed 里的包漂移、签名对不上、属性映射写错），不必启窗口手写两笔就能看到红。
@@ -2029,6 +2101,10 @@ internal static class Program
             && Math.Abs(center.X - 240) < 0.1 && Math.Abs(center.Y - 180) < 0.1
             && Math.Abs(surface.EraserPreviewRadius - 22) < 0.1,
             "Mouse movement shows the SVG eraser at the pointer with the configured screen radius");
+        SendPointer(overlay, UIElement.PointerMoveEvent, 70, new Point(360, 280), PointerDeviceType.Mouse);
+        Check(surface.EraserPreviewCenter is { } movedCenter
+            && Math.Abs(movedCenter.X - 360) < 0.1 && Math.Abs(movedCenter.Y - 280) < 0.1,
+            "Eraser preview follows subsequent pointer movement");
 
         SendPointer(overlay, UIElement.PointerDownEvent, 71, new Point(320, 220), PointerDeviceType.Touch);
         Check(surface.EraserPreviewVisible, "Touch contact shows the eraser preview");
@@ -2044,6 +2120,49 @@ internal static class Program
         SendPointer(overlay, UIElement.PointerMoveEvent, 73, new Point(400, 260), PointerDeviceType.Mouse);
         Check(!surface.EraserPreviewVisible, "Leaving eraser mode hides the preview");
         ToolbarTools.Select(selectedId);
+        CloseWindow(toolbar);
+    }
+
+    private static void CheckTrayMenu()
+    {
+        var toolbar = new AnnotationToolbarWindow
+        {
+            Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false,
+        };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        var settings = 0;
+        var restart = 0;
+        var exit = 0;
+        using var tray = new TrayIconService(
+            toolbar,
+            () => settings++,
+            () => restart++,
+            () => exit++,
+            registerIcon: true);
+        var items = tray.Menu.Items.OfType<MenuItem>().ToArray();
+        Check(tray.IsRegistered, $"托盘图标已注册到系统通知区域（错误码={tray.RegistrationError}）");
+
+        Check(items.Length == 3
+            && items[0].Header as string == "打开设置"
+            && items[1].Header as string == "重新启动应用"
+            && items[2].Header as string == "退出应用",
+            "托盘菜单提供打开设置、重启应用和退出应用");
+
+        items[0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        items[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Check(settings == 1 && restart == 1 && exit == 1,
+            $"托盘菜单动作分别触发一次（设置={settings}，重启={restart}，退出={exit}）");
+
+        if (OperatingSystem.IsWindows() && tray.CallbackMessage != 0)
+        {
+            SendMessage(toolbar.Handle, tray.CallbackMessage, new IntPtr(0x0202), IntPtr.Zero);
+            Check(settings == 2, "托盘左键消息通过窗口过程打开设置");
+        }
+
         CloseWindow(toolbar);
     }
 
