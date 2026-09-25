@@ -10,24 +10,24 @@
                                      Background="{StaticResource LayerFillColorDefaultBrush}">
             <fluent:FluentNavigationView.MenuItems>
                 <fluent:FluentNavigationItem x:Name="AppearanceNavButton" Content="外观" ToolTip="外观">
-                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE790;" FontFamily="Segoe Fluent Icons" /></fluent:FluentNavigationItem.Icon>
+                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE790;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
                 <fluent:FluentNavigationItem x:Name="InkNavButton" Content="墨迹" ToolTip="墨迹">
-                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE76D;" FontFamily="Segoe Fluent Icons" /></fluent:FluentNavigationItem.Icon>
+                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE76D;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
                 <fluent:FluentNavigationItem x:Name="CanvasNavButton" Content="画布" ToolTip="画布">
-                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE7F4;" FontFamily="Segoe Fluent Icons" /></fluent:FluentNavigationItem.Icon>
+                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE7F4;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
                 <fluent:FluentNavigationItem x:Name="ToolbarNavButton" Content="工具栏" ToolTip="工具栏">
-                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE700;" FontFamily="Segoe Fluent Icons" /></fluent:FluentNavigationItem.Icon>
+                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE700;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
                 <fluent:FluentNavigationItem x:Name="InteractionNavButton" Content="窗口与交互" ToolTip="窗口与交互">
-                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE7C9;" FontFamily="Segoe Fluent Icons" /></fluent:FluentNavigationItem.Icon>
+                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE7C9;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
             </fluent:FluentNavigationView.MenuItems>
             <fluent:FluentNavigationView.FooterMenuItems>
                 <fluent:FluentNavigationItem x:Name="AboutNavButton" Content="关于" ToolTip="关于">
-                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE946;" FontFamily="Segoe Fluent Icons" /></fluent:FluentNavigationItem.Icon>
+                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE946;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
             </fluent:FluentNavigationView.FooterMenuItems>
 

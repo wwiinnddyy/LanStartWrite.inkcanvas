@@ -245,6 +245,9 @@ internal static class Program
     {
         var appearance = (FluentNavigationItem)window.FindName("AppearanceNavButton")!;
         var ink = (FluentNavigationItem)window.FindName("InkNavButton")!;
+        var navigationIcons = Descendants((FrameworkElement)window.FindName("NavigationRoot")!).OfType<FontIcon>().ToList();
+        Check(navigationIcons.Count == 6 && navigationIcons.All(icon => Math.Abs(icon.FontSize - 16) < 0.1),
+            "设置导航图标使用 Fluent 16 DIP 尺寸");
         Check(appearance.IsSelected && !ink.IsSelected, "Navigation exposes selection independently of focus");
         ink.RaiseEvent(new RoutedEventArgs(Jalium.UI.Controls.Primitives.ButtonBase.ClickEvent, ink));
         window.ForceRenderFrame();
