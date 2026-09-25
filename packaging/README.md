@@ -6,11 +6,11 @@ Linux 这一端每种架构两个包（deb + AppImage）共用**该架构那一�
 裸发布目录按架构各留一份中间产物（`linux-publish-x64-*` / `linux-publish-arm64-*`），
 Flatpak 与玲珑取 x64 那一份 —— 两个中间产物都不上传 Release。
 
-| 平台 | 产物（v1.0.1 实测大小） | 打法 |
+| 平台 | 产物（Windows / x64 那几件是 v1.0.1 的实测数，arm64 两件来自探针跑 36106109770） | 打法 |
 |---|---|---|
 | Windows | `…-windows-x64-setup.exe` 32 MiB | NSIS（`packaging/windows/installer.nsi`），每用户装到 `$LOCALAPPDATA` |
-| Linux · deb | `…-linux-amd64.deb` 35 MiB · `…-linux-arm64.deb`（arm64 的数待第一轮 CI 填） | `dpkg-deb`（`packaging/linux/build-deb.sh`），载荷在 `/opt/lanstartwrite` |
-| Linux · AppImage | `…-linux-x64.AppImage` 42 MiB · `…-linux-arm64.AppImage`（同上） | appimagetool（`packaging/linux/build-appimage.sh`，工具自己解包 —— CI 没 FUSE） |
+| Linux · deb | `…-linux-amd64.deb` 35 MiB · `…-linux-arm64.deb` 33 MiB | `dpkg-deb`（`packaging/linux/build-deb.sh`），载荷在 `/opt/lanstartwrite` |
+| Linux · AppImage | `…-linux-x64.AppImage` 42 MiB · `…-linux-arm64.AppImage` 40 MiB | appimagetool（`packaging/linux/build-appimage.sh`，工具自己解包 —— CI 没 FUSE） |
 | Linux · Flatpak | `…-linux-x64.flatpak` 32 MiB | flatpak-builder + 清单 `packaging/linux/<appid>.json`（**只有 x64**） |
 | Linux · 玲珑 | `io.github.wwiinnddyy.lanstartwrite_1.0.1.0_x86_64_main.uab` 65 MiB | `ll-builder`（模板 `packaging/linux/linglong.yaml.in`，把上面那个 .deb 摊进容器；**只有 x64**） |
 
@@ -76,15 +76,13 @@ runner 上跑同一份。四条红路都拿变异验过（改掉一个 `p_align`
   追踪 provider 要它；24.04 只提供 `.so.1`，缺了只是没有 LTTng 追踪，运行时自己降级）。
   因此它进 deb 那步的白名单，**不是**往 `Depends` 里加一条装不上的包；白名单外的缺库 CI 直接红。
   deb 的 `Depends` 实测只需要 `libc6, libstdc++6`。
-  ⚠️ 这条"唯一"是 **x64** 的账；arm64 那一腿第一次跑要么与它一致、要么在这一步红并把库名打出来。
-- **arm64 这一腿第一轮要盯的三件事**（都还没在真 runner 上跑过，所以不写成"已确认"）：
-  ① `ubuntu-24.04-arm` 这个标签在本仓库可用（GitHub 的 hosted arm64 Linux runner 已 GA）；
-  ② 那台 runner 上有没有 docker（deb 的装包验收要用它；没有就红在"Linux · deb"那一步）；
-  ③ arm64 那份产物解析出来的缺库是否只有白名单里那一条。
-  已经实测过的：`dotnet publish -r linux-arm64` 在 Windows 上能编出来（263 文件）、两个架构的产物
-  本地各扫一遍门禁（arm64 23 个 ELF 全 aarch64 / `0x10000`；x64 23 个全 x86_64 / `0x1000`，
-  按各自的门槛一绿一红都对得上）、appimagetool 的 `continuous` 里 `appimagetool-aarch64.AppImage`
-  这个资产在（HTTP 200）。
+  那条"唯一"本来是 x64 的账；arm64 那一腿跑绿之后读数**完全相同**，所以白名单没扩（见下一节）。
+- **arm64 这一腿已在真 runner 上跑绿过一轮**（探针跑 36106109770，`create_release=false`，版本号
+  `0.0.0-arm64probe`）。当时三个未知量的答案：① `ubuntu-24.04-arm` 标签可用；
+  ② 那台 runner **有 docker**，所以 deb 的容器装包验收照跑（arm64 镜像原生跑，不需要 qemu）；
+  ③ arm64 产物解析不出来的库**只有 `liblttng-ust.so.0` 那一条**，与 x64 完全相同 —— 白名单不用扩，
+  `Depends` 也不用改。落位 296 条、`desktop-file-validate` OK，两个数都与 x64 那份一致。
+  门禁在这一腿上同样复现了本机的读数：arm64 23 个 ELF 全 `0x10000`、x64 23 个全 `0x1000`。
 - **Wayland 会话做不到全屏批注**，这不是打包能补的：无边框全屏输入覆盖层与屏幕取帧都被合成器挡住。
   Flatpak 因此只申请 `fallback-x11` + `wayland` + `dri` + `ipc`，X11 会话下正常。玲珑 / deb 同理。
 - **玲珑的工具链只认 HTTP(S) 取源**：`kind: file` 是交给 `/usr/bin/wget` 的，`file://` 与相对路径

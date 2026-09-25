@@ -425,7 +425,7 @@ Windows NSIS / Linux x64 / Linux arm64，后两条各出 deb + AppImage）→ `f
    `desktop-file-validate` + 白名单外的缺库即红。实测唯一缺的是 `liblttng-ust.so.0`
    （coreclr 的 LTTng provider，24.04 只给 `.so.1`，缺了只是没追踪）—— 所以它进白名单，
    不是往 `Depends` 里写一条装不上的包；`Depends` 实测只需 `libc6, libstdc++6`。
-   **那条"唯一"是 x64 的账**，arm64 那一腿第一次跑要么相同、要么在这一步红并打出库名。
+   **arm64 那一腿的读数与 x64 完全相同**（见第 12 项），白名单不扩、`Depends` 不改。
 10. **Linux 腿的 `if` 一律看 `matrix.kind`，不看 `matrix.os`**：加了 `ubuntu-24.04-arm` 之后，
     "这是不是一台 Linux"用 os 等值判断会静默失配 —— AppImage / deb 两步整步不跑，
     而绿会一路留到"上传构建产物"那步才因 `if-no-files-found: error` 红，报得像打包坏了。
@@ -437,13 +437,17 @@ Windows NSIS / Linux x64 / Linux arm64，后两条各出 deb + AppImage）→ `f
     实测是 `0x10000`（64K），比 16K 高一档。脚本纯 stdlib（本机没有 readelf，同一份要在本机与
     runner 上都能跑），四条红路各验过：改 `p_align`、换机器类型、空目录、抬门槛；
     **"一个 ELF 都没扫到"也算红**，目录写错的绿比没检查更坏。
+12. **arm64 那一腿在真 runner 上已经跑绿**（探针 run 36106109770，`ubuntu-24.04-arm`）：deb 33 MiB、
+    AppImage 40 MiB，容器里 apt 装得上、落位 296 条、`desktop-file-validate` OK，
+    缺库只有白名单那一条（与 x64 完全相同，所以白名单没扩）。那台 runner **自带 docker**，
+    不需要 qemu 模拟 —— `ubuntu:24.04` 在 arm 上解出来的就是 arm64 镜像，装的就是刚造的 arm64 deb。
 
 实测（run 36030896388，v1.0.1，五个 job 全绿，Release 上正好五件资产）：setup.exe 32 MiB、
 deb 35 MiB（296 条落位、apt install OK、desktop-file-validate OK）、AppImage 42 MiB、
 flatpak 32 MiB（沙箱内自检 `/app/bin/lanstartwrite` 与 apphost 均可执行）、玲珑 uab 65 MiB。
-**arm64 那一腿还没有 CI 实测数**（本地只验到"`publish -r linux-arm64` 编得出来 + 23 个 ELF 全
-aarch64 且 `0x10000` 对齐"这一层）：第一次跑要盯 `ubuntu-24.04-arm` 标签可用性、那台 runner 上
-有没有 docker、以及 arm64 的缺库清单是否只有白名单那一条。
+**arm64 那一腿的数是后来探针跑 36106109770 补的**（见上一条第 12 项：deb 33 MiB、AppImage 40 MiB，
+容器装包、落位条数与缺库清单都与 x64 一致）。所以一次完整跑的 Release 上是**七件**资产 ——
+setup、两份 deb、两份 AppImage、flatpak、玲珑 —— 不再是五件。
 
 ## Jalium.UI Framework Reference
 
