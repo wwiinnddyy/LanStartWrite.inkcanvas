@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Dusk.Ink.Controls;
 using Dusk.Ink.Primitives;
 using Jalium.UI;
+using Jalium.UI.Automation;
 using Jalium.UI.Controls;
 using Jalium.UI.Input;
 using Jalium.UI.Media;
@@ -38,9 +39,11 @@ public partial class WhiteboardWindow : Window
     /// <summary>手柄命中比"画出来的那一颗"宽出来的容差（屏幕 DIP）：手指点手柄不能要求点得准。</summary>
     private const double HandleSlopScreen = 4;
 
-    private readonly CanvasSurface _surface;
+    private readonly List<WhiteboardPage> _pages = [];
     private readonly SelectionAdorner _adorner = new();
     private readonly TouchGestureTracker _gestures = new();
+    private CanvasSurface _surface = null!;
+    private int _activePageIndex;
 
     /// <summary>捏合的上下限：拉到 0.2 倍看得见整版板书，拉到 8 倍够写最细的字。</summary>
     private const double MinZoom = 0.2;
@@ -105,6 +108,14 @@ public partial class WhiteboardWindow : Window
 
     internal IReadOnlyList<Point>? AdornerHandles => _adorner.Handles;
 
+    internal int PageCount => _pages.Count;
+
+    internal int ActivePageIndex => _activePageIndex;
+
+    internal event Action? ActivePageChanged;
+
+    internal event Action? HistoryStateChanged;
+
     public WhiteboardWindow()
     {
         AllowsTransparency = false;
@@ -117,29 +128,35 @@ public partial class WhiteboardWindow : Window
         // 两块画布不会同时在屏，所以同层并存只出现在"其中一块还没建起来"的那段。
         WindowLayerManager.Register(this, WindowLayer.Canvas, "白板");
 
-        _surface = new CanvasSurface(Dispatcher);
-        _surface.AttachTo(InkHost);
+        var firstPage = CreatePage();
+        _surface = firstPage.Surface;
+        _surface.AttachTo(InkHost, 0);
+        SubscribeSurface(_surface);
 
         // 选择层在墨迹<b>之上</b>：加在面之后。它不吃命中（IsHitTestVisible=false），
         // 所有输入都还是白板窗口自己按坐标判的。
         InkHost.Children.Add(_adorner);
 
+        PreviousPageButton.Click += (_, _) => ActivateRelativePage(-1);
+        NextPageButton.Click += (_, _) => ActivateRelativePage(1);
+        AddPageButton.Click += (_, _) => AddPage();
+
         ApplyBackground();
+        UpdatePageControl();
         CanvasOptions.Changed += OnCanvasOptionsChanged;
-        _surface.Document.Changed += OnDocumentChanged;
-        _surface.View.Viewport.Changed += OnViewportChanged;
 
         // 输入：<b>handledEventsToo = true</b>。引擎在选择态虽然什么都不写，
         // 但它仍然会把指针事件标成已处理（OnPointerDownHandler 末尾那一句），
         // 不带着一句就永远收不到落点 —— 而"收不到"没有任何症状，只是选择不动。
-        AddHandler(PointerDownEvent, new PointerDownEventHandler(OnPointerDown), true);
-        AddHandler(PointerMoveEvent, new PointerMoveEventHandler(OnPointerMove), true);
-        AddHandler(PointerUpEvent, new PointerUpEventHandler(OnPointerUp), true);
-        AddHandler(PointerCancelEvent, new PointerCancelEventHandler(OnPointerCancel), true);
+        InkHost.AddHandler(PointerDownEvent, new PointerDownEventHandler(OnPointerDown), true);
+        InkHost.AddHandler(PointerMoveEvent, new PointerMoveEventHandler(OnPointerMove), true);
+        InkHost.AddHandler(PointerUpEvent, new PointerUpEventHandler(OnPointerUp), true);
+        InkHost.AddHandler(PointerCancelEvent, new PointerCancelEventHandler(OnPointerCancel), true);
 
         // Delete 摘掉选中的那些笔迹（整批一步撤销）。只在白板里有意义：批注那块没有"选中"这件事。
         PreviewKeyDown += (_, e) =>
         {
+            if (PageControlHost.IsKeyboardFocusWithin) return;
             if (e.Key != Key.Delete || !_surface.IsSelectMode) return;
             e.Handled = DeleteSelection();
         };
@@ -149,6 +166,88 @@ public partial class WhiteboardWindow : Window
 
     /// <summary>这块画布的墨迹面。工具栏要写的一切（模式、颜色、粗细、擦法、撤销）都从这里走。</summary>
     internal CanvasSurface Surface => _surface;
+
+    private WhiteboardPage CreatePage()
+    {
+        var page = new WhiteboardPage(new CanvasSurface(Dispatcher, assertLoadedSize: false));
+        _pages.Add(page);
+        return page;
+    }
+
+    private void SubscribeSurface(CanvasSurface surface)
+    {
+        surface.Document.Changed += OnDocumentChanged;
+        surface.View.Viewport.Changed += OnViewportChanged;
+        surface.HistoryStateChanged += OnSurfaceHistoryStateChanged;
+    }
+
+    private void UnsubscribeSurface(CanvasSurface surface)
+    {
+        surface.Document.Changed -= OnDocumentChanged;
+        surface.View.Viewport.Changed -= OnViewportChanged;
+        surface.HistoryStateChanged -= OnSurfaceHistoryStateChanged;
+    }
+
+    private void AddPage()
+    {
+        if (_drag != Drag.None || _gestures.IsActive || _surface.History.HasOpenBatch) return;
+
+        CreatePage();
+        ActivatePage(_pages.Count - 1);
+    }
+
+    private void ActivateRelativePage(int offset) => ActivatePage(_activePageIndex + offset);
+
+    private void ActivatePage(int index)
+    {
+        if (index < 0 || index >= _pages.Count || index == _activePageIndex) return;
+        if (_drag != Drag.None || _gestures.IsActive || _surface.History.HasOpenBatch) return;
+
+        ClearSelection();
+        ResetTransientState();
+
+        var previous = _surface;
+        previous.DetachFrom(InkHost);
+        UnsubscribeSurface(previous);
+
+        _activePageIndex = index;
+        _surface = _pages[index].Surface;
+        _surface.AttachTo(InkHost, 0);
+        SubscribeSurface(_surface);
+
+        ApplyBackground();
+        UpdatePageControl();
+        ActivePageChanged?.Invoke();
+        HistoryStateChanged?.Invoke();
+    }
+
+    private void ResetTransientState()
+    {
+        if (_surface.History.HasOpenBatch) _surface.History.EndBatch();
+        _gestures.Reset();
+        _drag = Drag.None;
+        _dragHandle = -1;
+        _dragPointerId = -1;
+        _pendingEmptyClear = false;
+        _adorner.Marquee = null;
+        _adorner.LassoPoints = null;
+        _lassoWorld.Clear();
+    }
+
+    private void UpdatePageControl()
+    {
+        var pageNumber = _activePageIndex + 1;
+        var pageCount = _pages.Count;
+        PageNumberText.Text = $"{pageNumber} / {pageCount}";
+        PreviousPageButton.IsEnabled = _activePageIndex > 0;
+        NextPageButton.IsEnabled = _activePageIndex < pageCount - 1;
+        AutomationProperties.SetName(PreviousPageButton, "上一页");
+        AutomationProperties.SetName(PageNumberText, $"第 {pageNumber} 页，共 {pageCount} 页");
+        AutomationProperties.SetName(NextPageButton, "下一页");
+        AutomationProperties.SetName(AddPageButton, "新建页面");
+    }
+
+    private void OnSurfaceHistoryStateChanged() => HistoryStateChanged?.Invoke();
 
     /// <summary>
     /// 把设置里那一档底色铺到宿主格子上。<b>铺在格子上而不是控件上</b>：
@@ -685,10 +784,10 @@ public partial class WhiteboardWindow : Window
     private void OnClosed(object? sender, System.EventArgs e)
     {
         CanvasOptions.Changed -= OnCanvasOptionsChanged;
-        _surface.Document.Changed -= OnDocumentChanged;
-        _surface.View.Viewport.Changed -= OnViewportChanged;
+        UnsubscribeSurface(_surface);
 
         // 墨迹控件必须显式拆：Jalium 不代调，而它挂着整棵墨迹视觉树（见 AGENTS）。
-        _surface.Dispose();
+        foreach (var page in _pages) page.Surface.Dispose();
+        _pages.Clear();
     }
 }

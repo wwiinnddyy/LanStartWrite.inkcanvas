@@ -113,6 +113,7 @@ internal static class Program
         steps.Enqueue(CheckInkPreferenceLands);
         // 白板那两条读的是"下一拍才落地"的按钮状态，理由与上面那条相同（不能与发起那一拍同步断言）。
         steps.Enqueue(CheckWhiteboardUndoLands);
+        steps.Enqueue(CheckWhiteboardPages);
         // 选择档排在它后面：它也要动全局的"眼前是哪块画布"，两步共用一个全局状态，
         // 各自收尾都回到屏幕批注 + 两块画布都收起，才不会互相看见对方的残局。
         steps.Enqueue(CheckWhiteboardSelect);
@@ -410,7 +411,11 @@ internal static class Program
                 FluentThemeManager.GetBrush("SubtleFillColorTransparentBrush")),
             "An unchecked tool sits on a transparent surface");
         var grip = (Border)toolbar.FindName("DragHandleChrome")!;
-        var root = (UIElement)toolbar.Content!;
+        var root = (Grid)toolbar.Content!;
+        var surface = (Border)root.Children[0];
+        Check(toolbar.Background is null && root.Background is null
+            && surface.BorderThickness == default(Thickness) && grip.BorderThickness == default(Thickness),
+            "浮动工具栏使用真正透明的窗口背景，表面没有额外外框");
         var start = grip.TransformToVisual(root)!.Transform(new Point(20, 28));
         var left = toolbar.Left;
         var top = toolbar.Top;
@@ -899,8 +904,8 @@ internal static class Program
     }
 
     /// <summary>
-    /// 送一个合成的指针事件到某个窗口的<b>冒泡口</b>（与用户那一条同路：
-    /// 白板注册的是 <c>PointerDown/Move/Up</c> 且 <c>handledEventsToo = true</c>）。
+    /// 送一个合成的指针事件到某个宿主的<b>冒泡口</b>（与用户那一条同路：
+    /// 白板注册在 <c>InkHost</c> 上的是 <c>PointerDown/Move/Up</c> 且 <c>handledEventsToo = true</c>）。
     /// <para>落笔不这么做：引擎认不认一根"笔"还隔着设备类型与捕获那一层，那是 Dusk 自己探针的事。
     /// 但挑、框、挪走的就是这些事件，所以这条合成路正好是要钉的那一条。</para>
     /// </summary>
@@ -915,7 +920,10 @@ internal static class Program
                     ? new PointerCancelEventArgs(point, ModifierKeys.None, 1_000)
                     : new PointerDownEventArgs(point, ModifierKeys.None, 1_000);
         args.RoutedEvent = routed;
-        target.RaiseEvent(args);
+        var routeTarget = target is WhiteboardWindow whiteboard
+            ? (UIElement)whiteboard.FindName("InkHost")!
+            : target;
+        routeTarget.RaiseEvent(args);
     }
 
     /// <summary>白板上某一笔现在的第一个点（用来判断"整块挪了多少"与"撤销有没有原样回来"）。</summary>
@@ -923,6 +931,96 @@ internal static class Program
     {
         var stroke = board.Document.Strokes[index];
         return new Point2D(stroke[0].X, stroke[0].Y);
+    }
+
+    private static void CheckWhiteboardPages()
+    {
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        var mouseId = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Mouse).Id;
+        var penId = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen).Id;
+        ToolbarTools.Select(penId);
+        var whiteboardButton = (Button)toolbar.FindToolControl("whiteboard")!;
+        whiteboardButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+        var board = toolbar.Whiteboard!;
+        var pageHost = (Grid)board.FindName("PageControlHost")!;
+        var previousButton = (Button)board.FindName("PreviousPageButton")!;
+        var nextButton = (Button)board.FindName("NextPageButton")!;
+        var addButton = (Button)board.FindName("AddPageButton")!;
+        var pageText = (TextBlock)board.FindName("PageNumberText")!;
+        var firstSurface = board.Surface;
+
+        Check(pageHost.HorizontalAlignment == HorizontalAlignment.Left
+            && pageHost.VerticalAlignment == VerticalAlignment.Bottom
+            && pageHost.ActualHeight == 56,
+            "页面控件是白板窗口左下角的 56 DIP Fluent 浮层");
+        Check(previousButton.Parent is Grid && addButton.Parent is Border
+            && !ReferenceEquals(previousButton.Parent, addButton.Parent),
+            "页面导航与独立新增区域是分开的两个表面");
+        Check(pageHost.Children.OfType<Border>().All(border => border.BorderThickness == default(Thickness)),
+            "白板页面浮层没有额外外框");
+        Check(board.PageCount == 1 && board.ActivePageIndex == 0 && pageText.Text == "1 / 1",
+            "初始只有一页，页码显示为 1 / 1");
+        Check(!previousButton.IsEnabled && !nextButton.IsEnabled,
+            "第一页的上一页与下一页都禁用");
+
+        CommitStroke(firstSurface, 220, 220);
+        addButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var secondSurface = board.Surface;
+        Check(board.PageCount == 2 && board.ActivePageIndex == 1 && pageText.Text == "2 / 2",
+            "独立加号追加新页并自动切换到新页");
+        Check(!ReferenceEquals(firstSurface, secondSurface) && secondSurface.Document.Count == 0,
+            "新页有自己的空白墨迹面");
+        Check(previousButton.IsEnabled && !nextButton.IsEnabled,
+            "末页的上一页可用、下一页禁用");
+
+        CommitStroke(secondSurface, 520, 520);
+        nextButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(board.PageCount == 2 && board.ActivePageIndex == 1,
+            "末页点击下一页不会越过页面列表");
+        previousButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(ReferenceEquals(board.Surface, firstSurface) && pageText.Text == "1 / 2",
+            "上一页切回第一页，页码同步");
+        Check(firstSurface.Document.Count == 1 && secondSurface.Document.Count == 1,
+            "两页的墨迹彼此隔离");
+
+        firstSurface.Undo();
+        Check(firstSurface.Document.Count == 0 && secondSurface.Document.Count == 1,
+            "第一页的撤销只撤第一页，不影响第二页");
+        firstSurface.Redo();
+        Check(firstSurface.Document.Count == 1 && secondSurface.Document.Count == 1,
+            "第一页可以继续重做自己的历史");
+
+        nextButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        addButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var thirdSurface = board.Surface;
+        Check(board.PageCount == 3 && board.ActivePageIndex == 2 && pageText.Text == "3 / 3",
+            "新页继续追加到末尾");
+        Check(thirdSurface.Document.Count == 0 && firstSurface.Document.Count == 1 && secondSurface.Document.Count == 1,
+            "第三页为空，旧两页内容仍在");
+
+        previousButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        previousButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(ReferenceEquals(board.Surface, firstSurface) && pageText.Text == "1 / 3",
+            "连续上一页回到第一页");
+        ToolbarTools.Select(mouseId);
+        SendPointer(board, UIElement.PointerDownEvent, 51, new Point(220, 220), PointerDeviceType.Mouse);
+        SendPointer(board, UIElement.PointerUpEvent, 51, new Point(220, 220), PointerDeviceType.Mouse);
+        Check(board.SelectedStrokeCount == 1, "第一页选择态能选中本页笔迹");
+        nextButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(board.SelectedStrokeCount == 0 && firstSurface.Document.Selection.IsEmpty,
+            "切页时清除上一页选择态");
+        Check(ReferenceEquals(board.Surface, secondSurface) && secondSurface.Document.Selection.IsEmpty,
+            "切到第二页后没有继承上一页的选择集");
+
+        ToolbarTools.Select(mouseId);
+        whiteboardButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(!toolbar.WhiteboardPresented, "多页面白板收尾时整扇白板一起收起");
+        CloseWindow(toolbar);
     }
 
     /// <summary>
@@ -1262,6 +1360,9 @@ internal static class Program
             Left = -14000, Top = 0, ShowActivated = false, Topmost = false,
         };
         Windows.Add(menu);
+        var surface = (Border)menu.FindName("PenMenuSurface")!;
+        Check(menu.Background is null && surface.BorderThickness == default(Thickness),
+            "笔菜单使用真正透明的窗口背景，表面没有额外外框");
         var notifications = 0;
         menu.PenColorChanged += _ => notifications++;
         menu.PenKindChanged += _ => notifications++;
@@ -1727,6 +1828,9 @@ internal static class Program
             Left = -14000, Top = 0, ShowActivated = false, Topmost = false,
         };
         Windows.Add(menu);
+        var surface = (Border)menu.FindName("EraserMenuSurface")!;
+        Check(menu.Background is null && surface.BorderThickness == default(Thickness),
+            "橡皮菜单使用真正透明的窗口背景，表面没有额外外框");
         var modes = 0;
         var radii = 0;
         var clears = 0;

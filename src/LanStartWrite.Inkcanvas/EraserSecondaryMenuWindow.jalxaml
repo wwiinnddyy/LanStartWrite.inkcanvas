@@ -2,8 +2,9 @@
  x:Class="LanStartWrite.Inkcanvas.EraserSecondaryMenuWindow" Title="橡皮设置" WindowStartupLocation="Manual"
  ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" WindowStyle="None"
  IsShowTitleBar="False" IsShowMinimizeButton="False" IsShowMaximizeButton="False" IsShowCloseButton="False" HasSystemMenu="False"
- AllowsTransparency="True" SystemBackdrop="None" Background="Transparent" Foreground="{StaticResource TextFillColorPrimaryBrush}">
-  <Border x:Name="EraserMenuSurface" Margin="6" Padding="16" CornerRadius="8" Background="{StaticResource FlyoutSurfaceBrush}" BorderBrush="{StaticResource SurfaceStrokeColorDefaultBrush}" BorderThickness="1">
+  AllowsTransparency="True" SystemBackdrop="None" Foreground="{StaticResource TextFillColorPrimaryBrush}">
+  <Border x:Name="EraserMenuSurface" Padding="16" CornerRadius="8" Background="{StaticResource FlyoutSurfaceBrush}">
+
     <StackPanel Width="200">
       <TextBlock Text="橡皮" Style="{StaticResource BodyStrongTextBlockStyle}" />
       <StackPanel Margin="0,12,0,0">

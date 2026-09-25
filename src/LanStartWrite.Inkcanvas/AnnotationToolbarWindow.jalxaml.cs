@@ -25,9 +25,6 @@ namespace LanStartWrite.Inkcanvas;
 /// </summary>
 public partial class AnnotationToolbarWindow : Window
 {
-    private static readonly Brush TransparentBrush =
-        new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
-
     private bool _toolSync;
     private bool _isClosing;
     private AnnotationOverlayWindow? _annotationOverlay;
@@ -124,7 +121,7 @@ public partial class AnnotationToolbarWindow : Window
         AllowsTransparency = true;
         InitializeComponent();
         SystemBackdrop = WindowBackdropType.None;
-        Background = TransparentBrush;
+        Background = null;
         Opacity = 1;
 
         BuildToolControls();
@@ -558,13 +555,15 @@ public partial class AnnotationToolbarWindow : Window
             HidePenSecondaryMenu();
             HideEraserSecondaryMenu();
         };
-        _whiteboard.Surface.HistoryStateChanged += OnHistoryStateChanged;
+        _whiteboard.HistoryStateChanged += OnHistoryStateChanged;
+        _whiteboard.ActivePageChanged += OnWhiteboardActivePageChanged;
     }
 
     private void DisposeWhiteboard()
     {
         if (_whiteboard is null) return;
-        _whiteboard.Surface.HistoryStateChanged -= OnHistoryStateChanged;
+        _whiteboard.HistoryStateChanged -= OnHistoryStateChanged;
+        _whiteboard.ActivePageChanged -= OnWhiteboardActivePageChanged;
         _whiteboard.Close();
         _whiteboard = null;
         _whiteboardPresented = false;
@@ -723,6 +722,36 @@ public partial class AnnotationToolbarWindow : Window
                 SyncUndoRedoState();
                 break;
         }
+    }
+
+    private void OnWhiteboardActivePageChanged()
+    {
+        if (_isClosing || _whiteboard is null) return;
+        if (ToolbarTools.Selected is not { } tool)
+        {
+            SyncUndoRedoState();
+            return;
+        }
+
+        switch (tool.Kind)
+        {
+            case ToolbarToolKind.Mouse:
+                _whiteboard.Surface.SetSelectMode(true);
+                break;
+            case ToolbarToolKind.Pen:
+                _whiteboard.Surface.SetSelectMode(false);
+                _whiteboard.Surface.SetInkMode();
+                ApplyPenTool(_whiteboard.Surface, tool);
+                break;
+            case ToolbarToolKind.Eraser:
+                _whiteboard.Surface.SetSelectMode(false);
+                _whiteboard.Surface.SetEraseMode();
+                ApplyEraserTool(_whiteboard.Surface, tool);
+                break;
+        }
+
+        SyncUndoRedoState();
+        KeepToolbarForeground();
     }
 
     /// <summary>

@@ -20,5 +20,67 @@
       AllowsTransparency=False，而那块底由 code-behind 从画布设置里铺上来。
       墨迹面不在标记里声明：AGENTS 的规矩是 .jalxaml 里不出现 Dusk 的类型名。
     -->
-    <Grid x:Name="InkHost" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+    <Grid>
+        <Grid x:Name="InkHost" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+
+        <Grid x:Name="PageControlHost"
+              Height="56"
+              Margin="12"
+              HorizontalAlignment="Left"
+              VerticalAlignment="Bottom">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Height="56"
+                    Background="{StaticResource ToolbarSurfaceBrush}"
+                    CornerRadius="{StaticResource OverlayCornerRadius}"
+                    ClipToBounds="True"
+                    Padding="4,7">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="40" />
+                        <ColumnDefinition Width="56" />
+                        <ColumnDefinition Width="40" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button x:Name="PreviousPageButton"
+                            Grid.Column="0"
+                            Style="{StaticResource ToolActionButtonStyle}"
+                            ToolTip="上一页">
+                        <FontIcon Glyph="&#xE76B;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                    </Button>
+                    <TextBlock x:Name="PageNumberText"
+                               Grid.Column="1"
+                               Text="1 / 1"
+                               TextAlignment="Center"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <Button x:Name="NextPageButton"
+                            Grid.Column="2"
+                            Style="{StaticResource ToolActionButtonStyle}"
+                            ToolTip="下一页">
+                        <FontIcon Glyph="&#xE76C;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                    </Button>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="1"
+                    Width="40"
+                    Height="56"
+                    Margin="6,0,0,0"
+                    Background="{StaticResource ToolbarSurfaceBrush}"
+                    CornerRadius="{StaticResource OverlayCornerRadius}"
+                    ClipToBounds="True"
+                    Padding="0,7">
+                <Button x:Name="AddPageButton"
+                        Style="{StaticResource ToolActionButtonStyle}"
+                        ToolTip="新建页面">
+                    <FontIcon Glyph="&#xE710;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                </Button>
+            </Border>
+        </Grid>
+    </Grid>
 </Window>

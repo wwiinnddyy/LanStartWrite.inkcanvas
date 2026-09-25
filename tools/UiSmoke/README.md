@@ -118,7 +118,7 @@ behaving, not a test artifact — but it does mean the acceptance run flashes th
 
 ### Whiteboard (second canvas)
 
-`CheckWhiteboardCanvas`, `CheckWhiteboardUndoLands`, `CheckWhiteboardSelect` and
+`CheckWhiteboardCanvas`, `CheckWhiteboardUndoLands`, `CheckWhiteboardPages`, `CheckWhiteboardSelect` and
 `CheckWhiteboardTransforms` cover the second canvas. What they insist on, in the same
 "ask the observable thing" spirit:
 
@@ -130,7 +130,10 @@ behaving, not a test artifact — but it does mean the acceptance run flashes th
   because rebuilding would drop keyboard focus);
 - the whiteboard ground really is an opaque brush equal to the persisted choice (`FFFFFFFF` →
   `FFDDEEE1` on a swatch change, no re-entry needed);
-- selection is driven through **synthetic routed pointer events** raised at the window, and asserted
+- the page control is a 56 DIP bottom-left Fluent surface: previous/next switch pages, the page
+  number stays synchronized, the last page disables next, and the independent add region appends a
+  blank page; each page keeps its own document, history, viewport, and selection cleanup;
+- selection is driven through **synthetic routed pointer events** raised at the canvas host, and asserted
   as coordinates: a drag inside the frame moves every stroke by exactly the finger delta
   (Δ=(90,45) for a (90,45) drag), **one** undo restores both strokes, a corner drag leaves the
   opposite corner at 0.00 DIP of drift, and a rotate handle moves a corner 0.5 rad around a centre
@@ -178,7 +181,7 @@ This starts the real application windows with a fresh `preview-state/preferences
 next to the test executable. It neither edits the normal profile nor closes an already
 running annotation session. Close the preview toolbar to end the preview.
 
-The suite is 215 checks on the current tree (the count grows with every wiring surface
+The suite is 327 checks on the current tree (the count grows with every wiring surface
 that gets a guard, and the number printed on a run is only the part that ran before the
 first failure), including responsive settings-row reflow without control replacement,
 independent navigation selection/focus, native system-color hydration, initial framework
@@ -186,7 +189,7 @@ theme selection, single Click/Command gesture dispatch, cancelled gestures, tool
 contact capture and release, batched preference-to-ink synchronization, the eraser
 secondary menu (both erase modes, the radius clamp, and the two-click clear-all), the
 笔锋 chain end to end, the 窗口层级 chain against the real desktop Z-order, the 画布
-per-scene modes, and the overlay's undo/redo surface.
+per-scene modes, whiteboard page creation/switching, and the overlay's undo/redo surface.
 
 Two of them used to be timing-sensitive and measured to fail on some machines regardless
 of the ink engine (an unmodified `ce8013f` run produced 48 passes with the first one

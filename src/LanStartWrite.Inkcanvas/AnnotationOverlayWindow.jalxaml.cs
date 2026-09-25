@@ -17,9 +17,6 @@ namespace LanStartWrite.Inkcanvas;
 /// </summary>
 public partial class AnnotationOverlayWindow : Window
 {
-    private static readonly Brush TransparentBrush =
-        new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
-
     private readonly CanvasSurface _surface;
 
     /// <summary>穿透的<b>目标状态</b>。外壳可能抹掉样式位，所以这里记着"应该是什么"，
@@ -34,8 +31,8 @@ public partial class AnnotationOverlayWindow : Window
         ShowActivated = false;
         SystemBackdrop = WindowBackdropType.None;
         Opacity = 1;
-        Background = TransparentBrush;
         InitializeComponent();
+        Background = null;
 
         // 层级登记：画布层。这个类里<b>不再出现任何 Topmost 赋值</b> ——
         // "画布要压过其他应用、但要在工具栏之下"由 WindowLayerManager 算，

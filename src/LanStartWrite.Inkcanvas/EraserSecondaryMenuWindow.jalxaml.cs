@@ -9,9 +9,6 @@ namespace LanStartWrite.Inkcanvas;
 
 public partial class EraserSecondaryMenuWindow : Window
 {
-    private static readonly Brush TransparentBrush =
-        new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
-
     // 二次点击确认的窗口期：过了就退回"清空全部"，免得按钮悄悄停在待确认状态上。
     private static readonly TimeSpan ClearArmWindow = TimeSpan.FromSeconds(3);
 
@@ -39,7 +36,7 @@ public partial class EraserSecondaryMenuWindow : Window
         ShowActivated = false;
         InitializeComponent();
         SystemBackdrop = WindowBackdropType.None;
-        Background = TransparentBrush;
+        Background = null;
         Opacity = 1;
 
         // 层级登记：二级菜单层（在批注栏之上）。Topmost 不在这里声明 —— 见 WindowLayerManager。

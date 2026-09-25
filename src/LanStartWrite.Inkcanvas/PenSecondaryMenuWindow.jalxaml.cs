@@ -8,9 +8,6 @@ namespace LanStartWrite.Inkcanvas;
 
 public partial class PenSecondaryMenuWindow : Window
 {
-    private static readonly Brush TransparentBrush =
-        new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
-
     private readonly RadioButton[] _colorRings;
 
     /// <summary>
@@ -51,7 +48,7 @@ public partial class PenSecondaryMenuWindow : Window
         ShowActivated = false;
         InitializeComponent();
         SystemBackdrop = WindowBackdropType.None;
-        Background = TransparentBrush;
+        Background = null;
         Opacity = 1;
 
         // 层级登记：二级菜单层（在批注栏之上）。这里不写 Topmost ——

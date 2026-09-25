@@ -32,14 +32,16 @@ internal sealed class CanvasSurface
     private readonly Dispatcher _dispatcher;
     private readonly JaliumInkCanvas _canvas = new();
     private readonly InkHistory _history;
+    private readonly bool _assertLoadedSize;
     private PenKind _currentKind = PenKind.Pen;
     private Color _currentColor = Colors.Black;
     private double _currentThickness = 3;
     private EraserMode _eraserMode = EraserMode.Area;
 
-    internal CanvasSurface(Dispatcher dispatcher)
+    internal CanvasSurface(Dispatcher dispatcher, bool assertLoadedSize = true)
     {
         _dispatcher = dispatcher;
+        _assertLoadedSize = assertLoadedSize;
 
         // 撤销/重做挂在文档上：书写、擦除、清空、整笔擦、选择变换都进同一条历史。
         _history = new InkHistory(_canvas.Document);
@@ -53,9 +55,11 @@ internal sealed class CanvasSurface
         ApplyRuntimeOptions(InkRuntimeOptions.Current);
 
 #if DEBUG
-        // 可见区由 ArrangeOverride 报进来的尺寸算出；格子塌成零尺寸时画面全空且不报错。
-        _canvas.Loaded += (_, _) => Debug.Assert(
-            _canvas.ActualWidth > 0, "ink host arranged to zero size: nothing will render");
+        if (_assertLoadedSize)
+        {
+            _canvas.Loaded += (_, _) => _dispatcher.BeginInvoke(() => Debug.Assert(
+                _canvas.ActualWidth > 0, "ink host arranged to zero size: nothing will render"));
+        }
         _canvas.StrokeCommitted += (_, _) => Debug.WriteLine(
             $"[ink-metrics] doc={_canvas.Document.Count} passes={_canvas.RenderPassCount} "
             + $"last={_canvas.LastInputToRenderMs:F1}ms peak={_canvas.PeakInputToRenderMs:F1}ms");
@@ -90,7 +94,18 @@ internal sealed class CanvasSurface
             new Point2D(screenAnchor.X, screenAnchor.Y), factor, minScale, maxScale);
 
     /// <summary>把这块面摆进宿主格子。摆哪儿、宿主有没有背景，是窗口的事。</summary>
-    internal void AttachTo(Panel host) => host.Children.Add(_canvas);
+    internal void AttachTo(Panel host, int index = -1)
+    {
+        if (index < 0 || index > host.Children.Count)
+        {
+            host.Children.Add(_canvas);
+            return;
+        }
+
+        host.Children.Insert(index, _canvas);
+    }
+
+    internal void DetachFrom(Panel host) => host.Children.Remove(_canvas);
 
     // ------------------------------------------------------------- 工具与模式
 

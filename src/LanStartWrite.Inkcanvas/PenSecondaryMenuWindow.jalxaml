@@ -2,8 +2,9 @@
  x:Class="LanStartWrite.Inkcanvas.PenSecondaryMenuWindow" Title="笔设置" WindowStartupLocation="Manual"
  ShowInTaskbar="False" ShowActivated="False" ResizeMode="NoResize" WindowStyle="None"
  IsShowTitleBar="False" IsShowMinimizeButton="False" IsShowMaximizeButton="False" IsShowCloseButton="False" HasSystemMenu="False"
- AllowsTransparency="True" SystemBackdrop="None" Background="Transparent" Foreground="{StaticResource TextFillColorPrimaryBrush}">
-  <Border x:Name="PenMenuSurface" Margin="6" Padding="16" CornerRadius="8" Background="{StaticResource FlyoutSurfaceBrush}" BorderBrush="{StaticResource SurfaceStrokeColorDefaultBrush}" BorderThickness="1">
+  AllowsTransparency="True" SystemBackdrop="None" Foreground="{StaticResource TextFillColorPrimaryBrush}">
+  <Border x:Name="PenMenuSurface" Padding="16" CornerRadius="8" Background="{StaticResource FlyoutSurfaceBrush}">
+
     <StackPanel>
       <TextBlock Text="画笔" Style="{StaticResource BodyStrongTextBlockStyle}" />
       <Grid Margin="0,12,0,12">
