@@ -174,9 +174,6 @@ internal sealed class ToolbarToolListEditor
         row.Use.Content = selected ? "已选中" : "用这支";
 
         row.Remove.IsEnabled = tool.IsEditable;
-        row.Remove.ToolTip = tool.IsEditable
-            ? "删除这一项"
-            : "鼠标模式、撤销、重做、设置是固定项：可以移动，不能删除";
 
         var index = ToolbarTools.IndexOf(tool.Id);
         row.MoveUp.IsEnabled = index > 0;

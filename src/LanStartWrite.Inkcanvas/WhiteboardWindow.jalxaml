@@ -48,8 +48,7 @@
 
                     <Button x:Name="PreviousPageButton"
                             Grid.Column="0"
-                            Style="{StaticResource ToolActionButtonStyle}"
-                            ToolTip="上一页">
+                            Style="{StaticResource ToolActionButtonStyle}">
                         <FontIcon Glyph="&#xE76B;" FontFamily="Segoe Fluent Icons" FontSize="16" />
                     </Button>
                     <TextBlock x:Name="PageNumberText"
@@ -60,8 +59,7 @@
                                Style="{StaticResource BodyStrongTextBlockStyle}" />
                     <Button x:Name="NextPageButton"
                             Grid.Column="2"
-                            Style="{StaticResource ToolActionButtonStyle}"
-                            ToolTip="下一页">
+                            Style="{StaticResource ToolActionButtonStyle}">
                         <FontIcon Glyph="&#xE76C;" FontFamily="Segoe Fluent Icons" FontSize="16" />
                     </Button>
                 </Grid>
@@ -76,8 +74,7 @@
                     ClipToBounds="True"
                     Padding="0,7">
                 <Button x:Name="AddPageButton"
-                        Style="{StaticResource ToolActionButtonStyle}"
-                        ToolTip="新建页面">
+                        Style="{StaticResource ToolActionButtonStyle}">
                     <FontIcon Glyph="&#xE710;" FontFamily="Segoe Fluent Icons" FontSize="16" />
                 </Button>
             </Border>

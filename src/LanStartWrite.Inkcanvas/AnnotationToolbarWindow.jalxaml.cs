@@ -367,13 +367,6 @@ public partial class AnnotationToolbarWindow : Window
         // 名字与图标都是"此刻"的：同一颗鼠标钮在白板里念作「选择」（呈现，不改存档里的 Name）。
         var display = ToolbarToolVisuals.DisplayName(tool);
         AutomationProperties.SetName(control, $"{display}：{description}");
-        control.ToolTip = tool.Kind switch
-        {
-            ToolbarToolKind.Pen => $"{display} · {description}（再点一次打开设置）",
-            ToolbarToolKind.Eraser => $"{display} · {description}（再点一次打开设置）",
-            ToolbarToolKind.Mouse when ToolbarToolVisuals.SelectionHint is { } hint => $"{display}：{hint}",
-            _ => display,
-        };
     }
 
     /// <summary>把选中态刷到按钮上（互斥：绘制工具里只有一个选中）。</summary>

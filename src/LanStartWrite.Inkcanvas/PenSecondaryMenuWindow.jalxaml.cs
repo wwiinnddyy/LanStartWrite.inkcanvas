@@ -229,7 +229,6 @@ public partial class PenSecondaryMenuWindow : Window
             var ring = _colorRings[i];
             var index = i;
             ring.Background = new SolidColorBrush(InkPalette.Colors[index]);
-            ring.ToolTip = names[index];
             AutomationProperties.SetName(ring, names[index]);
             ring.Checked += (_, _) =>
             {

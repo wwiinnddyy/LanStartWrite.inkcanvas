@@ -74,14 +74,6 @@ internal static class ToolbarToolVisuals
             ? "选择"
             : tool.Name;
 
-    /// <summary>
-    /// 「选择」在白板里到底能干什么 —— 一句就懂，不用说"再点一次试试"。
-    /// <para>批注那侧没有这句：那里的鼠标档是"退出这块画布"，名字本身就是说清了的。</para>
-    /// </summary>
-    internal static string? SelectionHint => CanvasSceneState.IsActive(CanvasScene.Whiteboard)
-        ? "点一下挑中笔迹，拖一个框圈住一批，按住选中块拖动就整块挪走（一笔拖拽算一步撤销）"
-        : null;
-
     internal static FontIcon Icon(ToolbarTool tool, double size) => new()
     {
         Glyph = char.ConvertFromUtf32(GlyphFor(tool)),

@@ -97,6 +97,8 @@ public partial class SettingsWindow : Window
         {
             _loaded = true;
             OnThemeChanged();
+            ClearVisibleTooltips();
+            Dispatcher.BeginInvoke(ClearVisibleTooltips);
         };
         // The content root, unlike the Window's declared Width, follows native client resizing.
         ((FrameworkElement)Content!).SizeChanged += (_, e) =>
@@ -121,8 +123,12 @@ public partial class SettingsWindow : Window
     private void WireControls()
     {
         foreach (var (page, item) in _navigation)
+        {
+            item.ToolTip = null;
             AutomationProperties.SetName(item, (string?)item.Content ?? page.ToString());
+        }
         NavigationRoot!.SelectionChanged += OnNavigationSelectionChanged;
+        NavigationRoot.SizeChanged += (_, _) => ClearVisibleTooltips();
         BindSwitch((FluentToggleSwitch)ReduceMotionSwitch!, "减少动画", value =>
             AppPreferences.Update(AppPreferences.Current with { ReduceMotion = value }));
         BindSwitch((FluentToggleSwitch)KeepToolbarOnTopSwitch!, "始终置顶工具栏", value =>
@@ -204,7 +210,6 @@ public partial class SettingsWindow : Window
             ring.SetResourceReference(StyleProperty, "PenColorSwatchStyle");
             ring.Background = new SolidColorBrush(colors[index]);
             var name = CanvasBackgroundPalette.Names[index];
-            ring.ToolTip = name;
             AutomationProperties.SetName(ring, name);
             ring.Checked += (_, _) =>
             {
@@ -425,6 +430,17 @@ public partial class SettingsWindow : Window
             }
     }
 
+    private void ClearVisibleTooltips() => ClearVisibleTooltipsCore(this);
+
+    private static void ClearVisibleTooltipsCore(DependencyObject? root)
+    {
+        if (root is null) return;
+        if (root is FrameworkElement element) element.ToolTip = null;
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+            ClearVisibleTooltipsCore(VisualTreeHelper.GetChild(root, i));
+    }
+
     private void BindSwitch(FluentToggleSwitch control, string name, Action<bool> change)
     {
         AutomationProperties.SetName(control, name);
@@ -498,6 +514,7 @@ public partial class SettingsWindow : Window
         PageHost.Children.Clear();
         var panel = _pages[page];
         PageHost.Children.Add(panel);
+        ClearVisibleTooltips();
         ((ScrollViewer)SettingsScrollViewer!).ScrollToVerticalOffset(0);
         if (_loaded) FluentThemeManager.Enter(panel);
     }

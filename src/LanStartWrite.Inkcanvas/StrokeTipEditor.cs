@@ -140,8 +140,6 @@ internal sealed class StrokeTipEditor
 
         var content = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
 
-        // 工具提示里放"这一项到底在改什么"和取值范围 —— 滑杆本身只能表达一个数。
-        content.ToolTip = $"{parameter.Description}\n取值范围 {Format(parameter.Minimum)} – {Format(parameter.Maximum)}";
         content.Children.Add(header);
         content.Children.Add(slider);
 

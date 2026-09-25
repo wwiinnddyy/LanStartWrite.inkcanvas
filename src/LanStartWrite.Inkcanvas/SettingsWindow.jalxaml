@@ -9,24 +9,24 @@
         <fluent:FluentNavigationView x:Name="NavigationRoot" OpenPaneLength="220" Padding="0"
                                      Background="{StaticResource LayerFillColorDefaultBrush}">
             <fluent:FluentNavigationView.MenuItems>
-                <fluent:FluentNavigationItem x:Name="AppearanceNavButton" Content="外观" ToolTip="外观">
+                <fluent:FluentNavigationItem x:Name="AppearanceNavButton" Content="外观">
                     <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE790;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
-                <fluent:FluentNavigationItem x:Name="InkNavButton" Content="墨迹" ToolTip="墨迹">
+                <fluent:FluentNavigationItem x:Name="InkNavButton" Content="墨迹">
                     <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE76D;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
-                <fluent:FluentNavigationItem x:Name="CanvasNavButton" Content="画布" ToolTip="画布">
+                <fluent:FluentNavigationItem x:Name="CanvasNavButton" Content="画布">
                     <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE7F4;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
-                <fluent:FluentNavigationItem x:Name="ToolbarNavButton" Content="工具栏" ToolTip="工具栏">
+                <fluent:FluentNavigationItem x:Name="ToolbarNavButton" Content="工具栏">
                     <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE700;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
-                <fluent:FluentNavigationItem x:Name="InteractionNavButton" Content="窗口与交互" ToolTip="窗口与交互">
+                <fluent:FluentNavigationItem x:Name="InteractionNavButton" Content="窗口与交互">
                     <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE7C9;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
             </fluent:FluentNavigationView.MenuItems>
             <fluent:FluentNavigationView.FooterMenuItems>
-                <fluent:FluentNavigationItem x:Name="AboutNavButton" Content="关于" ToolTip="关于">
+                <fluent:FluentNavigationItem x:Name="AboutNavButton" Content="关于">
                     <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE946;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
             </fluent:FluentNavigationView.FooterMenuItems>
@@ -61,7 +61,7 @@
                                             <TextBlock Text="减少动画" Style="{StaticResource BodyTextBlockStyle}" />
                                             <TextBlock Text="关闭控件过渡和页面淡入；也尊重系统动画设置。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                                         </StackPanel>
-                                        <fluent:FluentToggleSwitch x:Name="ReduceMotionSwitch" ToolTip="减少动画" VerticalAlignment="Center" />
+                                         <fluent:FluentToggleSwitch x:Name="ReduceMotionSwitch" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
                                 <TextBlock Text="界面规范" Style="{StaticResource SectionTextStyle}" />
@@ -97,7 +97,7 @@
                                             <TextBlock Text="压力感应" Style="{StaticResource BodyTextBlockStyle}" />
                                             <TextBlock Text="支持压感的笔可根据压力改变笔迹宽度。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                                         </StackPanel>
-                                        <fluent:FluentToggleSwitch x:Name="PressureSwitch" ToolTip="压力感应" VerticalAlignment="Center" />
+                                         <fluent:FluentToggleSwitch x:Name="PressureSwitch" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
                                 <TextBlock Text="笔锋" Style="{StaticResource SectionTextStyle}" />
@@ -108,7 +108,7 @@
                                             <TextBlock Text="启用笔锋" Style="{StaticResource BodyTextBlockStyle}" />
                                             <TextBlock Text="关掉之后压力原样透传，不做任何塑形。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                                         </StackPanel>
-                                        <fluent:FluentToggleSwitch x:Name="TipEnabledSwitch" ToolTip="启用笔锋" VerticalAlignment="Center" />
+                                         <fluent:FluentToggleSwitch x:Name="TipEnabledSwitch" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
                                 <Border Style="{StaticResource SettingsCardStyle}">
@@ -146,7 +146,7 @@
                                             <TextBlock Text="穿透模式" Style="{StaticResource BodyTextBlockStyle}" />
                                             <TextBlock Text="鼠标模式下画布仍然盖在最上层，但鼠标与触摸直接落到它下面的窗口上 —— 批注留在原地，人继续操作电脑。书写与擦除不受影响。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                                         </StackPanel>
-                                        <fluent:FluentToggleSwitch x:Name="PassThroughSwitch" ToolTip="穿透模式" VerticalAlignment="Center" />
+                                         <fluent:FluentToggleSwitch x:Name="PassThroughSwitch" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
                                 <Border Style="{StaticResource SettingsCardStyle}">
@@ -155,7 +155,7 @@
                                             <TextBlock Text="冻结模式" Style="{StaticResource BodyTextBlockStyle}" />
                                             <TextBlock Text="进入画布（书写 / 擦除）时把当前屏幕截一张图铺在最底下，底下的画面就不再变了 —— 视频、滚动页面、闪烁的进度条都停在那一刻。每次重新进入都会重截一张。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                                         </StackPanel>
-                                        <fluent:FluentToggleSwitch x:Name="FreezeSwitch" ToolTip="冻结模式" VerticalAlignment="Center" />
+                                         <fluent:FluentToggleSwitch x:Name="FreezeSwitch" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
                                 <TextBlock x:Name="CanvasBehaviorText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
@@ -182,7 +182,7 @@
                                             <TextBlock Text="始终置顶工具栏" Style="{StaticResource BodyTextBlockStyle}" />
                                             <TextBlock Text="鼠标模式下也保持置顶；书写时始终在画布上方。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                                         </StackPanel>
-                                        <fluent:FluentToggleSwitch x:Name="KeepToolbarOnTopSwitch" ToolTip="始终置顶工具栏" VerticalAlignment="Center" />
+                                         <fluent:FluentToggleSwitch x:Name="KeepToolbarOnTopSwitch" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
                                 <TextBlock Text="工具栏按钮" Style="{StaticResource SectionTextStyle}" />

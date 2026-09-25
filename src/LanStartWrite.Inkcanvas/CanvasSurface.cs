@@ -7,6 +7,7 @@ using Dusk.Ink.Model;
 using Dusk.Ink.Primitives;
 using Jalium.UI;
 using Jalium.UI.Controls;
+using Jalium.UI.Input;
 using Jalium.UI.Media;
 using Jalium.UI.Threading;
 
@@ -31,7 +32,10 @@ internal sealed class CanvasSurface
 {
     private readonly Dispatcher _dispatcher;
     private readonly JaliumInkCanvas _canvas = new();
+    private readonly EraserPreviewAdorner _eraserPreview = new();
     private readonly InkHistory _history;
+    private Panel? _attachedHost;
+    private uint? _previewPointerId;
     private readonly bool _assertLoadedSize;
     private PenKind _currentKind = PenKind.Pen;
     private Color _currentColor = Colors.Black;
@@ -76,6 +80,12 @@ internal sealed class CanvasSurface
 
     internal InkHistory History => _history;
 
+    internal bool EraserPreviewVisible => _eraserPreview.PreviewVisible;
+
+    internal Point? EraserPreviewCenter => _eraserPreview.Center;
+
+    internal double EraserPreviewRadius => _eraserPreview.Radius;
+
     /// <summary>世界 ↔ 屏幕。白板那一块的漫游、命中半径、橡皮半径换算都读它。</summary>
     internal InkCanvasView View => _canvas.View;
 
@@ -93,19 +103,87 @@ internal sealed class CanvasSurface
         _canvas.View.Viewport.ZoomAt(
             new Point2D(screenAnchor.X, screenAnchor.Y), factor, minScale, maxScale);
 
-    /// <summary>把这块面摆进宿主格子。摆哪儿、宿主有没有背景，是窗口的事。</summary>
     internal void AttachTo(Panel host, int index = -1)
     {
-        if (index < 0 || index > host.Children.Count)
-        {
-            host.Children.Add(_canvas);
-            return;
-        }
+        if (_attachedHost is not null) DetachFrom(_attachedHost);
 
-        host.Children.Insert(index, _canvas);
+        var insertIndex = index < 0 || index > host.Children.Count ? host.Children.Count : index;
+        host.Children.Insert(insertIndex, _canvas);
+        host.Children.Insert(insertIndex + 1, _eraserPreview);
+        _attachedHost = host;
+
+        host.AddHandler(UIElement.PointerDownEvent, new PointerDownEventHandler(OnPointerDown), true);
+        host.AddHandler(UIElement.PointerMoveEvent, new PointerMoveEventHandler(OnPointerMove), true);
+        host.AddHandler(UIElement.PointerUpEvent, new PointerUpEventHandler(OnPointerUp), true);
+        host.AddHandler(UIElement.PointerCancelEvent, new PointerCancelEventHandler(OnPointerCancel), true);
+        _canvas.AddHandler(PointerEvents.PointerExitedEvent, new PointerEventHandler(OnPointerExited), true);
+        _canvas.AddHandler(PointerEvents.PointerCaptureLostEvent, new PointerEventHandler(OnPointerCaptureLost), true);
     }
 
-    internal void DetachFrom(Panel host) => host.Children.Remove(_canvas);
+    internal void DetachFrom(Panel host)
+    {
+        host.RemoveHandler(UIElement.PointerDownEvent, new PointerDownEventHandler(OnPointerDown));
+        host.RemoveHandler(UIElement.PointerMoveEvent, new PointerMoveEventHandler(OnPointerMove));
+        host.RemoveHandler(UIElement.PointerUpEvent, new PointerUpEventHandler(OnPointerUp));
+        host.RemoveHandler(UIElement.PointerCancelEvent, new PointerCancelEventHandler(OnPointerCancel));
+        _canvas.RemoveHandler(PointerEvents.PointerExitedEvent, new PointerEventHandler(OnPointerExited));
+        _canvas.RemoveHandler(PointerEvents.PointerCaptureLostEvent, new PointerEventHandler(OnPointerCaptureLost));
+        host.Children.Remove(_canvas);
+        host.Children.Remove(_eraserPreview);
+        if (ReferenceEquals(_attachedHost, host)) _attachedHost = null;
+        _previewPointerId = null;
+        _eraserPreview.Hide();
+    }
+
+    private bool CanShowEraserPreview => !IsSelectMode && _wasErasing;
+
+    private void OnPointerDown(object sender, PointerDownEventArgs e)
+    {
+        if (!CanShowEraserPreview) return;
+        _previewPointerId = e.Pointer.PointerId;
+        ShowEraserPreview(e.Pointer);
+    }
+
+    private void OnPointerMove(object sender, PointerMoveEventArgs e)
+    {
+        if (!CanShowEraserPreview) return;
+        if (_previewPointerId is { } pointerId && e.Pointer.PointerId != pointerId) return;
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Mouse || e.Pointer.IsInContact)
+            ShowEraserPreview(e.Pointer);
+    }
+
+    private void OnPointerUp(object sender, PointerUpEventArgs e)
+    {
+        if (_previewPointerId != e.Pointer.PointerId) return;
+        _previewPointerId = null;
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Mouse) _eraserPreview.Hide();
+        else ShowEraserPreview(e.Pointer);
+    }
+
+    private void OnPointerCancel(object sender, PointerCancelEventArgs e)
+    {
+        if (_previewPointerId != e.Pointer.PointerId) return;
+        _previewPointerId = null;
+        _eraserPreview.Hide();
+    }
+
+    private void OnPointerExited(object sender, PointerEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Mouse) _eraserPreview.Hide();
+    }
+
+    private void OnPointerCaptureLost(object sender, PointerEventArgs e)
+    {
+        _previewPointerId = null;
+        _eraserPreview.Hide();
+    }
+
+    private void ShowEraserPreview(PointerPoint pointer) =>
+        _eraserPreview.Show(pointer.GetPosition(_eraserPreview), CurrentEraserPreviewRadius);
+
+    private double CurrentEraserPreviewRadius => _eraserMode == EraserMode.Area
+        ? _eraserScreenRadius
+        : Math.Max(4, 10 * _canvas.View.Viewport.Scale);
 
     // ------------------------------------------------------------- 工具与模式
 
@@ -129,6 +207,8 @@ internal sealed class CanvasSurface
         if (enabled)
         {
             IsSelectMode = true;
+            _previewPointerId = null;
+            _eraserPreview.Hide();
             _canvas.EditingMode = InkEditingMode.None;
             return;
         }
@@ -145,6 +225,8 @@ internal sealed class CanvasSurface
         IsSelectMode = false;
         _wasErasing = false;
         _canvas.IsEraserMode = false;
+        _previewPointerId = null;
+        _eraserPreview.Hide();
     }
 
     internal void SetEraseMode()
@@ -161,6 +243,7 @@ internal sealed class CanvasSurface
         _canvas.EditingMode = mode == EraserMode.Stroke
             ? InkEditingMode.EraseByStroke
             : InkEditingMode.EraseByPoint;
+        _eraserPreview.SetRadius(CurrentEraserPreviewRadius);
     }
 
     /// <summary>
@@ -182,8 +265,11 @@ internal sealed class CanvasSurface
 
     /// <summary>按<b>当前</b>缩放重发一次橡皮半径。漫游那侧在 <c>Viewport.Changed</c> 上调它，
     /// 否则缩放之后橡皮盖住的内容会跟着一起变大（像素不变、世界变了）。</summary>
-    internal void ReapplyEraserRadius() =>
+    internal void ReapplyEraserRadius()
+    {
         _canvas.EraserRadius = _canvas.View.ScreenLengthToWorld(_eraserScreenRadius);
+        _eraserPreview.SetRadius(CurrentEraserPreviewRadius);
+    }
 
     internal void ClearCanvas() => _canvas.Clear();
 
@@ -282,6 +368,7 @@ internal sealed class CanvasSurface
     /// </summary>
     internal void Dispose()
     {
+        if (_attachedHost is not null) DetachFrom(_attachedHost);
         InkRuntimeOptions.Changed -= OnInkRuntimeOptionsChanged;
         InkTipOptions.Changed -= OnInkTipOptionsChanged;
         _canvas.Dispose();

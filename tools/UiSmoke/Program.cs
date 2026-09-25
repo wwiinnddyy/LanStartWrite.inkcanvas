@@ -67,6 +67,12 @@ internal static class Program
         steps.Enqueue(() =>
         {
             Check(((Grid)settings.FindName("SettingsContentHost")!).Children.Count == 1, "Only the selected page is attached");
+            var settingsTooltips = Descendants(settings).OfType<FrameworkElement>()
+                .Where(element => element.ToolTip is not null)
+                .Select(element => $"{element.GetType().Name}:{element.Name}:{element.ToolTip}")
+                .ToArray();
+            Check(settingsTooltips.Length == 0,
+                $"Settings controls keep no visible hover descriptions: {string.Join(" | ", settingsTooltips)}");
             Check(!navigation.IsCompact && PaneWidth(navigation) == 220,
                 $"Expanded navigation width（compact={navigation.IsCompact}，量到的宽={PaneWidth(navigation)}）");
             // 面板宽度带 0.2 秒过渡（库里读的是 SplitViewPaneAnimationOpenDuration），
@@ -103,6 +109,7 @@ internal static class Program
             CheckTipReload();
             CheckTipEditor(settings);
             CheckEraserMenu();
+            CheckEraserPreview();
             CheckFlyoutPlacement();
             CheckToolbarPlacement();
             CheckPreferences(path);
@@ -389,6 +396,8 @@ internal static class Program
         var tools = new[] { "mouse", "whiteboard", "pen.1", "eraser.1", "undo", "redo", "settings" };
         Check(tools.All(id => toolbar.FindToolControl(id) is not null),
             "默认工具栏那七颗钮都渲染出来了（按项标识取得到）");
+        Check(tools.All(id => toolbar.FindToolControl(id)!.ToolTip is null),
+            "Toolbar buttons keep no visible hover descriptions");
         Check(tools.All(id =>
             {
                 var button = toolbar.FindToolControl(id)!;
@@ -949,9 +958,12 @@ internal static class Program
                     ? new PointerCancelEventArgs(point, ModifierKeys.None, 1_000)
                     : new PointerDownEventArgs(point, ModifierKeys.None, 1_000);
         args.RoutedEvent = routed;
-        var routeTarget = target is WhiteboardWindow whiteboard
-            ? (UIElement)whiteboard.FindName("InkHost")!
-            : target;
+        var routeTarget = target switch
+        {
+            WhiteboardWindow whiteboard => (UIElement)whiteboard.FindName("InkHost")!,
+            AnnotationOverlayWindow overlay => (UIElement)overlay.FindName("InkHost")!,
+            _ => target,
+        };
         routeTarget.RaiseEvent(args);
     }
 
@@ -1091,9 +1103,9 @@ internal static class Program
         Check(toolbar.WhiteboardPresented, "选择态下白板仍然留在屏上（这一档的意思不是退出这块画布）");
 
         var mouseControl = toolbar.FindToolControl("mouse")!;
-        var mouseTip = (string?)mouseControl.ToolTip;
-        Check(mouseTip is string hint && hint.StartsWith("选择", StringComparison.Ordinal),
-            $"那颗钮此刻念作「选择」：{mouseTip}");
+        var mouseName = AutomationProperties.GetName(mouseControl);
+        Check(mouseControl.ToolTip is null && mouseName.StartsWith("选择", StringComparison.Ordinal),
+            $"那颗钮保留无障碍名称但不显示悬停描述：{mouseName}");
         Check(Descendants(mouseControl).OfType<FontIcon>().Any(icon => icon.Glyph == char.ConvertFromUtf32(0xE8B3)),
             "而且图标换成了选择那一格（E8B3，实测 ink=401）");
 
@@ -1399,6 +1411,8 @@ internal static class Program
         var surface = (Border)menu.FindName("PenMenuSurface")!;
         Check(menu.Background is null && surface.BorderThickness == default(Thickness),
             "笔菜单使用真正透明的窗口背景，表面没有额外外框");
+        Check(Descendants(menu).OfType<FrameworkElement>().All(element => element.ToolTip is null),
+            "笔菜单控件不显示悬停描述");
         var notifications = 0;
         menu.PenColorChanged += _ => notifications++;
         menu.PenKindChanged += _ => notifications++;
@@ -1867,6 +1881,8 @@ internal static class Program
         var surface = (Border)menu.FindName("EraserMenuSurface")!;
         Check(menu.Background is null && surface.BorderThickness == default(Thickness),
             "橡皮菜单使用真正透明的窗口背景，表面没有额外外框");
+        Check(Descendants(menu).OfType<FrameworkElement>().All(element => element.ToolTip is null),
+            "橡皮菜单控件不显示悬停描述");
         var modes = 0;
         var radii = 0;
         var clears = 0;
@@ -1899,6 +1915,50 @@ internal static class Program
         eraseAll.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Check(clears == 1 && (string?)eraseAll.Content == "清空全部",
             "The second click clears once and resets the label");
+    }
+
+    private static void CheckEraserPreview()
+    {
+        var toolbar = new AnnotationToolbarWindow
+        {
+            Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false,
+        };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        var selectedId = ToolbarTools.SelectedId;
+        var eraser = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Eraser);
+        ToolbarTools.Select(eraser.Id);
+        toolbar.ForceRenderFrame();
+        var overlay = toolbar.Canvas ?? throw new InvalidOperationException("eraser preview did not create annotation canvas");
+        var surface = overlay.Surface;
+        surface.SetEraserMode(EraserMode.Area);
+        surface.SetEraserRadius(22);
+
+        Check(!surface.EraserPreviewVisible, "Eraser preview stays hidden before the pointer enters the canvas");
+        SendPointer(overlay, UIElement.PointerMoveEvent, 70, new Point(240, 180), PointerDeviceType.Mouse);
+        Check(surface.EraserPreviewVisible
+            && surface.EraserPreviewCenter is { } center
+            && Math.Abs(center.X - 240) < 0.1 && Math.Abs(center.Y - 180) < 0.1
+            && Math.Abs(surface.EraserPreviewRadius - 22) < 0.1,
+            "Mouse movement shows the SVG eraser at the pointer with the configured screen radius");
+
+        SendPointer(overlay, UIElement.PointerDownEvent, 71, new Point(320, 220), PointerDeviceType.Touch);
+        Check(surface.EraserPreviewVisible, "Touch contact shows the eraser preview");
+        SendPointer(overlay, UIElement.PointerUpEvent, 71, new Point(320, 220), PointerDeviceType.Touch);
+        Check(!surface.EraserPreviewVisible, "Touch release hides the eraser preview");
+
+        surface.SetEraserMode(EraserMode.Stroke);
+        SendPointer(overlay, UIElement.PointerMoveEvent, 72, new Point(360, 240), PointerDeviceType.Mouse);
+        Check(surface.EraserPreviewVisible && Math.Abs(surface.EraserPreviewRadius - 10) < 0.1,
+            "Stroke erase previews the engine's screen-scaled hit radius");
+
+        surface.SetInkMode();
+        SendPointer(overlay, UIElement.PointerMoveEvent, 73, new Point(400, 260), PointerDeviceType.Mouse);
+        Check(!surface.EraserPreviewVisible, "Leaving eraser mode hides the preview");
+        ToolbarTools.Select(selectedId);
+        CloseWindow(toolbar);
     }
 
     private static void CheckInkSurface()
@@ -2055,10 +2115,11 @@ internal static class Program
         // 这是"设置窗口应当是个普通窗口、能被压到别的应用后面"那条要求，写成了层级系统自己算出来的规则。
         overlay.Hide();
         WindowLayerManager.Reconcile();
-        Check(WindowLayerManager.DialogPresent
-            && !WindowLayerManager.IsAboveOtherApps(toolbar)
-            && !WindowLayerManager.IsAboveOtherApps(dialog),
-            "对话框在场且画布已收起时，应用退出置顶带");
+        var dialogPresent = WindowLayerManager.DialogPresent;
+        var toolbarTopmost = WindowLayerManager.IsAboveOtherApps(toolbar);
+        var dialogTopmost = WindowLayerManager.IsAboveOtherApps(dialog);
+        Check(dialogPresent && !toolbarTopmost && !dialogTopmost,
+            $"对话框在场且画布已收起时，应用退出置顶带（dialog={dialogPresent}, toolbar={toolbarTopmost}, dialogTopmost={dialogTopmost}）");
         Check(WindowLayerManager.Verify() is { Count: 0 },
             $"退出置顶带之后层级仍然成立：{string.Join("；", WindowLayerManager.Verify())}");
 
