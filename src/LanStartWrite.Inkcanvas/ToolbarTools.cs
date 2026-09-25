@@ -88,18 +88,21 @@ internal static class ToolbarTools
     /// </summary>
     internal static void Load(IReadOnlyList<ToolbarTool> items, string selectedId)
     {
-        var resolvedSelected = Find(selectedId) is not null ? selectedId : string.Empty;
-        if (resolvedSelected.Length == 0) resolvedSelected = FirstSelectable([.. items])?.Id ?? string.Empty;
+        var source = items.Count > 0 ? items : DefaultItems();
+        var resolvedSelected = source.Any(tool => string.Equals(tool.Id, selectedId, StringComparison.Ordinal))
+            ? selectedId
+            : string.Empty;
+        if (resolvedSelected.Length == 0) resolvedSelected = FirstSelectable([.. source])?.Id ?? string.Empty;
 
         // 什么都没变就别动：这个方法会被每一次偏好变更调到（存个主题、拖个粗细都会），
         // 而它一旦往下走就会发两个事件，宿主会跟着把工具重新应用到画布上一遍。
-        if (SameItems(Tools, items) && string.Equals(_selectedId, resolvedSelected, StringComparison.Ordinal)) return;
+        if (SameItems(Tools, source) && string.Equals(_selectedId, resolvedSelected, StringComparison.Ordinal)) return;
 
         _loading = true;
         try
         {
             Tools.Clear();
-            Tools.AddRange(items);
+            Tools.AddRange(source);
             _idSeed = Math.Max(_idSeed, NextSeed(Tools));
             _selectedId = resolvedSelected;
         }

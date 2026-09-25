@@ -34,7 +34,7 @@ internal static class Program
         var preview = args.Contains("--preview", StringComparer.OrdinalIgnoreCase);
         var path = Path.Combine(AppContext.BaseDirectory, preview ? "preview-state" : "test-state", "preferences.json");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(new PreferenceSnapshot()));
+        if (File.Exists(path)) File.Delete(path);
         var renderContext = RenderContext.GetOrCreateCurrent(RenderBackend.Auto);
         renderContext.DefaultRenderingEngine = RenderingEngine.Impeller;
         var adapter = renderContext.GetAdapterInfo();
@@ -624,6 +624,13 @@ internal static class Program
             "加完顺手选中它（接下来几乎一定要调它的颜色）");
         Check(editor.FindRowButton(ToolbarTools.SelectedId, "remove") is { IsEnabled: true },
             "新加的那一项能被删掉");
+
+        // 空存档也必须恢复门槛项：首次启动没有 preferences.json 时，工具列表不能是空的。
+        ToolbarTools.Load([], "");
+        Check(ToolbarTools.Items.Count == 8
+            && ToolbarTools.Items.Any(static tool => tool.Kind == ToolbarToolKind.Settings)
+            && toolbar.FindToolControl("settings") is not null,
+            "空工具栏存档也会恢复默认项并渲染设置按钮");
 
         // 收尾：把工具栏还原成默认八项，后面的检查与存档往返都按默认形状走。
         ToolbarTools.Load(ToolbarTools.DefaultItems(), "pen.1");
@@ -2160,7 +2167,12 @@ internal static class Program
         if (OperatingSystem.IsWindows() && tray.CallbackMessage != 0)
         {
             SendMessage(toolbar.Handle, tray.CallbackMessage, new IntPtr(0x0202), IntPtr.Zero);
-            Check(settings == 2, "托盘左键消息通过窗口过程打开设置");
+            Check(tray.Menu.IsOpen, "托盘左键消息打开菜单");
+            tray.Menu.Close();
+
+            SendMessage(toolbar.Handle, tray.CallbackMessage, new IntPtr(0x0205), IntPtr.Zero);
+            Check(tray.Menu.IsOpen, "托盘右键消息打开菜单");
+            tray.Menu.Close();
         }
 
         CloseWindow(toolbar);

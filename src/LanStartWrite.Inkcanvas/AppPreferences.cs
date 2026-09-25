@@ -171,6 +171,7 @@ internal static class AppPreferences
             SaveError = "无法读取偏好设置，本次使用默认值。";
             Trace.WriteLine(ex);
         }
+        Current = Validate(Current);
         ApplyInkOptions(Current);
         ApplyTipOptions(Current);
         // 三条桥都是"运行时状态 → 存档"的方向：状态在运行时被改，这里把它记下来。

@@ -54,8 +54,8 @@ internal sealed class TrayIconService : IDisposable
                 ContextMenu = _menu,
                 Visible = registerIcon,
             };
-            _crossPlatformIcon.Click += (_, _) => _openSettings();
-            _crossPlatformIcon.DoubleClick += (_, _) => _openSettings();
+            _crossPlatformIcon.Click += (_, _) => OpenMenu();
+            _crossPlatformIcon.DoubleClick += (_, _) => OpenMenu();
             return;
         }
 
@@ -131,21 +131,30 @@ internal sealed class TrayIconService : IDisposable
         }
 
         int eventCode = unchecked((ushort)wparam.ToInt64());
-        if (eventCode is WmLButtonUp or WmLButtonDblClk)
+        if (eventCode is WmLButtonUp or WmLButtonDblClk or WmRButtonUp or WmContextMenu)
         {
-            _openSettings();
-        }
-        else if (eventCode is WmRButtonUp or WmContextMenu)
-        {
-            OpenMenuAtCursor();
+            OpenMenu();
         }
 
         return IntPtr.Zero;
     }
 
+    private void OpenMenu()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            OpenMenuAtCursor();
+            return;
+        }
+
+        _menu.IsOpen = true;
+    }
+
     private void OpenMenuAtCursor()
     {
         if (!GetCursorPos(out var point)) return;
+        if (!ScreenToClient(_owner.Handle, ref point)) return;
+
         double scale = Math.Max(0.1, _owner.DpiScale);
         _menu.Open(new Point(point.X / scale, point.Y / scale));
     }
@@ -226,4 +235,8 @@ internal sealed class TrayIconService : IDisposable
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out PointNative point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ScreenToClient(IntPtr window, ref PointNative point);
 }
