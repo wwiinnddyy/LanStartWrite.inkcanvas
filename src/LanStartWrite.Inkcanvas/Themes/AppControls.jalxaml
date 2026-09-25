@@ -69,12 +69,11 @@
     对应的是 Button / ToggleButton 这一族，所以这里只在库的键上做四件事：
       1. 定 40x40 的方格并清掉内边距与 MinHeight（库给的是 32 高的文字按钮节奏）；
       2. 动作钮直接继承 SubtleButtonStyle（未选透明 / hover SubtleSecondary / pressed SubtleTertiary）；
-      3. 切换钮继承 DefaultToggleButtonStyle 拿它的选中色阶 —— 库把它接到了
-         ToggleButtonBackgroundChecked = AccentFillColorDefaultBrush、
-         ToggleButtonForegroundChecked = TextOnAccentFillColorPrimaryBrush，正是旧版那套；
+      3. 切换钮继承 DefaultToggleButtonStyle 的交互与背景色阶，但前景由应用选中态统一回到
+         TextFillColorPrimaryBrush，保证浅色黑、深色白，不因选中态变成另一种颜色；
       4. 再把切换钮未选那一半的色阶换成和动作钮同一条 Subtle 阶梯（库里 ToggleButton 的默认态是
          带边框的实体按钮底，放在一排透明图标钮旁边会突出来一块）。
-    颜色一个都没新定义，全是引用库的 token；键盘焦点环由库的 ButtonLayoutStyle 带进来。
+    颜色全部引用主题 token；键盘焦点环由库的 ButtonLayoutStyle 带进来。
   -->
   <Style x:Key="ToolActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
     <Setter Property="Width" Value="40" />
@@ -96,23 +95,40 @@
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
-    <!-- 未选那一半换成 Subtle 阶梯；选中那一半留给库的 accent 色阶，不要碰。 -->
-    <Setter Property="Background" Value="{StaticResource SubtleFillColorTransparentBrush}" />
-    <Setter Property="Foreground" Value="{StaticResource TextFillColorPrimaryBrush}" />
+    <!-- 未选那一半换成 Subtle 阶梯；选中态的前景仍使用主题主文本色。 -->
+    <Setter Property="Background" Value="{ThemeResource SubtleFillColorTransparentBrush}" />
+    <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
     <Style.Triggers>
       <MultiTrigger>
         <MultiTrigger.Conditions>
           <Condition Property="IsChecked" Value="False" />
           <Condition Property="IsMouseOver" Value="True" />
         </MultiTrigger.Conditions>
-        <Setter Property="Background" Value="{StaticResource SubtleFillColorSecondaryBrush}" />
+        <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
       </MultiTrigger>
       <MultiTrigger>
         <MultiTrigger.Conditions>
           <Condition Property="IsChecked" Value="False" />
           <Condition Property="IsPressed" Value="True" />
         </MultiTrigger.Conditions>
-        <Setter Property="Background" Value="{StaticResource SubtleFillColorTertiaryBrush}" />
+        <Setter Property="Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+      </MultiTrigger>
+      <Trigger Property="IsChecked" Value="True">
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+      </Trigger>
+      <MultiTrigger>
+        <MultiTrigger.Conditions>
+          <Condition Property="IsChecked" Value="True" />
+          <Condition Property="IsMouseOver" Value="True" />
+        </MultiTrigger.Conditions>
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+      </MultiTrigger>
+      <MultiTrigger>
+        <MultiTrigger.Conditions>
+          <Condition Property="IsChecked" Value="True" />
+          <Condition Property="IsPressed" Value="True" />
+        </MultiTrigger.Conditions>
+        <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
       </MultiTrigger>
     </Style.Triggers>
   </Style>

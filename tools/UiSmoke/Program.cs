@@ -403,10 +403,36 @@ internal static class Program
         // 图标没设本地前景，靠 ContentPresenter 把控件前景继承下来 —— 这两条一起才说明
         // "白字在 accent 上"和"未选透明"是真的，而不是恰好看着像。
         // 图标现在包在一层 Grid 里（底下多了一条色标），所以要往下找那颗 FontIcon，而不是直接读 Content。
+        var checkedIcon = Descendants(checkedTool).OfType<FontIcon>().Single();
+        var uncheckedIcon = Descendants(uncheckedTool).OfType<FontIcon>().Single();
         Check(Descendants(checkedTool).OfType<FontIcon>().Any(icon => ReferenceEquals(
                 icon.GetValue(TextBlock.ForegroundProperty),
-                FluentThemeManager.GetBrush("TextOnAccentFillColorPrimaryBrush"))),
-            "The checked tool's icon inherits the on-accent ink");
+                FluentThemeManager.GetBrush("TextFillColorPrimaryBrush"))),
+            "浅色模式下选中图标仍使用主题主文本色");
+        Check(ReferenceEquals(checkedIcon.GetValue(TextBlock.ForegroundProperty),
+                checkedTool.GetValue(Control.ForegroundProperty))
+            && ReferenceEquals(uncheckedIcon.GetValue(TextBlock.ForegroundProperty),
+                uncheckedTool.GetValue(Control.ForegroundProperty)),
+            "工具栏图标前景与宿主按钮保持 IconInk 活绑定");
+        var lightInk = ((SolidColorBrush)checkedIcon.GetValue(TextBlock.ForegroundProperty)!).Color;
+        AppPreferences.Update(AppPreferences.Current with { Theme = AppTheme.Dark });
+        toolbar.ForceRenderFrame();
+        var darkInk = ((SolidColorBrush)checkedIcon.GetValue(TextBlock.ForegroundProperty)!).Color;
+        Check(lightInk.R < 32 && darkInk.R > 200 && FluentThemeManager.IsDark,
+            "切换深色主题后图标立即变为白色前景");
+        AppPreferences.Update(AppPreferences.Current with { Theme = AppTheme.Light });
+        toolbar.ForceRenderFrame();
+        Check(((SolidColorBrush)checkedIcon.GetValue(TextBlock.ForegroundProperty)!).Color.R < 32,
+            "切回浅色主题后图标立即恢复黑色前景");
+        ToolbarTools.Select("pen.1");
+        toolbar.ForceRenderFrame();
+        Check(ReferenceEquals(checkedIcon.GetValue(TextBlock.ForegroundProperty),
+                checkedTool.GetValue(Control.ForegroundProperty))
+            && ReferenceEquals(uncheckedIcon.GetValue(TextBlock.ForegroundProperty),
+                uncheckedTool.GetValue(Control.ForegroundProperty)),
+            "切换工具后旧图标不会继承另一颗按钮的白色前景");
+        ToolbarTools.Select("mouse");
+        toolbar.ForceRenderFrame();
         Check(ReferenceEquals(uncheckedTool.GetValue(Control.BackgroundProperty),
                 FluentThemeManager.GetBrush("SubtleFillColorTransparentBrush")),
             "An unchecked tool sits on a transparent surface");
@@ -963,6 +989,13 @@ internal static class Program
             "页面导航与独立新增区域是分开的两个表面");
         Check(pageHost.Children.OfType<Border>().All(border => border.BorderThickness == default(Thickness)),
             "白板页面浮层没有额外外框");
+        Check(Descendants(previousButton).OfType<FontIcon>().Single().GetValue(TextBlock.ForegroundProperty)
+                == previousButton.GetValue(Control.ForegroundProperty)
+            && Descendants(nextButton).OfType<FontIcon>().Single().GetValue(TextBlock.ForegroundProperty)
+                == nextButton.GetValue(Control.ForegroundProperty)
+            && Descendants(addButton).OfType<FontIcon>().Single().GetValue(TextBlock.ForegroundProperty)
+                == addButton.GetValue(Control.ForegroundProperty),
+            "页面按钮图标保持主题前景绑定");
         Check(board.PageCount == 1 && board.ActivePageIndex == 0 && pageText.Text == "1 / 1",
             "初始只有一页，页码显示为 1 / 1");
         Check(!previousButton.IsEnabled && !nextButton.IsEnabled,

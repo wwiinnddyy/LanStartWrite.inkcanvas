@@ -96,7 +96,7 @@ internal static class ToolbarToolVisuals
     /// 一颗按钮的内容：居中图标 +（笔才有）底部一条色标。
     /// <para>
     /// <b>色标是"两支同色系的笔也能分辨"的唯一依据</b>，而它必须另画一条而不是给图标上色：
-    /// 图标的前景是继承来的，一设本地值就压住库那条"选中态白字在 accent 上"的绑定。
+    /// 图标的墨水由宿主通过 IconInk 绑定，色标不会影响前景。
     /// </para>
     /// </summary>
     internal static UIElement BuildContent(ToolbarTool tool, double size)

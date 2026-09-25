@@ -80,6 +80,8 @@ toolbar. The point of that group is one sentence from the user — "放两个笔
   no tool switch in between. This is a regression guard for a shipped defect where the data model was
   updated but nothing wrote the new value into the engine, so the change only appeared after switching
   tools and back;
+- toolbar glyphs use the primary text ink in both checked and unchecked states, stay live-bound while
+  switching tools, and change immediately when the app flips between Light and Dark;
 - same for two erasers (mode + radius);
 - the fixed items (mouse / undo / redo / settings) cannot be deleted, and deleting the *selected*
   item leaves the selection on a usable tool rather than dangling;
@@ -181,7 +183,7 @@ This starts the real application windows with a fresh `preview-state/preferences
 next to the test executable. It neither edits the normal profile nor closes an already
 running annotation session. Close the preview toolbar to end the preview.
 
-The suite is 327 checks on the current tree (the count grows with every wiring surface
+The suite is 332 checks on the current tree (the count grows with every wiring surface
 that gets a guard, and the number printed on a run is only the part that ran before the
 first failure), including responsive settings-row reflow without control replacement,
 independent navigation selection/focus, native system-color hydration, initial framework

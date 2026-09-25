@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using FluentJalium.Controls;
 using Dusk.Ink.Controls;
 using Dusk.Ink.Primitives;
 using Jalium.UI;
@@ -122,6 +123,9 @@ public partial class WhiteboardWindow : Window
         ShowActivated = false;
         SystemBackdrop = WindowBackdropType.None;
         InitializeComponent();
+        BindPageIcon(PreviousPageButton);
+        BindPageIcon(NextPageButton);
+        BindPageIcon(AddPageButton);
 
         // 层级登记：与批注同在画布层。这个类里一行 Topmost 都不该有 ——
         // "画布可见即压过其他应用、但排在批注栏之下"是层自带的性质（见 WindowLayerManager）。
@@ -166,6 +170,11 @@ public partial class WhiteboardWindow : Window
 
     /// <summary>这块画布的墨迹面。工具栏要写的一切（模式、颜色、粗细、擦法、撤销）都从这里走。</summary>
     internal CanvasSurface Surface => _surface;
+
+    private static void BindPageIcon(Button button)
+    {
+        if (button.Content is IconElement icon) IconInk.Apply(button, icon);
+    }
 
     private WhiteboardPage CreatePage()
     {

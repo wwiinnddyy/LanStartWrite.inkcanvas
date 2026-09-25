@@ -1,3 +1,4 @@
+using FluentJalium.Controls;
 using FluentJalium.Themes;
 using Jalium.UI;
 using Jalium.UI.Automation;
@@ -352,7 +353,15 @@ public partial class AnnotationToolbarWindow : Window
     private static void RefreshToolVisual(ToolbarTool tool, FrameworkElement control)
     {
         // 只有内容控件吃 Content；分隔线那种 Decorator 没有它，也就没有图标可刷。
-        if (control is ContentControl content) content.Content = ToolbarToolVisuals.BuildContent(tool, 40);
+        if (control is ContentControl content)
+        {
+            content.Content = ToolbarToolVisuals.BuildContent(tool, 40);
+            if (content.Content is Grid grid)
+            {
+                var icon = grid.Children.OfType<FontIcon>().FirstOrDefault();
+                if (icon is not null) IconInk.Apply(content, icon);
+            }
+        }
 
         var description = ToolbarTools.Describe(tool);
         // 名字与图标都是"此刻"的：同一颗鼠标钮在白板里念作「选择」（呈现，不改存档里的 Name）。

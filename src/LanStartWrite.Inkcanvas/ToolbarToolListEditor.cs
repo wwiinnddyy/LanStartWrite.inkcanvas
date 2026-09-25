@@ -1,3 +1,4 @@
+using FluentJalium.Controls;
 using Jalium.UI;
 using Jalium.UI.Automation;
 using Jalium.UI.Controls;
@@ -20,7 +21,7 @@ internal sealed class ToolbarToolListEditor
     {
         internal string Id = "";
         internal Grid Container = null!;
-        internal ContentPresenter IconHost = null!;
+        internal ContentControl IconHost = null!;
         internal TextBlock Title = null!;
         internal TextBlock Summary = null!;
         internal Button Use = null!;
@@ -101,12 +102,13 @@ internal sealed class ToolbarToolListEditor
     {
         var row = new RowView { Id = tool.Id };
 
-        row.IconHost = new ContentPresenter
+        row.IconHost = new ContentControl
         {
             Width = 20,
             Height = 20,
             VerticalAlignment = VerticalAlignment.Center,
         };
+        row.IconHost.SetResourceReference(Control.ForegroundProperty, "TextFillColorPrimaryBrush");
 
         row.Title = new TextBlock { VerticalAlignment = VerticalAlignment.Center };
         row.Title.SetResourceReference(FrameworkElement.StyleProperty, "BodyTextBlockStyle");
@@ -160,6 +162,7 @@ internal sealed class ToolbarToolListEditor
     private static void RefreshVisuals(RowView row, ToolbarTool tool)
     {
         row.IconHost.Content = ToolbarToolVisuals.Icon(tool, 16);
+        if (row.IconHost.Content is IconElement icon) IconInk.Apply(row.IconHost, icon);
         row.Title.Text = tool.Name;
         row.Summary.Text = ToolbarTools.Describe(tool);
 
