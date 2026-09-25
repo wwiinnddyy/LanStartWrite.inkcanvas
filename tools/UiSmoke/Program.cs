@@ -123,7 +123,6 @@ internal static class Program
             CheckTipEditor(settings);
             CheckEraserMenu();
             CheckEraserPreview();
-            CheckTrayMenu();
             CheckFlyoutPlacement();
             CheckToolbarPlacement();
             CheckPreferences(path);
@@ -2030,9 +2029,6 @@ internal static class Program
     [DllImport("user32.dll")]
     private static extern int GetDpiForWindow(IntPtr window);
 
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
-
     // 批注板墨迹层已换成闭源 SDK（Dusk）。这里不测真笔输入，只钉住"应用的五个命令确实
     // 落到引擎属性上"，以及"设置页仅存的那一项墨迹偏好真的还在生效"——
     // 这两条一旦断（feed 里的包漂移、签名对不上、属性映射写错），不必启窗口手写两笔就能看到红。
@@ -2127,54 +2123,6 @@ internal static class Program
         SendPointer(overlay, UIElement.PointerMoveEvent, 73, new Point(400, 260), PointerDeviceType.Mouse);
         Check(!surface.EraserPreviewVisible, "Leaving eraser mode hides the preview");
         ToolbarTools.Select(selectedId);
-        CloseWindow(toolbar);
-    }
-
-    private static void CheckTrayMenu()
-    {
-        var toolbar = new AnnotationToolbarWindow
-        {
-            Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false,
-        };
-        Windows.Add(toolbar);
-        toolbar.Show();
-        toolbar.ForceRenderFrame();
-
-        var settings = 0;
-        var restart = 0;
-        var exit = 0;
-        using var tray = new TrayIconService(
-            toolbar,
-            () => settings++,
-            () => restart++,
-            () => exit++,
-            registerIcon: true);
-        var items = tray.Menu.Items.OfType<MenuItem>().ToArray();
-        Check(tray.IsRegistered, $"托盘图标已注册到系统通知区域（错误码={tray.RegistrationError}）");
-
-        Check(items.Length == 3
-            && items[0].Header as string == "打开设置"
-            && items[1].Header as string == "重新启动应用"
-            && items[2].Header as string == "退出应用",
-            "托盘菜单提供打开设置、重启应用和退出应用");
-
-        items[0].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        items[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        Check(settings == 1 && restart == 1 && exit == 1,
-            $"托盘菜单动作分别触发一次（设置={settings}，重启={restart}，退出={exit}）");
-
-        if (OperatingSystem.IsWindows() && tray.CallbackMessage != 0)
-        {
-            SendMessage(toolbar.Handle, tray.CallbackMessage, new IntPtr(0x0202), IntPtr.Zero);
-            Check(tray.Menu.IsOpen, "托盘左键消息打开菜单");
-            tray.Menu.Close();
-
-            SendMessage(toolbar.Handle, tray.CallbackMessage, new IntPtr(0x0205), IntPtr.Zero);
-            Check(tray.Menu.IsOpen, "托盘右键消息打开菜单");
-            tray.Menu.Close();
-        }
-
         CloseWindow(toolbar);
     }
 

@@ -1281,11 +1281,6 @@ public partial class AnnotationToolbarWindow : Window
     {
         _ = sender;
         _ = e;
-        OpenSettings();
-    }
-
-    internal void OpenSettings()
-    {
         if (_settingsWindow is not null)
         {
             _settingsWindow.Activate();
