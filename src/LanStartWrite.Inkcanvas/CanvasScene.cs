@@ -17,7 +17,7 @@ namespace LanStartWrite.Inkcanvas;
 /// 在 <see cref="CanvasSceneState"/>，不落盘。
 /// </para>
 /// </summary>
-internal enum CanvasScene
+public enum CanvasScene
 {
     /// <summary>屏幕批注：全屏透明画布盖在当前桌面上，边看边写。</summary>
     ScreenAnnotation = 0,
@@ -27,6 +27,20 @@ internal enum CanvasScene
     /// 「鼠标」这一档在这里的意思是"选择墨迹"，并且允许双指漫游。
     /// </summary>
     Whiteboard = 1,
+
+    /// <summary>
+    /// 图片批注：底下铺一张打开的图，图上写字。
+    /// <para>
+    /// 与白板共用同一套"选择 / 变换 / 漫游"手势，但底下那块不是纯色而是一张位图 ——
+    /// 所以它多两件别处没有的事：<b>换朝向</b>（图与笔迹一起转，只走 90° 的整数步）与
+    /// <b>停靠</b>（窗口模式下工具栏动画停在图片窗口下方，而不是浮在屏幕底部）。
+    /// </para>
+    /// <para>
+    /// 一个文件一页，多个文件就是多页 —— 与白板的分页模型同构，所以那边那套缩略图导航
+    /// 与 <c>InkViewport</c> 缩放漫游整条都直接复用。
+    /// </para>
+    /// </summary>
+    ImageCanvas = 2,
 }
 
 /// <summary>

@@ -30,12 +30,122 @@ public partial class AnnotationToolbarWindow : Window
     private bool _isClosing;
     private AnnotationOverlayWindow? _annotationOverlay;
     private WhiteboardWindow? _whiteboard;
+    private ImageViewerWindow? _imageViewer;
     private SettingsWindow? _settingsWindow;
     private PenSecondaryMenuWindow? _penMenuWindow;
     private bool _penMenuVisible;
     private EraserSecondaryMenuWindow? _eraserMenuWindow;
     private bool _eraserMenuVisible;
     private TouchDevice? _touchDragDevice;
+
+    /// <summary>
+    /// 批注栏的<b>内容</b>（标记里那个根 <see cref="Grid"/>）。重父化搬的就是它。
+    /// <para>存成字段而不是每次去读 <see cref="Window.Content"/>：搬进图片窗口那一刻，
+    /// <c>Content</c> 的值没变但它的<b>视觉父亲</b>变了；字段是稳定的身份，落回去时对着同一个对象搬回去。</para>
+    /// </summary>
+    private readonly Grid _contentRoot;
+
+    /// <summary>
+    /// 批注栏这一份视觉<b>当前挂在哪个窗口下</b>。
+    /// <para>
+    /// 正常是自己那个窗口；窗口模式下它是图片窗口里的一个控件，那时就是图片窗口。
+    /// 二级菜单、拖动、跟随宿主移动这几件事全都读它 —— 读 <c>this</c> 的话，
+    /// 重父化期间算出来的坐标会以工具栏窗口的 <c>Left/Top</c> 为基准，而那对值此时是<b>陈旧的</b>
+    /// （窗口已经 <c>Hide</c>，没人更新它），症状是浮窗出现在离按钮很远的地方。
+    /// </para>
+    /// </summary>
+    private Window? _hostWindow;
+
+    /// <summary>批注栏视觉现在挂在哪一格里。存下来是因为"摘回去"要知道从哪一格摘，
+    /// 而 <see cref="_hostWindow"/> 是 <see cref="Window"/>，它自己<b>没有 <c>Children</c></b>
+    /// （<c>Children</c> 是 Panel 的成员）—— 只存窗口的话摘不回来。</summary>
+    private Grid? _hostGrid;
+
+    /// <summary>视觉是否已经搬进别的窗口（也就是「工具栏是图片窗口的控件」这个状态）。</summary>
+    internal bool IsRehosted { get; private set; }
+
+    /// <summary>批注栏那个窗口现在<b>自己</b>持有内容吗（= 它是独立窗口，而不是空壳）。</summary>
+    internal bool OwnContentIsBack => ReferenceEquals(Content, _contentRoot);
+
+    /// <summary>
+    /// 批注栏自己那个窗口在屏吗 —— <b>只听 <c>Shown</c> / <c>Hiding</c></b>。
+    /// <para>
+    /// 本来想用 <c>Window.IsVisible</c>，实测它在"搬进图片窗口又搬回来"这一趟里两次都不可靠：
+    /// 窗口已经 <c>Hide()</c> 了它仍报 <c>true</c>，而 <c>Window.Visibility</c> 在 WPF 那一族里
+    /// 本来就是"从没 Show 过"的窗口上初值不可靠（项目规矩第 4 条也是这个理由，层级系统早就为此
+    /// 改听事件）。既然已经有一对事件，就以它为准 —— 层级那边消费的也是同一份真相。
+    /// </para>
+    /// </summary>
+    internal bool IsShown { get; private set; }
+
+    /// <summary>
+    /// 把批注栏<b>整棵视觉</b>搬进 <paramref name="host"/>，自己那个窗口收起来。
+    /// <para>
+    /// 这就是「窗口模式下批注栏是图片窗口里的一个控件」的全部实现 —— 搬视觉，不是搬一个矩形。
+    /// 两个各画各的窗口永远对不齐：图片窗口改尺寸时它不知道、它那一根窗框还压着图片、
+    /// 拖手柄一动两者用两套坐标算位移，于是错位永远修不掉。
+    /// </para>
+    /// <para><b>反过来说，全屏模式下不能走这里</b>：那时批注栏要盖在图片上面浮着，
+    /// 必须是独立窗口，否则它会占掉布局高度、把画面挤掉一块。</para>
+    /// </summary>
+    internal void RehostInto(Grid host, Window hostWindow)
+    {
+        if (IsRehosted || ReferenceEquals(hostWindow, this)) return;
+
+        // 摘下来只有一条路：把 Content 置空。
+        // 框架没给 Panel 暴露 DetachFromVisualParent（那是 Popup 的内部办法），
+        // 而 Window.Content 是 DP —— 置空就是"视觉父亲变成 null"这一步本身。
+        Content = null;
+        host.Children.Add(_contentRoot);
+        _hostWindow = hostWindow;
+        _hostGrid = host;
+        IsRehosted = true;
+
+        // 自己那个窗口收起来：内容已经在别人那儿了，再 Show 一次就是同一份视觉画两遍。
+        Hide();
+
+        hostWindow.LocationChanged += OnHostWindowLocationChanged;
+        hostWindow.SizeChanged += OnHostWindowSizeChanged;
+        PositionSecondaryMenus();
+    }
+
+    /// <summary>
+    /// 把批注栏的视觉搬回自己那个窗口并显示。
+    /// <para>
+    /// 退路必须<b>只有一个</b>：批注栏是 <c>app.MainWindow</c>，它收起来而没有搬回去的话，
+    /// 整条工具栏会跟着图片窗口一起消失，而图片窗口自己又没有「关掉自己」以外的出路。
+    /// 所以图片窗口的每一处收尾（切回屏幕批注、关窗、Dispose）都调它，且允许重复调用。
+    /// </para>
+    /// </summary>
+    internal void RestoreFromHost()
+    {
+        if (!IsRehosted) return;
+
+        if (_hostGrid is not { } host || _hostWindow is not { } hostWindow) return;
+
+        hostWindow.LocationChanged -= OnHostWindowLocationChanged;
+        hostWindow.SizeChanged -= OnHostWindowSizeChanged;
+
+        host.Children.Remove(_contentRoot);
+        // 挂回窗口不能直接重设成同一个值：DP 那一趟会被当成「没变」而什么都不做。
+        // 先摘成 null 再挂回去，才真的把视觉父亲换回窗口自己。
+        Content = _contentRoot;
+        _hostWindow = null;
+        _hostGrid = null;
+        IsRehosted = false;
+
+        // 可见性只听 Shown/Hiding（层级那套的规矩），所以再 Show 一次就会重新登记。
+        Show();
+        PositionSecondaryMenus();
+    }
+
+    private void OnHostWindowLocationChanged(object? sender, EventArgs e) => PositionSecondaryMenus();
+
+    private void OnHostWindowSizeChanged(object sender, SizeChangedEventArgs e) => PositionSecondaryMenus();
+
+    /// <summary>这一趟触摸拖动<b>动的是哪个窗口</b>：重父化期间是宿主，否则是工具栏自己。</summary>
+    private Window? _touchDragOwner;
+
     private Point _touchDragStartScreenPoint;
     private double _touchDragStartWindowLeft;
     private double _touchDragStartWindowTop;
@@ -100,6 +210,15 @@ public partial class AnnotationToolbarWindow : Window
     /// <summary>本窗口持有的那块白板（可能是 <c>null</c>：它也是懒创建的）。</summary>
     internal WhiteboardWindow? Whiteboard => _whiteboard;
 
+    /// <summary>图片批注这块画布此刻在不在屏。与白板各记各的，理由同上。</summary>
+    private bool _imageViewerPresented;
+
+    /// <summary>验收读它：图片批注在不屏上。</summary>
+    internal bool ImageViewerPresented => _imageViewerPresented;
+
+    /// <summary>本窗口持有的图片批注窗口（可能是 <c>null</c>：懒创建）。</summary>
+    internal ImageViewerWindow? ImageViewer => _imageViewer;
+
     /// <summary>
     /// <b>此刻该被写的那块面</b>：白板在眼前就是白板那块，否则是批注那块；没建起来时是 <c>null</c>。
     /// <para>
@@ -108,8 +227,12 @@ public partial class AnnotationToolbarWindow : Window
     /// 会安静地撤掉<b>另一块画布</b>的历史，而这既不报错也看不出来。
     /// </para>
     /// </summary>
-    private CanvasSurface? ActiveSurface =>
-        CanvasSceneState.IsActive(CanvasScene.Whiteboard) ? _whiteboard?.Surface : _annotationOverlay?.Surface;
+    private CanvasSurface? ActiveSurface => CanvasSceneState.Active switch
+    {
+        CanvasScene.Whiteboard => _whiteboard?.Surface,
+        CanvasScene.ImageCanvas => _imageViewer?.Surface,
+        _ => _annotationOverlay?.Surface,
+    };
 
     /// <summary>工具栏上某一项的按钮控件；没有这一项时返回 <c>null</c>。</summary>
     internal FrameworkElement? FindToolControl(string id) => _toolControls.GetValueOrDefault(id);
@@ -121,6 +244,7 @@ public partial class AnnotationToolbarWindow : Window
     {
         AllowsTransparency = true;
         InitializeComponent();
+        _contentRoot = (Grid)Content!;
         SystemBackdrop = WindowBackdropType.None;
         Background = null;
         Opacity = 1;
@@ -141,10 +265,18 @@ public partial class AnnotationToolbarWindow : Window
         AppPreferences.Changed += OnPreferencesChanged;
         LocationChanged += (_, _) =>
         {
+            // 重父化期间这一条不再描述批注栏的位置（视觉在图片窗口里，宿主挪了这里也不动），
+            // 挪图片窗口是 OnHostWindowLocationChanged 管的。
+            if (IsRehosted) return;
             if (_penMenuVisible) PositionPenSecondaryMenu();
             if (_eraserMenuVisible) PositionEraserSecondaryMenu();
         };
-        Hiding += (_, _) => EndTouchDrag(DragHandle);
+        Hiding += (_, _) =>
+        {
+            IsShown = false;
+            EndTouchDrag(DragHandle);
+        };
+        Shown += (_, _) => IsShown = true;
         SystemSettingsChanged += (_, _) => FluentThemeManager.RefreshSystemTheme();
         PreviewKeyDown += (_, e) =>
         {
@@ -155,6 +287,10 @@ public partial class AnnotationToolbarWindow : Window
             {
                 // 白板里选着东西时，Esc 的第一件事是"取消选择"而不是"退出这块画布"：
                 // 一次 Esc 就把整块白板收掉，用户下一次进来会以为是笔迹没了。
+            }
+            else if (_imageViewer is not null && _imageViewer.ClearSelectionForEscape())
+            {
+                // 图片批注同一条：选着东西时 Esc 先清选择。
             }
             else ToolbarTools.Select(FirstToolId(ToolbarToolKind.Mouse));
             e.Handled = true;
@@ -178,6 +314,7 @@ public partial class AnnotationToolbarWindow : Window
             _settingsWindow = null;
             DisposeAnnotationOverlay();
             DisposeWhiteboard();
+            DisposeImageViewer();
         };
 
         SyncToolControls();
@@ -252,7 +389,7 @@ public partial class AnnotationToolbarWindow : Window
     private void SyncSelectedToolToCanvas()
     {
         if (ActiveSurface is not { } surface) return;
-        if (!_canvasPresented && !_whiteboardPresented) return;
+        if (!_canvasPresented && !_whiteboardPresented && !_imageViewerPresented) return;
         if (ToolbarTools.Selected is not { } tool) return;
 
         switch (tool.Kind)
@@ -334,6 +471,9 @@ public partial class AnnotationToolbarWindow : Window
                 break;
             case ToolbarToolKind.Whiteboard:
                 action.Click += (_, _) => ToggleCanvasScene(CanvasScene.Whiteboard);
+                break;
+            case ToolbarToolKind.Image:
+                action.Click += (_, _) => EnterImageCanvas();
                 break;
         }
 
@@ -586,6 +726,178 @@ public partial class AnnotationToolbarWindow : Window
         _whiteboardPresented = false;
     }
 
+    // ------------------------------------------------------------------ 图片批注
+
+    /// <summary>
+    /// 点工具栏那颗「图片」：进图片批注这一块。
+    /// <para>
+    /// 它<b>不</b>走 <see cref="ToggleCanvasScene"/>：那颗钮连按两次的语义是"进去 / 出来"，
+    /// 而图片这块第一次进去必然还要挑一个文件，多出来的一步就是那个文件选择框 ——
+    /// 把它藏进"第一次点"里，用户看到的就是"我点了图片，弹了个选文件的框"，这正是要的那一步。
+    /// 已经有一张图在页里时，再点就只是回到这一块（不来回跳），免得误点第二次就把窗口关了。
+    /// </para>
+    /// </summary>
+    private void EnterImageCanvas()
+    {
+        var already = CanvasSceneState.IsActive(CanvasScene.ImageCanvas) && _imageViewer is { PageCount: > 1 };
+        if (already)
+        {
+            PresentImageViewer();
+            return;
+        }
+
+        ToggleCanvasScene(CanvasScene.ImageCanvas);
+    }
+
+    private void EnsureImageViewer()
+    {
+        if (_imageViewer is not null) return;
+        _imageViewer = new ImageViewerWindow();
+        _imageViewer.PreviewPointerDown += (_, _) =>
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+        };
+        _imageViewer.HistoryStateChanged += OnHistoryStateChanged;
+        _imageViewer.ActivePageChanged += OnImageViewerActivePageChanged;
+
+        // 兜底：图片窗口<b>自己</b>被关掉时（X、Alt+F4、任务栏）也必须把批注栏摘回来。
+        // 只在 DisposeImageViewer 里摘是不够的 —— 那是我们的正常出口，
+        // 而这条是「窗口从视觉树上消失」那一刻：那一刻批注栏还在它里面，
+        // 跟着一起没了，而批注栏是 app.MainWindow，整条工具栏就此消失。
+        _imageViewer.Closed += (_, _) => RestoreFromHost();
+    }
+
+    private void DisposeImageViewer()
+    {
+        if (_imageViewer is null) return;
+
+        // 先把批注栏摘出来再关图片窗口。顺序反了会怎样：图片窗口一关，
+        // 那棵还在它视觉树里的批注栏跟着没了，而 RestoreFromHost 之后再没人调得到 —— 工具栏整条消失。
+        RestoreFromHost();
+        _imageViewer.HistoryStateChanged -= OnHistoryStateChanged;
+        _imageViewer.ActivePageChanged -= OnImageViewerActivePageChanged;
+        _imageViewer.Close();
+        _imageViewer = null;
+        _imageViewerPresented = false;
+        SyncUndoRedoState();
+    }
+
+    private void PresentImageViewer()
+    {
+        EnsureImageViewer();
+        if (_imageViewer is null) return;
+        var mode = AppPreferences.Current.ImageOpenMode;
+        _imageViewer.ApplyOpenMode(mode);
+
+        // 已经在屏就别再 Show —— 这是丢最大化的<b>另一条独立的路</b>。
+        // Show 的语义是"从没有到有"，对一个已经显形的窗口再走一遍会让外壳把状态重摆一次。
+        // Activate 不一样，它只是把它叫到前面，切工具时该有。
+        if (!_imageViewerPresented) _imageViewer.Show();
+        _imageViewer.Activate();
+        _imageViewerPresented = true;
+        _imageViewer.RestoreRecentImages();
+
+        // 这里<b>不</b>决定批注栏搬不搬 —— 那是 ApplyToolbarHosting 的活，且只该有它一个。
+    }
+
+    private void ConcealImageViewer()
+    {
+        if (_imageViewer is null) return;
+        _imageViewer.Hide();
+        _imageViewerPresented = false;
+        // 同上：搬回去也不归这里管。放在这里曾经造成"白板那条分支没人搬"，
+        // 而隐藏图片窗口和搬回工具栏是两件独立的事，谁触发都不该顺手负责另一件。
+    }
+
+    /// <summary>
+    /// 图片这一套：<b>没有穿透、没有冻结</b>（底下是一张固定的图，没有"透出去"与"冻住"这两种状态），
+    /// 但<b>有选择</b>——「鼠标」那一档在这里是"选择这一页上的墨迹"，与白板同义。
+    /// </summary>
+    private void SyncImageViewerOverlay()
+    {
+        if (_isClosing) return;
+        if (_settingsWindow is not null)
+        {
+            ConcealImageViewer();
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+            return;
+        }
+
+        var tool = ToolbarTools.Selected;
+        if (tool is null || tool.Kind == ToolbarToolKind.Mouse)
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+            EnsureImageViewer();
+            _imageViewer!.Surface.SetSelectMode(true);
+            PresentImageViewer();
+            SyncUndoRedoState();
+            KeepToolbarForeground();
+            return;
+        }
+
+        switch (tool.Kind)
+        {
+            case ToolbarToolKind.Pen:
+                HideEraserSecondaryMenu();
+                EnsureImageViewer();
+                _imageViewer!.Surface.SetSelectMode(false);
+                _imageViewer.Surface.SetInkMode();
+                ApplyPenTool(_imageViewer.Surface, tool);
+                PresentImageViewer();
+                SyncUndoRedoState();
+                KeepToolbarForeground();
+                break;
+
+            case ToolbarToolKind.Eraser:
+                HidePenSecondaryMenu();
+                EnsureImageViewer();
+                _imageViewer!.Surface.SetSelectMode(false);
+                _imageViewer.Surface.SetEraseMode();
+                ApplyEraserTool(_imageViewer.Surface, tool);
+                PresentImageViewer();
+                SyncUndoRedoState();
+                KeepToolbarForeground();
+                break;
+
+            default:
+                SyncUndoRedoState();
+                break;
+        }
+    }
+
+    private void OnImageViewerActivePageChanged()
+    {
+        if (_isClosing || _imageViewer is null) return;
+        if (ToolbarTools.Selected is not { } tool)
+        {
+            SyncUndoRedoState();
+            return;
+        }
+
+        switch (tool.Kind)
+        {
+            case ToolbarToolKind.Mouse:
+                _imageViewer.Surface.SetSelectMode(true);
+                break;
+            case ToolbarToolKind.Pen:
+                _imageViewer.Surface.SetSelectMode(false);
+                _imageViewer.Surface.SetInkMode();
+                ApplyPenTool(_imageViewer.Surface, tool);
+                break;
+            case ToolbarToolKind.Eraser:
+                _imageViewer.Surface.SetSelectMode(false);
+                _imageViewer.Surface.SetEraseMode();
+                ApplyEraserTool(_imageViewer.Surface, tool);
+                break;
+        }
+
+        SyncUndoRedoState();
+        KeepToolbarForeground();
+    }
+
     /// <summary>
     /// 换了一块画布。<b>一边让开、另一边按当前选中项重新决定要不要显形</b>，
     /// 顺带把按钮的外观刷一遍（"选择"那颗的图标与说明是按场景的）。
@@ -598,23 +910,18 @@ public partial class AnnotationToolbarWindow : Window
     {
         if (_isClosing) return;
 
-        if (scene != CanvasScene.Whiteboard && ToolbarTools.Selected?.Kind != ToolbarToolKind.Mouse)
+        if (!CanvasSceneState.IsPageScene(scene) && ToolbarTools.Selected?.Kind != ToolbarToolKind.Mouse)
         {
             var mouse = ToolbarTools.Items.FirstOrDefault(static item => item.Kind == ToolbarToolKind.Mouse);
             if (mouse is not null) ToolbarTools.Select(mouse.Id);
         }
 
-        if (scene == CanvasScene.Whiteboard)
-        {
-            // 批注让开：两块全屏画布叠着没有意义，而"墨迹在各自的历史里"这件事不受影响 ——
-            // 隐藏不等于拆销，两边回来时都还是自己那一屏。
-            _annotationOverlay?.SetClickThrough(false);
-            ConcealCanvas();
-        }
-        else
-        {
-            ConcealWhiteboard();
-        }
+        // 其余场景一律让开：两块全屏画布叠着没有意义，而"墨迹在各自的历史里"这件事不受影响 ——
+        // 隐藏不等于销毁，回来时都还是自己那一屏。
+        _annotationOverlay?.SetClickThrough(false);
+        ConcealCanvas();
+        ConcealWhiteboard();
+        ConcealImageViewer();
 
         RefreshToolVisuals();
         SyncCanvasOverlay();
@@ -649,13 +956,44 @@ public partial class AnnotationToolbarWindow : Window
     {
         if (_isClosing) return;
 
-        if (CanvasSceneState.IsActive(CanvasScene.Whiteboard))
+        switch (CanvasSceneState.Active)
         {
-            SyncWhiteboardOverlay();
-            return;
+            case CanvasScene.Whiteboard:
+                SyncWhiteboardOverlay();
+                break;
+            case CanvasScene.ImageCanvas:
+                SyncImageViewerOverlay();
+                break;
+            default:
+                SyncAnnotationOverlay();
+                break;
         }
 
-        SyncAnnotationOverlay();
+        ApplyToolbarHosting();
+    }
+
+    /// <summary>
+    /// 批注栏<b>该待在哪儿</b> —— 全应用<b>只有这一处</b>决定这件事。
+    /// <para>
+    /// 这条是踩过一次坑才写成这样的：原先"搬进图片窗口"挂在 <c>PresentImageViewer</c> 上，
+    /// "搬回来"散落在几个分支里。结果用户<b>在图片窗口里点白板</b>时走的是白板那条分支 ——
+    /// 没人负责搬回来，批注栏就留在一个已经隐藏的图片窗口里，屏幕上什么都没有，
+    /// 而它又是 <c>app.MainWindow</c>，再关掉图片窗口就整条工具栏一起没了。
+    /// <para>
+    /// 教训不是"少调了一个函数"，而是<b>位置不能由事件推动</b>。
+    /// 每条分支各自记得收拾，漏一条就是一个"东西消失了但没有任何报错"的状态；
+    /// 而"此刻该在哪儿"本来就是当前状态的一个函数，算一次就够。
+    /// </para>
+    /// <para>幂等：状态没变时它什么都不做，所以可以随便多调。</para>
+    /// </summary>
+    private void ApplyToolbarHosting()
+    {
+        var wantsImageWindow = _imageViewerPresented
+            && _imageViewer is not null
+            && AppPreferences.Current.ImageOpenMode == ImageOpenMode.Window;
+
+        if (wantsImageWindow && _imageViewer is { } viewer) RehostInto(viewer.ToolbarHost, viewer);
+        else RestoreFromHost();
     }
 
     /// <summary>
@@ -763,30 +1101,29 @@ public partial class AnnotationToolbarWindow : Window
     }
 
     /// <summary>
-    /// 把"当前那块画布"该显的显、该藏的藏。<b>进白板时批注让开，进批注时白板让开</b>，
-    /// 所以这里不再自己判选中项是哪一类之外的事。
+    /// 切场景。<b>已经在这一块时就退回屏幕批注</b> —— 再点一次那颗钮要走出去，而不是"没反应"。
+    /// <para>
+    /// 三个场景共用这一条，不是因为"三"是个数，而是因为「同一条进、同一条出」是那几颗钮的契约：
+    /// 白板点一次进、再点一次回批注；图片也一样。加场景时这里不用改，只在下面那份名单里加成员。
+    /// </para>
     /// </summary>
     private void ToggleCanvasScene(CanvasScene scene)
     {
-        if (CanvasSceneState.Active == scene)
-        {
-            if (scene == CanvasScene.Whiteboard)
-            {
-                var mouse = ToolbarTools.Items.FirstOrDefault(static item => item.Kind == ToolbarToolKind.Mouse);
-                if (mouse is not null) ToolbarTools.Select(mouse.Id);
-            }
+        var target = CanvasSceneState.Active == scene
+            ? CanvasScene.ScreenAnnotation
+            : scene;
 
-            CanvasSceneState.Active = scene == CanvasScene.Whiteboard
-                ? CanvasScene.ScreenAnnotation
-                : CanvasScene.Whiteboard;
-            return;
+        if (CanvasSceneState.Active == scene && CanvasSceneState.IsPageScene(scene))
+        {
+            var mouse = ToolbarTools.Items.FirstOrDefault(static item => item.Kind == ToolbarToolKind.Mouse);
+            if (mouse is not null) ToolbarTools.Select(mouse.Id);
         }
 
-        CanvasSceneState.Active = scene;
+        CanvasSceneState.Active = target;
 
-        // 进白板时如果手里空着（选中的是"鼠标 / 选择"），先递一支笔过去：
-        // 用户点"白板"是要写，不是要看一块空底；点开之后什么都没发生的那种"没反应"最难猜。
-        if (scene == CanvasScene.Whiteboard && ToolbarTools.Selected?.Kind == ToolbarToolKind.Mouse)
+        // 进"有页面"的那块时如果手里空着（选中的是"鼠标 / 选择"），先递一支笔过去：
+        // 用户点入口是要写，不是要看一块空底；点开之后什么都没发生的那种"没反应"最难猜。
+        if (CanvasSceneState.IsPageScene(target) && ToolbarTools.Selected?.Kind == ToolbarToolKind.Mouse)
         {
             var firstPen = ToolbarTools.Items
                 .FirstOrDefault(static item => item.Kind == ToolbarToolKind.Pen)
@@ -1041,15 +1378,24 @@ public partial class AnnotationToolbarWindow : Window
         control?.Focus();
     }
 
+    private void PositionSecondaryMenus()
+    {
+        if (_penMenuVisible) PositionPenSecondaryMenu();
+        if (_eraserMenuVisible) PositionEraserSecondaryMenu();
+    }
+
     private void PositionPenSecondaryMenu()
     {
         if (_penMenuWindow is null)
             return;
 
-        if (!FlyoutPlacement.Position(this, _penMenuWindow))
+        // 基准是**当前宿主**，不是 this。重父化期间批注栏的视觉在图片窗口里，
+        // 而本窗口已经 Hide —— 它的 Left/Top 停在上一次摆位，早就不描述批注栏在哪了。
+        var host = _hostWindow ?? this;
+        if (!FlyoutPlacement.Position(host, _penMenuWindow))
         {
-            _penMenuWindow.Left = Left;
-            _penMenuWindow.Top = Top + Height - 8;
+            _penMenuWindow.Left = host.Left;
+            _penMenuWindow.Top = host.Top + host.Height - 8;
         }
     }
 
@@ -1122,10 +1468,11 @@ public partial class AnnotationToolbarWindow : Window
         if (_eraserMenuWindow is null)
             return;
 
-        if (!FlyoutPlacement.Position(this, _eraserMenuWindow))
+        var host = _hostWindow ?? this;
+        if (!FlyoutPlacement.Position(host, _eraserMenuWindow))
         {
-            _eraserMenuWindow.Left = Left;
-            _eraserMenuWindow.Top = Top + Height - 8;
+            _eraserMenuWindow.Left = host.Left;
+            _eraserMenuWindow.Top = host.Top + host.Height - 8;
         }
     }
 
@@ -1193,12 +1540,23 @@ public partial class AnnotationToolbarWindow : Window
         if (!p.IsPressed)
             return;
 
-        // 触摸有独立的 Touch 事件和捕获通道，不能调用只支持鼠标左键的 DragMove。
+        // 触摸有独立的 Touch 事件和捕获通道，不能调用只支持鼠标左键的 DragMove
         if (p.Pointer.PointerDeviceType == PointerDeviceType.Touch)
             return;
 
-        // 鼠标继续使用系统原生 DragMove，获得与普通窗口标题栏一致的拖动体验。
-        DragMove();
+        // 重父化时批注栏是图片窗口里的一个控件，拖手柄就该拖<b>图片窗口</b> ——
+        // 两者本就是同一个窗口的同一棵树，不存在"谁跟着谁"的问题。
+        // 原生 DragMove 只能拖自己所在的那个窗口，所以要点名宿主去拖。
+        // 拖自己那个（此时已经 Hide 的）窗口会没有任何反应。
+        if (IsRehosted && _hostWindow is { } host)
+        {
+            host.DragMove();
+        }
+        else
+        {
+            DragMove();
+        }
+
         p.Handled = true;
         PositionPenSecondaryMenu();
     }
@@ -1213,12 +1571,16 @@ public partial class AnnotationToolbarWindow : Window
         if (_touchDragDevice is not null) return;
 
         var rootPoint = e.GetTouchPoint(this).Position;
+
+        // 触摸那条路不走 DragMove（它只支持鼠标左键），所以这里要自己记住"是谁在动"。
+        // 重父化时被拖的是图片窗口（批注栏就在它里面）。
+        _touchDragOwner = IsRehosted && _hostWindow is { } host ? host : this;
         _touchDragDevice = e.TouchDevice;
-        _touchDragStartWindowLeft = Left;
-        _touchDragStartWindowTop = Top;
+        _touchDragStartWindowLeft = _touchDragOwner.Left;
+        _touchDragStartWindowTop = _touchDragOwner.Top;
         _touchDragStartScreenPoint = new Point(
-            Left + rootPoint.X,
-            Top + rootPoint.Y);
+            _touchDragOwner.Left + rootPoint.X,
+            _touchDragOwner.Top + rootPoint.Y);
 
         // 捕获当前触点，手指即使瞬间移出原来的 40×56 命中区，拖动也不会中断。
         if (!captureOwner.CaptureTouch(e.TouchDevice)) ResetTouchDragState();
@@ -1229,15 +1591,16 @@ public partial class AnnotationToolbarWindow : Window
         if (_touchDragDevice is null || e.TouchDevice.Id != _touchDragDevice.Id)
             return;
 
-        // TouchPoint.Position 是窗口根坐标。将当前窗口 Left/Top 加回去，
+        // TouchPoint.Position 是窗口根坐标。把当前窗口 Left/Top 加回去，
         // 就得到稳定的屏幕坐标；即使窗口已经在上一帧移动，也不会产生反向抖动。
         var rootPoint = e.GetTouchPoint(this).Position;
-        var currentScreenX = Left + rootPoint.X;
-        var currentScreenY = Top + rootPoint.Y;
+        var owner = _touchDragOwner ?? this;
+        var currentScreenX = owner.Left + rootPoint.X;
+        var currentScreenY = owner.Top + rootPoint.Y;
 
-        Left = _touchDragStartWindowLeft
+        owner.Left = _touchDragStartWindowLeft
             + (currentScreenX - _touchDragStartScreenPoint.X);
-        Top = _touchDragStartWindowTop
+        owner.Top = _touchDragStartWindowTop
             + (currentScreenY - _touchDragStartScreenPoint.Y);
 
         PositionPenSecondaryMenu();
@@ -1273,6 +1636,7 @@ public partial class AnnotationToolbarWindow : Window
     private void ResetTouchDragState()
     {
         _touchDragDevice = null;
+        _touchDragOwner = null;
     }
 
     // ------------------------------------------------------------------ 设置

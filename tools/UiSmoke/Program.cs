@@ -17,6 +17,7 @@ using Jalium.UI.Controls.Primitives;
 using Jalium.UI.Input;
 using Jalium.UI.Interop;
 using Jalium.UI.Media;
+using Jalium.UI.Media.Imaging;
 using Jalium.UI.Threading;
 using LanStartWrite.Inkcanvas;
 
@@ -113,6 +114,7 @@ internal static class Program
             CheckNavigation(settings);
             CheckToolbarTouch();
             CheckToolbarTools(settings);
+            CheckImageCanvas();
             CheckScenePenColors();
             CheckCanvasModes(settings);
             CheckWhiteboardCanvas(settings);
@@ -266,7 +268,7 @@ internal static class Program
         var appearance = (FluentNavigationItem)window.FindName("AppearanceNavButton")!;
         var ink = (FluentNavigationItem)window.FindName("InkNavButton")!;
         var navigationIcons = Descendants((FrameworkElement)window.FindName("NavigationRoot")!).OfType<FontIcon>().ToList();
-        Check(navigationIcons.Count == 6 && navigationIcons.All(icon => Math.Abs(icon.FontSize - 16) < 0.1),
+        Check(navigationIcons.Count == 7 && navigationIcons.All(icon => Math.Abs(icon.FontSize - 16) < 0.1),
             "设置导航图标使用 Fluent 16 DIP 尺寸");
         Check(appearance.IsSelected && !ink.IsSelected, "Navigation exposes selection independently of focus");
         ink.RaiseEvent(new RoutedEventArgs(Jalium.UI.Controls.Primitives.ButtonBase.ClickEvent, ink));
@@ -406,9 +408,9 @@ internal static class Program
         // 22 DIP 的标签带，于是整条过长且选中实底只盖到上面一块。这两条钉的就是那两个症状。
         // 按钮是数据驱动的，没有 x:Name 可查 —— 按项标识取。默认列表的标识是固定的；
         // 新加的「白板」也要过这三条，它是普通 Button，长得必须和同伴一样。
-        var tools = new[] { "mouse", "whiteboard", "pen.1", "eraser.1", "undo", "redo", "settings" };
+        var tools = new[] { "mouse", "whiteboard", "image", "pen.1", "eraser.1", "undo", "redo", "settings" };
         Check(tools.All(id => toolbar.FindToolControl(id) is not null),
-            "默认工具栏那七颗钮都渲染出来了（按项标识取得到）");
+            "默认工具栏那几颗钮都渲染出来了（按项标识取得到）");
         Check(tools.All(id => toolbar.FindToolControl(id)!.ToolTip is null),
             "Toolbar buttons keep no visible hover descriptions");
         Check(tools.All(id =>
@@ -502,13 +504,14 @@ internal static class Program
         toolbar.Show();
         toolbar.ForceRenderFrame();
 
-        Check(ToolbarTools.Items.Count == 8, "默认工具栏是八项（七颗钮加一条分隔线）");
+        Check(ToolbarTools.Items.Count == 9, "默认工具栏是九项（八颗钮加一条分隔线）");
         Check(ToolbarTools.Items.Select(static tool => tool.Kind).SequenceEqual(new[]
             {
-                ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Pen, ToolbarToolKind.Eraser,
+                ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Image,
+                ToolbarToolKind.Pen, ToolbarToolKind.Eraser,
                 ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Separator, ToolbarToolKind.Settings,
             }),
-            "默认顺序是 鼠标 / 白板 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置");
+            "默认顺序是 鼠标 / 白板 / 图片 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置");
         Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Mouse }, "启动时停在鼠标模式");
 
         // ---------------------------------------------------------- 两支笔
@@ -593,8 +596,12 @@ internal static class Program
         var penIndex = ToolbarTools.IndexOf(firstPen.Id);
         Check(penIndex > 0 && ToolbarTools.Move(firstPen.Id, -1), "能往前挪一格");
         Check(ToolbarTools.IndexOf(firstPen.Id) == penIndex - 1, "挪完位置真的变了");
-        Check(!ToolbarTools.Move(firstPen.Id, -1) || ToolbarTools.IndexOf(firstPen.Id) == 0,
-            "挪到头就不再动");
+
+        // 一路挪到挪不动为止，而不是固定挪两次就断言到 0 ——
+        // 笔前面有几颗固定项会随工具栏增删变（白板、图片都是固定项），
+        // 把次数写死的话，加一颗按钮就会在这里红，而它压根没测错任何东西。
+        while (ToolbarTools.Move(firstPen.Id, -1)) { }
+        Check(ToolbarTools.IndexOf(firstPen.Id) == 0, "挪到头就不再动");
 
         // 删掉当前选中的那一项之后，选中态要落到另一个能画的工具上，而不是悬空。
         ToolbarTools.Select(firstPen.Id);
@@ -602,38 +609,597 @@ internal static class Program
         Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Pen or ToolbarToolKind.Eraser or ToolbarToolKind.Mouse },
             "删掉选中的那一项之后，选中态落到另一个能用的工具上");
 
-        // ---------------------------------------------------------- 设置页那份列表
-        var editor = settings.ToolEditor;
-        Check(editor.RowCount == ToolbarTools.Items.Count, "设置页的工具栏列表行数等于数据项数");
-        // 拿还活着的那把橡皮来验行 —— 上面那一段把两支笔都删掉了，正是为了验"删干净也不炸"。
-        Check(editor.FindRowButton(firstEraser.Id, "use") is not null
-            && editor.FindRowButton(firstEraser.Id, "remove") is not null
-            && editor.FindRowButton(firstEraser.Id, "up") is not null,
-            "每一行都有『用这支』『上移』『删除』");
-        Check(editor.FindRowButton("settings", "remove")?.IsEnabled == false, "固定项的『删除』是灰的");
-        Check(editor.FindRowButton("whiteboard", "remove")?.IsEnabled == false
-            && ToolbarTools.Remove("whiteboard") == false,
+        // ---------------------------------------------------------- 设置页那两页
+        var strip = settings.ToolLayout;
+        var library = settings.ToolLibrary;
+
+        // 这条是"页面只有一条空行、什么都没有"的正面钉子：
+        // FluentTabView 的标签条与正文**只从 TabItems 那个集合取**。
+        // 把 <fluent:FluentTabViewItem> 写成标记里的内容子元素，集合就是空的 ——
+        // 于是标签条渲染成一条空行、正文也空，而**界面上没有任何报错**。
+        // 断言放在这里而不是"页面上看得见东西"，是因为后者要像素，而这条是根因。
+        var settingsHost = settings;
+        settingsHost.GoToPageForProbe(SettingsNavPage.Toolbar);
+        settingsHost.ForceRenderFrame();
+
+        // 组件库必须在**那一排下面**，"从底下拖到上面"是这一页唯一的动作。
+        // 曾经用 FluentTabView 把两者拆成两个页面，于是拖变成了"切过去拿、切过去放" ——
+        // 手势方向被界面结构抹掉了。这一条钉的是"上下"这个事实本身。
+        var stripHost = (FrameworkElement)settings.FindName("ToolbarLayoutStripHost")!;
+        var libraryHost = (FrameworkElement)settings.FindName("ToolbarLibraryTiles")!;
+        Check(stripHost.ActualWidth > 0 && libraryHost.ActualWidth > 0,
+            "那一排与组件库都排了版");
+        Point TopIn(FrameworkElement e) => e.TransformToVisual(settings.FindName("SettingsContentHost") as UIElement)! is var p
+            ? p.Transform(new Point(0, 0)) : default;
+        var stripTop = TopIn(stripHost).Y;
+        var libraryTop = TopIn(libraryHost).Y;
+        Check(libraryTop > stripTop,
+            $"组件库在那一排<b>下面</b>（{stripTop:0} < {libraryTop:0}）—— 拖的方向是往上");
+
+        Check(strip.ChipCount == ToolbarTools.Items.Count, "「工具栏」那一排的项数等于数据项数");
+        Check(strip.ChipIds.SequenceEqual(ToolbarTools.Items.Select(static t => t.Id)),
+            "那一排的次序与数据一致（它就是工具栏此刻的样子）");
+        Check(strip.ChipIds.All(id => strip.FindChip(id) is { ActualWidth: > 0, ActualHeight: > 0 }),
+            "每一项都真的量出了尺寸（元素建了但没排版时 ActualWidth 是 0，看着就是一条空行）");
+        Check(strip.FindChipButton(firstEraser.Id, "remove") is not null, "可删的那一项带一个 ×");
+        Check(strip.FindChipButton("settings", "remove") is null
+            && strip.FindChipButton("whiteboard", "remove") is null,
+            "固定项连 × 都不给（不是按了没反应，是压根没有）");
+        Check(ToolbarTools.Remove("whiteboard") == false,
             "「白板」删不掉：它是那块画布的唯一入口，删了就进不去了");
 
+        // 组件库：元数据表有几条就有几格，每格有图标、名字、描述、一个加号。
+        Check(library.TileCount == ToolbarToolCatalog.Entries.Count && library.TileCount == 9,
+            $"组件库的格数等于元数据表条目数（{library.TileCount} 格）");
+        Check(ToolbarToolCatalog.Entries.All(entry =>
+                library.FindTile(entry.Kind) is { ActualWidth: > 0, ActualHeight: > 0 }),
+            "每一格都排了版、有实际尺寸");
+        Check(ToolbarToolCatalog.Entries.All(entry => library.FindAddButton(entry.Kind) is not null),
+            "每一格右上都有一颗加号（拖是主路，加号是给「我就想再加一个」的人那条路）");
+
+        // 两条添加入口都要通：拖进来落在手指放开的那一格；点加号落在老规矩的位置。
         var countBeforeAdd = ToolbarTools.Items.Count;
-        ((Button)settings.FindName("AddPenToolButton")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        Check(ToolbarTools.Items.Count == countBeforeAdd + 1 && editor.RowCount == countBeforeAdd + 1,
-            "设置页的『加一支笔』真的加了一项，列表也跟着长");
-        Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Pen },
-            "加完顺手选中它（接下来几乎一定要调它的颜色）");
-        Check(editor.FindRowButton(ToolbarTools.SelectedId, "remove") is { IsEnabled: true },
+        settings.ForceRenderFrame();
+        var penTile = library.FindTile(ToolbarToolKind.Pen);
+        var firstChipBefore = strip.ChipIds[0];
+        Check(penTile is not null && strip.ChipCount > 0
+                && DragFrom(strip, penTile, strip.FindChip(firstChipBefore)!, atLeftHalf: true),
+            "从下面的组件库按住一格、拖到上面那一排 —— 手势真的走完了（越过阈值才开始拖）");
+        Check(ToolbarTools.Items.Count == countBeforeAdd + 1
+                && ToolbarTools.IndexOf(ToolbarTools.SelectedId) == 0,
+            $"拖入的新项落在手指放开的那一格并顺手选中"
+            + $"（期望第 0 格，实得第 {ToolbarTools.IndexOf(ToolbarTools.SelectedId)}，"
+            + $"共 {ToolbarTools.Items.Count} 项）");
+        Check(strip.ChipIds.FirstOrDefault() == ToolbarTools.SelectedId,
+            "那一排跟着重建，新项在最前面");
+        Check(strip.FindChipButton(ToolbarTools.SelectedId, "remove") is { IsEnabled: true },
             "新加的那一项能被删掉");
+
+        var countBeforePlus = ToolbarTools.Items.Count;
+        library.FindAddButton(ToolbarToolKind.Eraser)!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(ToolbarTools.Items.Count == countBeforePlus + 1
+            && ToolbarTools.Selected is { Kind: ToolbarToolKind.Eraser },
+            "点那一格的加号也加一项（落在老规矩的位置），并选中它");
+        Check(library.FindAddButton(ToolbarToolKind.Settings) is { IsEnabled: false }
+            && library.FindAddButton(ToolbarToolKind.Mouse) is { IsEnabled: false },
+            "固定项那一格的加号是灰的、也装不了拖动手势（本来就有一枚，拖上来就是第二枚）");
+        var fixedCountBefore = ToolbarTools.Items.Count(static t => t.Kind == ToolbarToolKind.Settings);
+        Check(library.FindTile(ToolbarToolKind.Settings) is { } fixedTile
+                && DragFrom(strip, fixedTile, strip.FindChip(strip.ChipIds[0])!, atLeftHalf: true)
+            && ToolbarTools.Items.Count(static t => t.Kind == ToolbarToolKind.Settings) == fixedCountBefore,
+            "固定项那一格按到底也拖不动（拖动手势压根没装在它身上）");
+
+        // 列表内拖动换序：落点语义是"落在哪一格"，不是"往那边走几格" ——
+        // 后者在拖过头再拖回来时会来回跳，落点与目标反了，顺序永远对不齐。
+        // 两个方向都验：落点判据曾在宿主坐标里算错，而那种错法只往一个方向偏。
+        settings.ForceRenderFrame();
+        var moving = ToolbarTools.Items[0].Id;
+        var source0 = strip.FindChip(moving)!;
+        Check(DragFrom(strip, source0, strip.FindChip(strip.ChipIds[2])!, atLeftHalf: true)
+                && ToolbarTools.IndexOf(moving) == 2,
+            $"拖到第 3 格的<b>左</b>半边 = 插到它前面（落点 {ToolbarTools.IndexOf(moving)}）");
+        settings.ForceRenderFrame();
+        Check(DragFrom(strip, strip.FindChip(moving)!, strip.FindChip(strip.ChipIds[3])!, atLeftHalf: false)
+                && ToolbarTools.IndexOf(moving) == 4,
+            $"拖到第 4 格的<b>右</b>半边 = 插到它后面（落点 {ToolbarTools.IndexOf(moving)}）");
+        settings.ForceRenderFrame();
+        Check(DragFrom(strip, strip.FindChip(moving)!, strip.FindChip(strip.ChipIds[0])!, atLeftHalf: true)
+                && ToolbarTools.IndexOf(moving) == 0,
+            "往回拖到第 1 格左半边，落回最前面（不是只能往后挪）");
+        // 拖过头要**夹到边上**，不是"不挪"：手指拖过头时人期望落在最后一项后面，
+        // 而"越界就当没发生"会让那一下看起来像卡住了。
+        var lastIndex = ToolbarTools.Items.Count - 1;
+        Check(ToolbarTools.MoveTo(moving, 99) && ToolbarTools.IndexOf(moving) == lastIndex,
+            $"拖过头夹到最后一项（落点 {lastIndex}）");
+        Check(!ToolbarTools.MoveTo("nope", 0) && ToolbarTools.IndexOf("nope") < 0,
+            "拖一个不存在的项不动数据");
+        Check(ToolbarTools.MoveTo(moving, 0) && ToolbarTools.IndexOf(moving) == 0,
+            "从末尾落回第 1 格（与上面的夹边是同一条落点语义的两个方向）");
+        ToolbarTools.Load(ToolbarTools.DefaultItems(), "pen.1");
 
         // 空存档也必须恢复门槛项：首次启动没有 preferences.json 时，工具列表不能是空的。
         ToolbarTools.Load([], "");
-        Check(ToolbarTools.Items.Count == 8
+        Check(ToolbarTools.Items.Count == ToolbarTools.DefaultItems().Count
             && ToolbarTools.Items.Any(static tool => tool.Kind == ToolbarToolKind.Settings)
             && toolbar.FindToolControl("settings") is not null,
             "空工具栏存档也会恢复默认项并渲染设置按钮");
 
-        // 收尾：把工具栏还原成默认八项，后面的检查与存档往返都按默认形状走。
+        // 收尾：把工具栏还原成默认形状，后面的检查与存档往返都按默认走。
+        // 数量对着 DefaultItems() 取而不是写死：工具栏加了固定项（图片）就会在这儿红一次，
+        // 而它压根没测错任何东西 —— 断言要的是"回到默认"，不是"默认恰好是几项"。
+        var defaultCount = ToolbarTools.DefaultItems().Count;
         ToolbarTools.Load(ToolbarTools.DefaultItems(), "pen.1");
-        Check(ToolbarTools.Items.Count == 8 && editor.RowCount == 8, "收尾：列表回到默认八项");
+        Check(ToolbarTools.Items.Count == defaultCount && strip.ChipCount == defaultCount,
+            $"收尾：那一排回到默认的 {defaultCount} 项");
+    }
+
+    /// <summary>
+    /// 模拟一次<b>真的手势</b>：在 <paramref name="source"/> 上按下、走一段、
+    /// 在目标那一格的指定半边抬手。回读"越过阈值之前有没有被误判成拖动"。
+    /// <para>
+    /// 走的是 <c>PreviewMouseLeftButtonDown / Move / Up</c> 三件 —— 与实现同一批事件。
+    /// 这一版<b>不走 <c>DragDrop.DoDragDrop</c></b>：那玩意在鼠标按下时就进一个 Win32 嵌套
+    /// 消息循环，测试里既没法模拟也不该依赖，而且它让"点一下"永远变成"拖一下"。
+    /// </para>
+    /// <para>
+    /// <b>坐标一律是相对 <paramref name="source"/> 的</b>（与 <c>MouseEventArgs.Position</c> 的
+    /// 文档一致）。落点那条路是<b>真命中测试</b>，所以指针必须真的扫过目标那一格，
+    /// 不能直接报一个落点 —— 否则验的就不是实现里那条路了。
+    /// </para>
+    /// </summary>
+    /// <summary>
+    /// 发一个指针事件。<b>参数类型按事件名一起挑</b>，不能只按"是不是 Move"挑 ——
+    /// <c>SendPointer</c> 那份只认非 Preview 的三个名字，于是 <c>PreviewPointerUpEvent</c>
+    /// 会落到它的 else 分支、造出一个 <c>PointerDownEventArgs</c>，
+    /// 而实现里的 <c>e is not PointerUpEventArgs</c> 一挡，抬手那一步就静默地不发生 ——
+    /// 症状是"能拖动、能高亮，松手什么也不落"。
+    /// </summary>
+    private static PointerEventArgs SendPreviewPointer(UIElement target, RoutedEvent routed, Point position)
+    {
+        var point = new PointerPoint(90, position, PointerDeviceType.Mouse, true, new PointerPointProperties(), 1_000);
+        PointerEventArgs args =
+            routed == UIElement.PreviewPointerMoveEvent || routed == UIElement.PointerMoveEvent
+                ? new PointerMoveEventArgs(point, ModifierKeys.None, 1_000)
+                : routed == UIElement.PreviewPointerUpEvent || routed == UIElement.PointerUpEvent
+                    ? new PointerUpEventArgs(point, ModifierKeys.None, 1_000)
+                    : new PointerDownEventArgs(point, ModifierKeys.None, 1_000);
+        args.RoutedEvent = routed;
+        target.RaiseEvent(args);
+        return args;
+    }
+
+    /// <summary>
+    /// 模拟一次<b>真的手势</b>：在 <paramref name="source"/> 上按下、走一段、
+    /// 在目标那一格的指定半边抬手。回读"越过阈值之前有没有被误判成拖动"。
+    /// <para>
+    /// 走的是 <b>指针事件</b>（<c>PreviewPointerDown/Move/Up</c>）—— 与实现同一批，
+    /// 鼠标 / 触摸 / 笔同一条路（Class Island 那份行为也是 PointerPressed/Moved/Released）。
+    /// </para>
+    /// <para>
+    /// <b>位置喂的是"相对 source 的坐标"</b>，与实现读 <c>e.Pointer.Position</c> 的约定一致
+    /// （那个属性是相对事件被路由到的那一个元素的）。两边约定不同的话，阈值算的是别的距离，
+    /// 而症状是"怎么拖都不动"。
+    /// </para>
+    /// </summary>
+    private static bool DragFrom(ToolbarLayoutStrip strip, FrameworkElement source, FrameworkElement target, bool atLeftHalf)
+    {
+        var mid = source.ActualHeight / 2;
+        // 终点是"目标那一格里那一点"换算到 **source** 的坐标 ——
+        // 必须从 target 换算：<c>source.TranslatePoint(pt, source)</c> 是恒等变换，
+        // 那样拿到的就是"源左上角附近"，落点会落在组件库里而不是那一排上。
+        var endInSource = target.TranslatePoint(
+            atLeftHalf ? new Point(1, target.ActualHeight / 2)
+                       : new Point(Math.Max(1, target.ActualWidth - 1), target.ActualHeight / 2),
+            source);
+
+        SendPreviewPointer(source, UIElement.PreviewPointerDownEvent, new Point(2, mid));
+
+        // 阈值之前不该开始拖动 —— 这条是"点一下仍然是选中"的前提。
+        var sign = endInSource.X >= 2 ? 1 : -1;
+        SendPreviewPointer(source, UIElement.PreviewPointerMoveEvent,
+            new Point(2 + sign * (InPlaceDragGesture.ThresholdDip - 0.5), mid));
+        var startedTooEarly = strip.IsDragging;
+
+        // 一次跳到终点不够：手势至少要有"按下 → 越过阈值 → 到达"三帧。
+        SendPreviewPointer(source, UIElement.PreviewPointerMoveEvent,
+            new Point((2 + endInSource.X) / 2, (mid + endInSource.Y) / 2));
+        SendPreviewPointer(source, UIElement.PreviewPointerMoveEvent, endInSource);
+        SendPreviewPointer(source, UIElement.PreviewPointerUpEvent, endInSource);
+
+        return !startedTooEarly;
+    }
+
+    /// <summary>
+    /// 图片批注：<b>打开一张图 → 图真的垫在墨迹底下 → 跟着视口动 → 转 90° 图与笔迹一起转</b>。
+    /// <para>
+    /// 这一组不读真实文件：<c>OpenImage</c> 收的是一张已解码的位图，而"读文件"那半边
+    /// （扩展名、编码、损坏文件）由解码器自己负责，混进来只会多一份与被测行为无关的失败面。
+    /// </para>
+    /// </summary>
+    private static void CheckImageCanvas()
+    {
+        var toolbar = new AnnotationToolbarWindow
+        {
+            Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false,
+        };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        var imageButton = toolbar.FindToolControl("image") as Button;
+        Check(imageButton is not null, "工具栏上有『图片』入口");
+        imageButton?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        toolbar.ForceRenderFrame();
+
+        var viewer = toolbar.ImageViewer;
+        Check(viewer is not null && toolbar.ImageViewerPresented,
+            "点『图片』进的是图片批注这一块，而且它显形了");
+        if (viewer is null) return;
+
+        // 「工具栏是图片窗口的一个控件」这句话的全部含义就是这一条：
+        // 批注栏的视觉在**图片窗口那棵视觉树里**，而不是两个各画各的窗口挨在一起。
+        // 后者看着能对上一会儿，但图片窗口一改尺寸它不知道、拖手柄一动两者用两套坐标算位移 ——
+        // 错位永远修不掉，而且没有一条断言会红。
+        Check(toolbar.IsRehosted && viewer.HostsToolbar,
+            "窗口模式下批注栏整棵搬进了图片窗口（是一个控件，不是另一个窗口）");
+        // 用 IsShown（只听 Shown/Hiding）而不是 IsVisible：后者在"搬进去又搬回来"这一趟里
+        // 两次都不可靠 —— 窗口已经 Hide 了它仍报 true。
+        Check(!toolbar.IsShown, "搬进去之后批注栏自己那个窗口收起来了（不 Show 就是同一份视觉画两遍）");
+
+        // ══ 用户报的那个问题，原样复现 ══
+        // 「窗口最大化的时候，我在工具栏上切换工具，这个时候就会退出最大化。」
+        //
+        // 根因不在"摆错了"，在"摆得太勤"：切工具每一次都走一遍 PresentImageViewer，
+        // 而 ApplyOpenMode 无条件 WindowState = Normal + 重设 Left/Top。
+        // 给最大化窗口设 Left/Top 本身就会把它打回 Normal（外壳按还原尺寸摆）。
+        //
+        // 这里量的是**用户当下的决定**：他摆的形状不该被"顺手复位"。
+        viewer.WindowState = WindowState.Maximized;
+        viewer.ForceRenderFrame();
+        // 前置：最大化这个状态在这一套运行时里真的设得上。否则下面那三条是空转的绿。
+        Check(viewer.WindowState == WindowState.Maximized,
+            $"（前置）窗口能进最大化状态（WindowState={viewer.WindowState}）");
+
+        // 切三样：笔 → 橡皮 → 选择。每一次都真的走一遍那条同步路径。
+        foreach (var toolId in new[] { "pen", "eraser", "mouse" })
+        {
+            var tool = ToolbarTools.Items.FirstOrDefault(item => item.Id == toolId);
+            if (tool is null) continue;
+            ToolbarTools.Select(toolId);
+            toolbar.ForceRenderFrame();
+            viewer.ForceRenderFrame();
+            Check(viewer.WindowState == WindowState.Maximized,
+                $"最大化状态下切到「{tool.Name}」，仍然是最大化（WindowState={viewer.WindowState}）");
+        }
+
+        // 位置与大小同样不该被动 —— 用户自己拖的形状是他的决定。
+        var keptLeft = viewer.Left;
+        var keptTop = viewer.Top;
+        ToolbarTools.Select("pen");
+        toolbar.ForceRenderFrame();
+        viewer.ForceRenderFrame();
+        Check(Math.Abs(viewer.Left - keptLeft) < 0.5 && Math.Abs(viewer.Top - keptTop) < 0.5,
+            $"切工具不动窗口位置（{keptLeft:0.##},{keptTop:0.##} → {viewer.Left:0.##},{viewer.Top:0.##}）");
+        viewer.WindowState = WindowState.Normal;
+        viewer.ForceRenderFrame();
+
+        // 反过来：设置里真的换了档，下一次进画布必须摆出新的形状（不能因为"要少碰"而丢掉这个功能）。
+        var modeBefore = AppPreferences.Current.ImageOpenMode;
+        AppPreferences.Update(AppPreferences.Current with { ImageOpenMode = ImageOpenMode.FullScreen });
+        viewer.ApplyOpenMode(AppPreferences.Current.ImageOpenMode);
+        viewer.ForceRenderFrame();
+        Check(viewer.WindowState == WindowState.Maximized && viewer.ResizeMode == ResizeMode.NoResize,
+            "设置里换档之后下一次进画布按新档摆（这一档是全屏）");
+        AppPreferences.Update(AppPreferences.Current with { ImageOpenMode = modeBefore });
+        viewer.ApplyOpenMode(AppPreferences.Current.ImageOpenMode);
+        viewer.ForceRenderFrame();
+        Check(viewer.WindowState == WindowState.Normal && viewer.ResizeMode == ResizeMode.CanResize,
+            "换回窗口模式也摆回去了（换档是双向都通的）");
+
+        // ══ 全屏必须是"真全屏"，不是普通的最大化 ══
+        // 「全屏下的图片查看器和白板窗口是一样的，是一个全屏覆盖窗口，包括任务栏区域也要覆盖，
+        //   它是一个全屏。而不是普通的最大化。」
+        //
+        // 差别全在**有没有窗框**：带窗框的窗口最大化只到工作区，底下露出任务栏、顶上留一条边。
+        // 所以这条钉的是**形状那一组属性**，不是 WindowState —— 只钉 WindowState 的话，
+        // 一个"最大化的带框窗口"照样全绿。
+        AppPreferences.Update(AppPreferences.Current with { ImageOpenMode = ImageOpenMode.FullScreen });
+        viewer.ApplyOpenMode(ImageOpenMode.FullScreen);
+        viewer.ForceRenderFrame();
+        Check(viewer.WindowStyle == WindowStyle.None
+                && viewer.IsShowTitleBar == false
+                && viewer.IsShowMaximizeButton == false
+                && viewer.IsShowCloseButton == false
+                && viewer.HasSystemMenu == false
+                && viewer.ShowInTaskbar == false
+                && viewer.WindowState == WindowState.Maximized,
+            "全屏那一档的形状与白板一致：无窗框、无标题栏、无系统菜单、不在任务栏、整屏最大化"
+            + $"（style={viewer.WindowStyle} title={viewer.IsShowTitleBar} menu={viewer.HasSystemMenu}"
+            + $" taskbar={viewer.ShowInTaskbar} state={viewer.WindowState}）");
+        AppPreferences.Update(AppPreferences.Current with { ImageOpenMode = modeBefore });
+        viewer.ApplyOpenMode(modeBefore);
+        viewer.ForceRenderFrame();
+        Check(viewer.WindowStyle == WindowStyle.SingleBorderWindow
+                && viewer.IsShowTitleBar
+                && viewer.HasSystemMenu
+                && viewer.ShowInTaskbar,
+            "换回窗口模式把窗框那一套还回来（能拖窗口、能用系统菜单关掉它）");
+
+        // ══ 底栏右边的缩放控件 ══
+        var pageStrip = (FrameworkElement)viewer.FindName("PageControlHost")!;
+        var zoomBar = viewer.ZoomControlElement!;
+        Point At1(FrameworkElement e) => e.TransformToVisual(viewer)!.Transform(new Point(0, 0));
+        var pageX = At1(pageStrip).X;
+        var zoomX = At1(zoomBar).X;
+        Check(zoomBar.ActualWidth > 0 && zoomX > pageX + pageStrip.ActualWidth,
+            $"缩放控件在底栏<b>右边</b>（页码右边 {pageX + pageStrip.ActualWidth:0}，缩放左边 {zoomX:0}）");
+
+        // 次序是用户定的：左加号 / 中百分数 / 右减号。
+        var zoomIn = (FrameworkElement)viewer.FindName("ZoomInButton")!;
+        var zoomPct = (FrameworkElement)viewer.FindName("ZoomPercentButton")!;
+        var zoomOut = (FrameworkElement)viewer.FindName("ZoomOutButton")!;
+        var inX = At1(zoomIn).X;
+        var pctX = At1(zoomPct).X;
+        var outX = At1(zoomOut).X;
+        Check(zoomBar.ActualWidth > 0 && inX < pctX && pctX < outX,
+            $"缩放控件内次序是 左加号 / 中百分数 / 右减号（{inX:0} < {pctX:0} < {outX:0}）");
+
+        // 加号放大、减号缩小，百分数跟着变。
+        viewer.ZoomTo(1.0);
+        viewer.ForceRenderFrame();
+        var basePercent = viewer.ZoomPercent;
+        ((Button)zoomIn).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        viewer.ForceRenderFrame();
+        var afterIn = viewer.ZoomPercent;
+        Check(afterIn > basePercent, $"加号放大（{basePercent}% → {afterIn}%）");
+        ((Button)zoomOut).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        viewer.ForceRenderFrame();
+        var afterOut = viewer.ZoomPercent;
+        Check(afterOut < afterIn, $"减号缩小（{afterIn}% → {afterOut}%）");
+        var percentText = (TextBlock)viewer.FindName("ZoomPercentText")!;
+        Check(percentText.Text == $"{viewer.ZoomPercent}%",
+            $"底栏那个百分数与真实缩放一致（写着 {percentText.Text}，实得 {viewer.ZoomPercent}%）");
+
+        // 点百分数弹二级菜单，里面那条滑块是**无级**的。
+        ((Button)zoomPct).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        viewer.ForceRenderFrame();
+        var menu = viewer.ZoomMenu;
+        Check(menu is not null && viewer.IsZoomMenuOpen, "点百分数弹出缩放的二级菜单");
+        Check(menu is { IsContinuous: true }, "菜单里那条滑块是无级的（不吸到刻度上）");
+        Check(menu is { SliderPercent: > 0 }, "菜单打开时带着画布当前的倍数");
+        Check(menu is { PercentRange.Min: 0, PercentRange.Max: 300 },
+            "滑块范围是 0~300%（用户要的）");
+        Check(menu is not null && menu.ActualWidth > 0 && menu.ActualWidth <= 240 && menu.ActualHeight <= 60,
+            $"菜单只有滑块那么长，不是第二套设置页（{menu?.ActualWidth:0}×{menu?.ActualHeight:0}）");
+
+        if (menu is not null)
+        {
+            menu.SetSliderFromProbe(137);
+            viewer.ForceRenderFrame();
+            Check(Math.Abs(viewer.ZoomScale - 1.37) < 0.02,
+                $"把滑块拖到 137 就真的缩到 137%（实得 {viewer.ZoomPercent}%）");
+            Check(menu.ValueBoxText == $"{viewer.ZoomPercent}%",
+                $"数字框与滑块说的是同一个数（{menu.ValueBoxText}）");
+            Check(((TextBlock)viewer.FindName("ZoomPercentText")!).Text == $"{viewer.ZoomPercent}%",
+                "拖完滑块底栏那个百分数也跟着变（两处是同一个数）");
+            Check(menu.Top > 0, $"菜单摆在底栏那条上面而不是屏外（Top={menu.Top:0}）");
+        }
+        ((Button)zoomPct).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        viewer.ForceRenderFrame();
+        Check(!viewer.IsZoomMenuOpen, "再点一次百分数收起菜单（同一个钮开关它）");
+
+        // ══ 用户报的那个：全屏下菜单跑到左上角 ══
+        // 「全屏模式下点击缩放数它还是出现在左上角，而不是在右下控件上方。」
+        //
+        // 根因是拿 **窗口的 Left/Top** 当屏幕坐标：最大化窗口的 Left/Top 报的是**还原位置**，
+        // 不是它在屏幕上的位置。窗口模式下那两者恰好相等，所以上一版的断言全绿；
+        // 一进全屏就整体偏出去。判据必须走 PointToScreen。
+        AppPreferences.Update(AppPreferences.Current with { ImageOpenMode = ImageOpenMode.FullScreen });
+        viewer.ApplyOpenMode(ImageOpenMode.FullScreen);
+        viewer.ForceRenderFrame();
+        ((Button)zoomPct).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        viewer.ForceRenderFrame();
+
+        var host = (FrameworkElement)viewer.ZoomControlElement!;
+        // 屏幕坐标是**物理像素**（PointToScreen 内部乘过 DpiScale），而 Window.Left/Top 是 **DIP**。
+        // 断言两边必须先归一到同一个单位 —— 不归一就是拿 1.75 倍的差去比，
+        // 读数看着"差很多"，而其实两边说的都是同一处。
+        var hostOrigin = host.PointToScreen(new Point(0, 0));
+        var hostProbe = host.PointToScreen(new Point(100, 0));
+        var dpr = Math.Abs(hostProbe.X - hostOrigin.X) / 100.0;
+        if (dpr is not (> 0.25 and < 8)) dpr = 1.0;
+        Point Dip(Point screen) => new(screen.X / dpr, screen.Y / dpr);
+        var hostTopRight = Dip(host.PointToScreen(new Point(host.ActualWidth, 0)));
+        var hostBottomRight = Dip(host.PointToScreen(new Point(host.ActualWidth, host.ActualHeight)));
+
+        if (menu is not null && menu.IsVisible)
+        {
+            var work = Jalium.UI.SystemParameters.WorkArea;
+            var menuWidth = menu.ActualWidth;
+            var menuHeight = menu.ActualHeight;
+            // 在那排控件的**正上方**：下沿离控件上沿 6 DIP。
+            var wantTop = hostBottomRight.Y - menuHeight - 6;
+            Check(Math.Abs(menu.Top - wantTop) < 3,
+                $"全屏下菜单在那排控件<b>正上方</b>（期望 Top≈{wantTop:0} DIP，实得 {menu.Top:0}）");
+            // 右缘与控件右缘对齐。
+            Check(Math.Abs((menu.Left + menuWidth) - hostTopRight.X) < 3,
+                $"全屏下菜单右缘与控件右缘对齐（期望 ≈{hostTopRight.X:0} DIP，实得 {menu.Left + menuWidth:0}）");
+            // 明确钉住"不在左上角"：它落在屏幕上半部分就是错的。
+            Check(menu.Top > work.Height / 2,
+                $"全屏下菜单落在屏幕下半部分，不在左上角（Top={menu.Top:0}，工作区高 {work.Height:0}）");
+        }
+        else
+        {
+            Check(false, "全屏下点百分数弹出了菜单");
+        }
+
+        AppPreferences.Update(AppPreferences.Current with { ImageOpenMode = modeBefore });
+        viewer.ApplyOpenMode(modeBefore);
+        viewer.ForceRenderFrame();
+        viewer.ZoomTo(1.0);
+        viewer.ForceRenderFrame();
+
+        // 退路只有一个，必须验它真的能走通：批注栏是 app.MainWindow，
+        // 它留在一个看不见的窗口里 = 整条工具栏跟着图片窗口一起消失。
+        // 下面这些图片批注的行为都在"已搬进图片窗口"的状态里测，所以先搬回去、再搬回来。
+        toolbar.RestoreFromHost();
+        toolbar.ForceRenderFrame();
+        Check(!toolbar.IsRehosted && !viewer.HostsToolbar && toolbar.OwnContentIsBack,
+            "摘出来之后批注栏回到独立窗口，图片窗口那一格空了");
+
+        toolbar.RehostInto(viewer.ToolbarHost, viewer);
+        toolbar.ForceRenderFrame();
+        // 排版发生在**图片窗口**那棵树上，只给工具栏推帧不排它 —— 量出来会是宽度 0。
+        viewer.ForceRenderFrame();
+        Check(toolbar.IsRehosted && viewer.HostsToolbar, "可以再搬回去（搬进搬出不是一次性的）");
+        // 这里<b>不</b>断言 toolbar.IsVisible：本项目的规矩是窗口可见性只听 Shown/Hiding，
+        // 读 Window.Visibility 判"显没显形"本来就不可靠。真要盯的是"谁持有那份视觉"。
+        Check(!toolbar.OwnContentIsBack && viewer.HostsToolbar,
+            "搬进去之后持有者是图片窗口那一格，批注栏那个窗口不持有内容（不会同一份视觉画两遍）");
+
+        // 页码与批注栏并排、离窗口边有边距。用户看到的原话是"位置不对，
+        // 应当和页码并排，离窗口要有一点边距" —— 这两条都要钉住。
+        // 量的办法是 TransformToVisual（相对同一个参照系）：这个运行时没暴露 ArrangeBounds，
+        // 而"两个控件在同一个父里的相对位置"正是这里要问的东西。
+        var pageBar = (Grid)viewer.FindName("PageControlHost")!;
+        var slot = viewer.ToolbarHost;
+        Point At(FrameworkElement child) => child.TransformToVisual(viewer)!.Transform(new Point(0, 0));
+        var pageAt = At(pageBar);
+        var slotAt = At(slot);
+        Check(pageAt.X + pageBar.ActualWidth <= slotAt.X + 0.5 && slot.ActualWidth > 0,
+            $"批注栏与页码并排，不叠在它上面（页码右边 {pageAt.X + pageBar.ActualWidth:F0}，批注栏左边 {slotAt.X:F0}）");
+
+        var windowWidth = viewer.ActualWidth;
+        var rightGap = windowWidth - (slotAt.X + slot.ActualWidth);
+        Check(slotAt.X > 0 && rightGap > 0,
+            $"整条底栏离窗口左右两边都有边距（左边 {slotAt.X:F0}，右边 {rightGap:F0}，窗口宽 {windowWidth:F0}）");
+
+        Check(viewer.HostedImageVisible == false,
+            "还没选文件时底下不放任何东西（不是一张占位图）");
+
+        // 一张 400×300 的图。宽高不等，才测得出"转 90° 之后宽高真的对调"。
+        var bitmap = MakeTestBitmap(400, 300);
+        Check(viewer.OpenImage(bitmap, @"C:\fake\one.png"), "一张图能开成页");
+        toolbar.ForceRenderFrame();
+
+        Check(viewer.PageCount == 2 && viewer.ActivePageIndex == 1,
+            "多文件每文件一页：开一张就多一页并激活它");
+        Check(viewer.HostedImageVisible, $"图铺出来了（{viewer.HostedImageState}）");
+        Check(viewer.ImageLayerIndexInHost == 0,
+            "图垫在墨迹面底下（宿主索引 0）—— 反了会变成图盖住笔迹");
+        var size = viewer.HostedImageSize;
+        Check(Math.Abs(size.Width - 400) < 0.5 && Math.Abs(size.Height - 300) < 0.5,
+            $"宿主里那张按图自己的像素尺寸铺（{size.Width}x{size.Height}）");
+
+        // 这一条是"标题栏说已打开、窗口却一片黑"那个症状的正面钉子：
+        // 只查"元素建了没、可见没"会全绿，而真正决定有没有画出来的是
+        // <b>那个源是不是带 native 后端的 BitmapImage</b>。喂一个 BitmapFrame 进来，
+        // 元素照样存在、照样可见、尺寸照样对，而 GPU 路径拿不到东西 —— 一个字都不画。
+        var hosted = viewer.HostedImageSource;
+        Check(hosted is BitmapImage { NativeHandle: not 0 } || hosted is BitmapImage { Width: > 0 },
+            $"宿主里那张的源是带后端的 BitmapImage 而不是 BitmapFrame（{hosted?.GetType().Name ?? "null"}）");
+
+        // 图必须跟着视口动：缩放之后宿主那张的变换要跟着变，否则它会钉在屏幕上不动。
+        var transformBefore = viewer.HostedImageTransform;
+        viewer.Surface.ZoomAt(new Point(400, 300), 2, 0.2, 8);
+        toolbar.ForceRenderFrame();
+        var transformAfter = viewer.HostedImageTransform;
+        Check(transformAfter is not null && transformBefore is not null
+            && transformAfter != transformBefore,
+            "视口缩放之后图跟着重定位（不会钉在屏幕上不动）");
+
+        // 转 90°：图与笔迹一起。先落一笔，这样"笔迹跟着转"才有东西可查。
+        viewer.Surface.Document.Clear();
+        CommitStroke(viewer.Surface, 100, 80);
+        var before = viewer.Surface.Document.Strokes[0].Bounds;
+        var canUndoBefore = viewer.Surface.History.CanUndo;
+        viewer.RotateActivePage(1);
+        toolbar.ForceRenderFrame();
+
+        var rotated = viewer.HostedImageSize;
+        Check(Math.Abs(rotated.Width - 300) < 0.5 && Math.Abs(rotated.Height - 400) < 0.5,
+            $"转 90° 之后页面宽高对调（{rotated.Width}x{rotated.Height}）");
+
+        var after = viewer.Surface.Document.Strokes.Count > 0
+            ? viewer.Surface.Document.Strokes[0].Bounds
+            : default;
+        Check(after.Width > 0 && after.Height > 0
+            && Math.Abs(after.Width - before.Height) < 1.0
+            && Math.Abs(after.Height - before.Width) < 1.0,
+            $"笔迹跟着图一起转了（原来 {before.Width:0}x{before.Height:0} → 现在 {after.Width:0}x{after.Height:0}）");
+        Check(viewer.Surface.Document.Selection.IsEmpty,
+            "转完选区收干净了（不留下一个全篇选区给下一次手势）");
+        Check(!canUndoBefore || viewer.Surface.History.CanUndo,
+            "一次旋转是一步可撤销的变换（不是撤不掉的）");
+
+        ToolbarTools.Select("mouse");
+        toolbar.ForceRenderFrame();
+
+        // ══ 用户报的那个严重问题，原样复现 ══
+        // 「工具栏进了图片窗口以后就出不来了。我点白板按钮，在图片窗口内点白板按钮，
+        //   白板内没有任何东西，白板内就没有工具栏窗口了。关闭这个图片窗口，
+        //   那么这个工具栏窗口也就跟着退出了。」
+        //
+        // 那不是一个漏调 RestoreFromHost 的 bug，是**位置被事件推动**造成的：
+        // 「搬进去」挂在 PresentImageViewer 上，「搬回来」散在几个分支里，
+        // 于是走白板那条分支时没有任何人负责搬。它又是 app.MainWindow，
+        // 于是"看不见"进一步变成"关掉就没了"。
+        //
+        // 现在"该待在哪儿"只有 ApplyToolbarHosting 一处算，幂等，与谁触发的无关。
+        Check(toolbar.IsRehosted && viewer.HostsToolbar,
+            "（前置）此刻批注栏在图片窗口里，白板按钮就点在那上面");
+
+        // 点的是**那颗按钮**（白板是 Click → ToggleCanvasScene，不走 ToolbarTools.Select），
+        // 而且是从图片窗口内部点它 —— 与用户报的路径一致。
+        var whiteboardButton = (Button)toolbar.FindToolControl("whiteboard")!;
+        whiteboardButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        toolbar.ForceRenderFrame();
+        viewer.ForceRenderFrame();
+
+        Check(CanvasSceneState.Active == CanvasScene.Whiteboard,
+            "在图片窗口里点白板，切到了白板这一块");
+        Check(!toolbar.IsRehosted && !viewer.HostsToolbar,
+            "切到白板之后批注栏**自己回来了**（它不会被留在已经隐藏的图片窗口里）");
+        Check(toolbar.OwnContentIsBack && toolbar.IsShown,
+            "批注栏回到独立窗口且可见 —— 白板上要能看见它");
+
+        // 再点一次图片按钮切回去，确认反向也通，而不是"只能出来一次"。
+        var imageButtonAgain = (Button)toolbar.FindToolControl("image")!;
+        imageButtonAgain.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        toolbar.ForceRenderFrame();
+        viewer.ForceRenderFrame();
+        Check(CanvasSceneState.Active == CanvasScene.ImageCanvas && toolbar.IsRehosted && viewer.HostsToolbar,
+            "切回图片之后批注栏又搬进去（来回都通，不是一次性的）");
+
+        // 场景要复原：这一组结束时停在 ImageCanvas，而后面那些检查（场景隔离的笔色、
+        // 画布模式那一组）都以"眼前是屏幕批注"为前提。不复原的话红的是它们，报错点却在这里。
+        CanvasSceneState.Active = CanvasScene.ScreenAnnotation;
+        toolbar.ForceRenderFrame();
+        Check(!toolbar.IsRehosted && toolbar.OwnContentIsBack,
+            "离开图片模式之后批注栏留在独立窗口上（这条状态是算出来的，不靠谁记得调）");
+        CloseWindow(toolbar);
+    }
+
+    /// <summary>
+    /// 造一张纯色测试位图。
+    /// <para>
+    /// 用 <c>BitmapImage.FromPixels</c> 而不是 <c>BitmapSource.Create</c>：<c>Image</c> 的解码与 GPU
+    /// 上传只认 <c>BitmapImage</c>（<c>RequestBitmapDecode</c> 第一句就 <c>is not BitmapImage</c> 就返回），
+    /// 拿别的那种喂进去<b>不报错、只是什么都不画</b>。这条注释本身就是那个坑的记录。
+    /// </para>
+    /// </summary>
+    private static BitmapImage MakeTestBitmap(int width, int height)
+    {
+        var pixels = new byte[width * height * 4];
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = 0x40;
+            pixels[i + 1] = 0x80;
+            pixels[i + 2] = 0xC0;
+            pixels[i + 3] = 0xFF;
+        }
+
+        return BitmapImage.FromPixels(pixels, width, height);
     }
 
     private static void CheckScenePenColors()

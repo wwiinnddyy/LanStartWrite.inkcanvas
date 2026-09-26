@@ -1,0 +1,141 @@
+<Window xmlns="http://schemas.jalium.ui/2024"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LanStartWrite.Inkcanvas.ImageViewerWindow"
+        Title="图片批注"
+        Width="960" Height="720" MinWidth="480" MinHeight="360"
+        WindowStartupLocation="Manual"
+        ResizeMode="CanResize"
+        WindowStyle="SingleBorderWindow"
+        ShowInTaskbar="True"
+        AllowsTransparency="False"
+        SystemBackdrop="None">
+
+    <!--
+      与白板同一套共用部分（见 PagedCanvasWindow），所以这几个命名元素是它点名要的那几个。
+      形状上只差两处：
+        · 白板是 WindowState=Maximized + ResizeMode=NoResize，这一块是<b>可缩放的普通窗口</b> ——
+          "窗口 / 全屏两种打开方式"里的那两种在这里就是同一个窗口的两种尺寸。
+        · 白板隐藏了标题栏与系统菜单（它盖着整个桌面）；这一块留着，
+          因为用户要能拖窗口、能用系统菜单关掉它，而停靠那套动画也要有一个能拖的窗口。
+      那张图不在标记里声明：它由 code-behind 按世界坐标铺在墨迹面<b>底下</b>（理由见
+      ImageViewerWindow.ApplyPageBackdrops）。AGENTS 的规矩是 .jalxaml 里不出现 Dusk 的类型名。
+    -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="InkHost" Grid.Row="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+
+        <!--
+          底栏：左边页码与批注栏并排，**右边缩放控件**，整条离窗口边 12 DIP。
+          批注栏在窗口模式下整棵搬进 ToolbarHostGrid（见 AnnotationToolbarWindow.RehostInto），
+          所以它在图片窗口里是**一个控件**，不是另一个窗口。
+          全屏模式下批注栏那一格是空的：批注栏仍是自己那个独立窗口浮在图上面。
+        -->
+        <Grid Grid.Row="1" Margin="12,0,12,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Bottom">
+
+                <Grid x:Name="PageControlHost" VerticalAlignment="Bottom">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0"
+                            Height="56"
+                            Background="{StaticResource ToolbarSurfaceBrush}"
+                            CornerRadius="{StaticResource OverlayCornerRadius}"
+                            ClipToBounds="True"
+                            Padding="4,7">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="56" />
+                                <ColumnDefinition Width="40" />
+                            </Grid.ColumnDefinitions>
+
+                            <Button x:Name="PreviousPageButton"
+                                    Grid.Column="0"
+                                    Style="{StaticResource ToolActionButtonStyle}">
+                                <FontIcon Glyph="&#xE76B;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                            </Button>
+                            <TextBlock x:Name="PageNumberText"
+                                       Grid.Column="1"
+                                       Text="0 / 0"
+                                       TextAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <Button x:Name="NextPageButton"
+                                    Grid.Column="2"
+                                    Style="{StaticResource ToolActionButtonStyle}">
+                                <FontIcon Glyph="&#xE76C;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <!-- 「打开文件」那一步，不是「新建空白页」：图标也据此换成 U+E8E5 OpenFile（实测 ink=220）。 -->
+                    <Border Grid.Column="1"
+                            Width="40"
+                            Height="56"
+                            Margin="6,0,0,0"
+                            Background="{StaticResource ToolbarSurfaceBrush}"
+                            CornerRadius="{StaticResource OverlayCornerRadius}"
+                            ClipToBounds="True"
+                            Padding="0,7">
+                        <Button x:Name="AddPageButton" Style="{StaticResource ToolActionButtonStyle}">
+                            <FontIcon Glyph="&#xE8E5;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                        </Button>
+                    </Border>
+                </Grid>
+
+                <Grid x:Name="ToolbarHostGrid" Margin="12,0,0,0" VerticalAlignment="Bottom" />
+            </StackPanel>
+
+            <!--
+              缩放控件：**左边加号 / 中间放大系数 / 右边减号**（用户定的次序）。
+              与页码那一块同一副样子（同一张 ToolbarSurfaceBrush 实体面、同样圆角），
+              因为它们在同一条底栏上、看着是同一族控件。
+              中间那个系数是**可点的**：点了弹二级菜单，里面是一条无级滑块。
+            -->
+            <Grid x:Name="ZoomControlHost" Grid.Column="2" VerticalAlignment="Bottom">
+                <Border Background="{StaticResource ToolbarSurfaceBrush}"
+                        CornerRadius="{StaticResource OverlayCornerRadius}"
+                        ClipToBounds="True"
+                        Padding="4,7">
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="ZoomInButton" Style="{StaticResource ToolActionButtonStyle}">
+                            <FontIcon Glyph="&#xE710;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                        </Button>
+                        <!--
+                          系数那颗**显式**给宽度与字号，不靠 Button 的默认内容呈现器 ——
+                          默认呈现器会按内容（这里是 "100%"）撑出一大块，
+                          于是整条缩放控件在底栏里显得又宽又高。
+                        -->
+                        <Button x:Name="ZoomPercentButton"
+                                MinWidth="56"
+                                Margin="2,0"
+                                Padding="4,0"
+                                VerticalAlignment="Center"
+                                HorizontalContentAlignment="Center"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                ToolTip="点击可无级调节缩放">
+                            <TextBlock x:Name="ZoomPercentText" Text="100%" FontSize="12" />
+                        </Button>
+                        <Button x:Name="ZoomOutButton" Style="{StaticResource ToolActionButtonStyle}">
+                            <FontIcon Glyph="&#xE738;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                        </Button>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

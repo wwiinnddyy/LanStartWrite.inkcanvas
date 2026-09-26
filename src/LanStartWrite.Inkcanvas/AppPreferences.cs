@@ -8,6 +8,23 @@ namespace LanStartWrite.Inkcanvas;
 internal enum AppTheme { Light, Dark, System }
 
 /// <summary>
+/// 打开一张图时，图片批注那块<b>以什么形状出现</b>。
+/// <para>
+/// 两种都要：窗口适合"边看边批注、同时还要看见别的窗口"，全屏适合"专心看这一张"。
+/// 它是<b>图片这一块自己的</b>打开方式，与白板/屏幕批注那两块无关，所以不进
+/// <see cref="CanvasSceneSettings"/> —— 那份是"每块画布该有怎样的表现"。
+/// </para>
+/// </summary>
+internal enum ImageOpenMode
+{
+    /// <summary>一个可缩放的普通窗口，工具栏停靠在它正下方。</summary>
+    Window = 0,
+
+    /// <summary>占满整块屏幕，工具栏不跟着动（沿用白板那套浮在屏幕底部的行为）。</summary>
+    FullScreen = 1,
+}
+
+/// <summary>
 /// 数值向量的<b>按值比较</b>，给本文件里那几个进存档的类型共用。
 /// <para>
 /// 存在的理由只有一条：<see cref="PreferenceSnapshot"/> 是 record，合成的 <c>Equals</c>
@@ -37,6 +54,43 @@ internal static class TipValue
 }
 
 /// <summary>一串按参数表顺序排列的笔锋取值。</summary>
+/// <summary>
+/// 「最近打开的图片」那份列表，<b>按值比较</b>。
+/// <para>
+/// 理由与 <see cref="TipPresetCollection"/> 一字不差：<see cref="PreferenceSnapshot"/> 是 record，
+/// 合成的 <c>Equals</c> 对 <c>List&lt;T&gt;</c> 按<b>引用</b>比，而 UiSmoke 有一条
+/// 「Preferences round-trip through JSON」断言它存盘再读回来仍然相等。
+/// 裸放一个 <c>List&lt;string&gt;</c> 进去，那条断言会<b>永远</b>红 —— 而且红得莫名其妙：
+/// 明明两条快照内容一模一样。这不是"测试太严"，是那份相等语义已经不再是它声称的东西。
+/// </para>
+/// </summary>
+internal sealed record RecentImageCollection
+{
+    /// <summary>可空理由同 <see cref="TipValueVector.Values"/>：它从文件里来。</summary>
+    public List<string>? Items { get; init; } = [];
+
+    public bool Equals(RecentImageCollection? other)
+    {
+        if (other is null) return false;
+        var mine = Items ?? [];
+        var theirs = other.Items ?? [];
+        if (mine.Count != theirs.Count) return false;
+        for (int i = 0; i < mine.Count; i++)
+            if (!string.Equals(mine[i], theirs[i], StringComparison.Ordinal)) return false;
+        return true;
+    }
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        foreach (var item in Items ?? []) hash.Add(item, StringComparer.Ordinal);
+        return hash.ToHashCode();
+    }
+}
+
+/// <summary>
+/// 一串按参数表顺序排列的笔锋取值。
+/// </summary>
 internal sealed record TipValueVector
 {
     /// <summary>
@@ -138,6 +192,35 @@ internal sealed record PreferenceSnapshot
     /// </para>
     /// </summary>
     public CanvasSceneCollection CanvasScenes { get; init; } = new();
+
+    /// <summary>
+    /// 打开图片时用窗口还是全屏。<b>当场生效</b>：下一次点「图片」就按它来。
+    /// </summary>
+    public ImageOpenMode ImageOpenMode { get; init; } = ImageOpenMode.Window;
+
+    /// <summary>
+    /// 启动时把上次打开的那张（或那几张）图重新打开。
+    /// <para>关掉它就等于"每次都从空白开始" —— 对"我只是临时看一眼"的用法更合适。</para>
+    /// </summary>
+    public bool ImageRestoreOnStartup { get; init; }
+
+    /// <summary>
+    /// 上次打开图片时所在的那个目录，文件选择框从这儿起。
+    /// <para>
+    /// 存它是因为"每次都从文档目录开始翻"是那种很小但天天遇的烦。
+    /// <b>空串</b>表示还没打开过任何图，那就不设初始目录（由系统决定）。
+    /// </para>
+    /// </summary>
+    public string LastImageDirectory { get; init; } = "";
+
+    /// <summary>
+    /// 最近打开过的图片文件（新的在前，最多 <see cref="MaxRecentImages"/> 个）。
+    /// <para>
+    /// 存<b>文件</b>而不只是目录，是因为"启动时打开上次的图片"要的是那几张具体文件 ——
+    /// 只记目录的话启动后只能打开文件夹让用户自己再点一遍。
+    /// </para>
+    /// </summary>
+    public RecentImageCollection RecentImages { get; init; } = new();
 }
 
 /// <summary>UI-thread-owned preferences. Slider changes are debounced; writes replace atomically.</summary>
@@ -240,6 +323,9 @@ internal static class AppPreferences
     private static PreferenceSnapshot Validate(PreferenceSnapshot value) => value with
     {
         Theme = Enum.IsDefined(value.Theme) ? value.Theme : AppTheme.Light,
+        ImageOpenMode = Enum.IsDefined(value.ImageOpenMode) ? value.ImageOpenMode : ImageOpenMode.Window,
+        LastImageDirectory = value.LastImageDirectory ?? string.Empty,
+        RecentImages = new RecentImageCollection { Items = ValidateRecentImages(value.RecentImages.Items) },
         ToolbarItems = ValidateTools(value.ToolbarItems),
         ToolbarSelectedId = ValidateSelectedTool(value.ToolbarItems, value.ToolbarSelectedId),
         TipCustomPresets = ValidateCustomPresets(value.TipCustomPresets),
@@ -281,8 +367,32 @@ internal static class AppPreferences
     /// （重复标识、超上限、固定项重复），查原始列表会留下一个指向不存在项的选中态。
     /// </para>
     /// </summary>
-    private static string ValidateSelectedTool(ToolbarToolCollection source, string selectedId)
+    /// <summary>
+    /// 洗一遍"最近打开的图片"：去重、去空、砍到上限。
+    /// <para>
+    /// <b>不检查文件还在不在</b>：外接盘/U 盘拔掉之后那些路径会失效，但把它们删掉等于
+    /// "下次插回去就没有这一项了"，而用户对"最近用过"的预期是它记得，文件没了再说。
+    /// 真正打开时打不开，那一条会在打开时单独跳过（有明确的失败面），不牵连别的条目。
+    /// </para>
+    /// </summary>
+    private static List<string> ValidateRecentImages(List<string>? recent)
     {
+        if (recent is not { Count: > 0 }) return [];
+
+        var kept = new List<string>(Math.Min(recent.Count, MaxRecentImages));
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in recent)
+        {
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            if (!seen.Add(path)) continue;
+            kept.Add(path);
+            if (kept.Count >= MaxRecentImages) break;
+        }
+
+        return kept;
+    }
+
+    private static string ValidateSelectedTool(ToolbarToolCollection source, string selectedId)    {
         if (string.IsNullOrEmpty(selectedId)) return string.Empty;
         var items = source.Items ?? [];
         foreach (var tool in items)
@@ -340,12 +450,16 @@ internal static class AppPreferences
             var fallback = ToolbarTools.DefaultItems().Find(item => item.Kind == kind)!;
             if (!ids.Add(fallback.Id)) continue; // 标识被别人占了：宁可不补，也不造一个重复标识
 
-            // 补齐落在它该在的那一格，而不是一律追加到尾巴：白板与鼠标是"进 / 出这块画布"的一对，
-            // 旧档补出来就该挨着它。追加到尾巴的话，同一份设置在"首启"与"升级后"长得不一样，
+            // 补齐落在它该在的那一格，而不是一律追加到尾巴：白板紧跟鼠标、图片紧跟白板 ——
+            // 后者依赖前者已经被补进去（FixedKinds 的顺序就是 Mouse → Whiteboard → Image），
+            // 所以这里查"前一颗"一定查得到。追加到尾巴的话，同一份设置在"首启"与"升级后"长得不一样，
             // 而这种差别只会以"我的按钮顺序怎么变了"的形式被用户看见。
-            var at = kind == ToolbarToolKind.Whiteboard
-                ? IndexAfterKind(kept, ToolbarToolKind.Mouse)
-                : kept.Count;
+            var at = kind switch
+            {
+                ToolbarToolKind.Whiteboard => IndexAfterKind(kept, ToolbarToolKind.Mouse),
+                ToolbarToolKind.Image => IndexAfterKind(kept, ToolbarToolKind.Whiteboard),
+                _ => kept.Count,
+            };
             kept.Insert(at, fallback);
         }
 
@@ -362,12 +476,12 @@ internal static class AppPreferences
     }
 
     /// <summary>
-    /// 五个"界面门槛"项：鼠标模式（退出这块画布）、白板（进那块画布的唯一入口）、
+    /// 六个"界面门槛"项：鼠标模式（退出这块画布）、白板与图片（进那两块画布的唯一入口）、
     /// 撤销、重做、设置（唯一能改工具栏的入口）。它们各只允许有一个，而且不许缺失。
     /// </summary>
     private static readonly ToolbarToolKind[] FixedKinds =
     [
-        ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard,
+        ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Image,
         ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Settings,
     ];
 
@@ -437,6 +551,9 @@ internal static class AppPreferences
     /// 决定还能不能存 —— 两处不一致的后果是"存进去了但下一次启动它没了"。
     /// </summary>
     internal const int MaxCustomPresets = 32;
+
+    /// <summary>"最近打开的图片"最多留几条。够一个人来回翻，又不至于把存档撑成一份日志。</summary>
+    internal const int MaxRecentImages = 10;
 
     private const int MaxPresetNameLength = 24;
 

@@ -14,11 +14,31 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<SettingsNavPage, FrameworkElement> _pages;
     private readonly Dictionary<SettingsNavPage, FluentNavigationItem> _navigation;
     private readonly StrokeTipEditor _tipEditor;
-    private readonly ToolbarToolListEditor _toolListEditor;
+    private ToolbarLayoutStrip? _layoutStrip;
+    private ToolbarToolLibrary? _library;
+
     private readonly JaliumInkCanvas _tipPreview;
 
-    /// <summary>「工具栏按钮」那份列表的编辑器。探针据此按项标识取行里的按钮（代码建的元素没有 x:Name）。</summary>
-    internal ToolbarToolListEditor ToolEditor => _toolListEditor;
+    /// <summary>
+    /// 「工具栏」那一页：工具栏此刻有的那些项，一排，可拖动改序、可从组件库拖入新建。
+    /// 探针据此按项标识取那一块（元素全是代码建的，没有 <c>x:Name</c>）。
+    /// </summary>
+    internal ToolbarLayoutStrip ToolLayout =>
+        _layoutStrip ?? throw new InvalidOperationException("工具栏那一页还没接上（WireToolbarControls 没跑）");
+
+    /// <summary>「工具菜单」那一页：组件库，一格格可拖出。</summary>
+    internal ToolbarToolLibrary ToolLibrary =>
+        _library ?? throw new InvalidOperationException("组件库还没接上（WireToolbarControls 没跑）");
+
+    /// <summary>
+    /// 探针用：把设置页切到某一页。
+    /// <para>
+    /// <b>只有当前那一页在视觉树里</b>（见 <c>NavigateTo</c>），所以要量"排了版没有"
+    /// 必须先真的切过去 —— 在别的页上量，量到的全是 0，而"全是 0"这件事既可能是
+    /// 控件没建，也可能是压根没进树，两者在读数上一模一样。
+    /// </para>
+    /// </summary>
+    internal void GoToPageForProbe(SettingsNavPage page) => NavigateTo(page, force: true);
 
     /// <summary>
     /// 笔锋档位下拉里每一项对应的档位标识（下标即 <c>ComboBox.Items</c> 的下标）。
@@ -53,6 +73,7 @@ public partial class SettingsWindow : Window
             [SettingsNavPage.Appearance] = AppearanceSectionPanel!,
             [SettingsNavPage.Ink] = InkSectionPanel!,
             [SettingsNavPage.Canvas] = CanvasSectionPanel!,
+            [SettingsNavPage.File] = FileSectionPanel!,
             [SettingsNavPage.Toolbar] = ToolbarSectionPanel!,
             [SettingsNavPage.Interaction] = InteractionSectionPanel!,
             [SettingsNavPage.About] = AboutSectionPanel!,
@@ -62,6 +83,7 @@ public partial class SettingsWindow : Window
             [SettingsNavPage.Appearance] = (FluentNavigationItem)AppearanceNavButton!,
             [SettingsNavPage.Ink] = (FluentNavigationItem)InkNavButton!,
             [SettingsNavPage.Canvas] = (FluentNavigationItem)CanvasNavButton!,
+            [SettingsNavPage.File] = (FluentNavigationItem)FileNavButton!,
             [SettingsNavPage.Toolbar] = (FluentNavigationItem)ToolbarNavButton!,
             [SettingsNavPage.Interaction] = (FluentNavigationItem)InteractionNavButton!,
             [SettingsNavPage.About] = (FluentNavigationItem)AboutNavButton!,
@@ -76,8 +98,7 @@ public partial class SettingsWindow : Window
         ((Grid)TipPreviewHost!).Children.Add(_tipPreview);
         InkTipOptions.ApplyTo(_tipPreview.TipSettings);
 
-        // 工具栏按钮列表：同样是照数据生成的（见 ToolbarToolListEditor）。
-        _toolListEditor = new ToolbarToolListEditor((Panel)ToolbarToolRows!);
+        // 工具栏设置：两个独立的对象（那一排 / 组件库），宿主面板在标记里，见 WireToolbarControls。
 
         // Only the current page belongs to the live tree: no hidden controls in Tab/UIA.
         PageHost.Children.Clear();
@@ -134,6 +155,24 @@ public partial class SettingsWindow : Window
         BindSwitch((FluentToggleSwitch)KeepToolbarOnTopSwitch!, "始终置顶工具栏", value =>
             AppPreferences.Update(AppPreferences.Current with { KeepToolbarOnTop = value }));
         BindSwitch((FluentToggleSwitch)PressureSwitch!, "压力感应", InkRuntimeOptions.SetEnablePressure);
+
+        // ---- 「文件」这一页 ----
+        AutomationProperties.SetName(ImageOpenModeChoice, "图片批注的打开方式");
+        ImageOpenModeChoice.Items.Add("窗口");
+        ImageOpenModeChoice.Items.Add("全屏");
+        ImageOpenModeChoice.SelectionChanged += (_, _) =>
+        {
+            if (_sync) return;
+            var index = SelectedIndex(ImageOpenModeChoice);
+            if (index < 0) return;
+            AppPreferences.Update(AppPreferences.Current with { ImageOpenMode = (ImageOpenMode)index });
+        };
+        BindSwitch((FluentToggleSwitch)ImageRestoreSwitch!, "启动时打开上次的图片", value =>
+            AppPreferences.Update(AppPreferences.Current with { ImageRestoreOnStartup = value }));
+        OpenImageDirectoryButton.Click += (_, _) => OpenLastImageDirectory();
+        SetDefaultViewerButton.Click += (_, _) => DefaultImageViewer.OpenSettingsFor(this);
+        AutomationProperties.SetName(SetDefaultViewerButton, "去系统里设置默认图片查看器");
+
         AutomationProperties.SetName(ThemeChoice, "应用主题");
         AutomationProperties.SetName(PenWidth, "画笔粗细");
         ThemeChoice.SelectionChanged += (_, _) =>
@@ -307,18 +346,26 @@ public partial class SettingsWindow : Window
     // ------------------------------------------------------------------ 工具栏按钮
 
     /// <summary>
-    /// 「工具栏按钮」那一块的接线。三条来源收在一个刷新点上（<see cref="SyncToolbarSection"/>）：
-    /// 数据变了、选中项变了、窗口刚建好。
+    /// <summary>
+    /// 「工具栏」设置那一块的接线：<b>一页两段</b> —— 上面工具栏此刻的样子（拖动改顺序），
+    /// 下面组件库（按住拖上来加一件）。数据变了、选中项变了、窗口刚建好，三条来源收在一个刷新点上。
+    /// <para>
+    /// 这里<b>没有标签页</b>。曾经用 <c>FluentTabView</c> 把这两段拆成两个页面，
+    /// 看着"各答一个问题"挺整齐，实际把"从下面拖到上面"变成了"先切过去拿、再切过去放" ——
+    /// 手势的方向被界面结构抹掉了，而那是这一页唯一要表达的事。
+    /// 而且这一页外面已经是设置页的导航，再套一层标签控件就是导航里套导航。
+    /// </para>
+    /// <para>
+    /// 也<b>没有</b>原来那三颗写死的"加一支笔 / 加一把橡皮 / 加一条分隔线"：
+    /// 类别与个数混在一处，于是"再加一个"到底是哪一类说不清，而工具栏上可以有八支笔。
+    /// 现在加号在组件库每一格上，一格一类。
+    /// </para>
     /// </summary>
     private void WireToolbarControls()
     {
-        AutomationProperties.SetName((Button)AddPenToolButton!, "再加一支笔");
-        AutomationProperties.SetName((Button)AddEraserToolButton!, "再加一把橡皮");
-        AutomationProperties.SetName((Button)AddSeparatorToolButton!, "加一条分隔线");
-
-        ((Button)AddPenToolButton!).Click += (_, _) => AddTool(ToolbarToolKind.Pen);
-        ((Button)AddEraserToolButton!).Click += (_, _) => AddTool(ToolbarToolKind.Eraser);
-        ((Button)AddSeparatorToolButton!).Click += (_, _) => AddTool(ToolbarToolKind.Separator);
+        // 顺序有讲究：组件库要把拖动借给那一排，所以那一排先建。
+        _layoutStrip = new ToolbarLayoutStrip((Panel)ToolbarLayoutStripHost!);
+        _library = new ToolbarToolLibrary((WrapPanel)ToolbarLibraryTiles!, _layoutStrip);
 
         ToolbarTools.LayoutChanged += OnToolbarToolsChanged;
         ToolbarTools.SelectionChanged += OnToolbarToolsChanged;
@@ -326,20 +373,8 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>
-    /// 加一项，并<b>顺手选中它</b>：用户点"加一支笔"接下来几乎一定要调它的颜色 / 粗细，
-    /// 不选中就会变成"加了一支跟当前一样的笔，然后不知道该改哪一支"。
-    /// </summary>
-    private void AddTool(ToolbarToolKind kind)
-    {
-        var added = ToolbarTools.Add(kind);
-        if (added is null) return;
-        ToolbarTools.Select(added.Id);
-        SyncToolbarSection();
-    }
-
-    /// <summary>
     /// 工具列表或选中项变了。<b>两个事件走同一条刷新</b>：
-    /// 列表面板要重建/刷新，而"画笔粗细"那条滑杆读的是<b>当前选中那一支笔</b> ——
+    /// 两页都要重建/刷新，而"画笔粗细"那条滑杆读的是<b>当前选中那一支笔</b> ——
     /// 从工具栏那边改粗细时它也得跟着动，否则设置页会显示一个过期的数。
     /// </summary>
     private void OnToolbarToolsChanged()
@@ -350,17 +385,20 @@ public partial class SettingsWindow : Window
 
     private void SyncToolbarSection()
     {
-        _toolListEditor.Sync();
+        ToolLayout.Sync();
+        ToolLibrary.Sync();
 
         var drawing = ToolbarTools.Items.Count(static tool => tool.Kind is ToolbarToolKind.Pen or ToolbarToolKind.Eraser);
         var canAdd = ToolbarTools.Items.Count < ToolbarTools.MaxItems;
-        ((Button)AddPenToolButton!).IsEnabled = canAdd;
-        ((Button)AddEraserToolButton!).IsEnabled = canAdd;
-        ((Button)AddSeparatorToolButton!).IsEnabled = canAdd;
+        var fixedOnes = string.Join(
+            "、",
+            ToolbarTools.Items
+                .Where(static tool => !tool.IsEditable)
+                .Select(static tool => ToolbarToolVisuals.DisplayName(tool)));
 
-        ((TextBlock)ToolbarToolHintText!).Text = canAdd
-            ? $"共 {ToolbarTools.Items.Count} 项，其中 {drawing} 个可画的工具。鼠标、撤销、重做、设置是固定项：可以移动，不能删除。"
-            : $"已到上限（{ToolbarTools.MaxItems} 项）。先删掉几项再加。";
+        ((TextBlock)ToolbarLayoutHintText!).Text = canAdd
+            ? $"共 {ToolbarTools.Items.Count} 项，其中 {drawing} 个可画的工具。固定项（{fixedOnes}）可以移动，不能删除。"
+            : $"已到上限（{ToolbarTools.MaxItems} 项）。先在下面删掉几项，再从上面那一片拖进来。";
     }
 
     private static double SelectedPenThickness() =>
@@ -452,8 +490,26 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void Synchronize(PreferenceSnapshot value)
+    private void OpenLastImageDirectory()
     {
+        var directory = AppPreferences.Current.LastImageDirectory;
+        if (directory.Length == 0 || !System.IO.Directory.Exists(directory)) return;
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = directory,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Trace.WriteLine(ex);
+        }
+    }
+
+    private void Synchronize(PreferenceSnapshot value)    {
         _sync = true;
         try
         {
@@ -461,6 +517,17 @@ public partial class SettingsWindow : Window
             ((FluentToggleSwitch)ReduceMotionSwitch!).IsChecked = value.ReduceMotion;
             ((FluentToggleSwitch)KeepToolbarOnTopSwitch!).IsChecked = value.KeepToolbarOnTop;
             ((FluentToggleSwitch)PressureSwitch!).IsChecked = value.Pressure;
+
+            // 「文件」这一页：打开方式是一份 ComboBox（下标即枚举值），而不是两个单选 ——
+            // 两档的东西做成"二选一"控件会多一份互斥状态要同步，而这里它就是一个枚举。
+            ImageOpenModeChoice.SelectedItem = ImageOpenModeChoice.Items[(int)value.ImageOpenMode];
+            ((FluentToggleSwitch)ImageRestoreSwitch!).IsChecked = value.ImageRestoreOnStartup;
+            var lastDirectory = value.LastImageDirectory;
+            ((TextBlock)LastImageDirectoryText!).Text = lastDirectory.Length > 0
+                ? lastDirectory
+                : "还没打开过图片";
+            OpenImageDirectoryButton.IsEnabled = lastDirectory.Length > 0;
+            ((TextBlock)DefaultViewerHintText!).Text = DefaultImageViewer.HintText;
 
             // 粗细这一项现在属于"当前选中的那支笔"：选中的不是笔时滑杆没有对象，直接禁用 ——
             // 留一条能动但改了没反应的滑杆比禁用更糟。

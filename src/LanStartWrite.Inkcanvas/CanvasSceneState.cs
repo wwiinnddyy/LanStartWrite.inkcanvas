@@ -38,4 +38,19 @@ internal static class CanvasSceneState
     /// <summary>是不是当前在眼前那块。<b>给消费方过滤用</b>：设置页要听所有场景的变化，
     /// 而画布只该按自己这一块的设置表现。</summary>
     internal static bool IsActive(CanvasScene scene) => _active == scene;
+
+    /// <summary>
+    /// 是不是<b>"有页面内容、而且鼠标那一档已经是选择"那种</b>场景。
+    /// <para>
+    /// 白板与图片批注都是：底下有一页固定尺寸的东西，于是"鼠标"从"把桌面还给别的应用"
+    /// 变成"选择这一页上的墨迹"；屏幕批注没有这一层，它盖的是整个桌面，没有"页"。
+    /// </para>
+    /// <para>
+    /// 为什么名单要收在一处而不是到处写 <c>scene != ScreenAnnotation</c>：
+    /// 那样每加一个场景都要回头改一串不相干的地方，漏一处就是"那颗钮在这个场景里意思错了"，
+    /// 而那句话不报错、只是画出来的图标不对。这里是唯一一份名单。
+    /// </para>
+    /// </summary>
+    internal static bool IsPageScene(CanvasScene scene) =>
+        scene is CanvasScene.Whiteboard or CanvasScene.ImageCanvas;
 }

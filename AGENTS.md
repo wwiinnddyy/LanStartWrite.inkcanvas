@@ -93,7 +93,7 @@ This project uses **Jalium.UI** framework. All UI code, markup, and patterns mus
 7. **量导航面板宽度要先关掉动画。** `PART_PaneRoot` 的宽度带 0.2 秒过渡（读 `SplitViewPaneAnimationOpenDuration`），"下一拍就该读到 48"是道时序题 —— 实测三轮里红过一次。现在那三步在 `ReduceMotion=true` 下量，两态真的换了与否由 `IsCompact` 与 `PART_Label` 折叠那两条管。
 8. **库没有的就继续自实现**（用户定的范围）：九色画笔色板 `PenColorSwatchStyle`、两个实体浮层表面 token（`ToolbarSurfaceBrush` 白 / `#2C2C2C`，`FlyoutSurfaceBrush` `#F9F9F9` / `#2C2C2C`；WinUI 的对应物 `FlyoutPresenterBackground` 是亚克力，本应用刻意不用，所以也不能借那个键名）、`FlyoutPlacement` 的原生坐标定位、`RadioToolToggleButton.Reactivated`、四个窗口的分工（Design.MD §1）。应用侧的 `HelperTextStyle` / `SectionTextStyle` / `SettingsCardStyle` 是**基于库的键往上加**的三行扩展（库按 WinUI 原样发布尺度，不替宿主定辅助文字颜色与卡片行距），不是第二套尺度。
 
-UiSmoke 现状：**364 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/UiSmoke.csproj -c Debug -p:OutputPath=bin/Verify/` 后直接跑 `tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe`）。
+UiSmoke 现状：**433 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/UiSmoke.csproj -c Debug -p:OutputPath=bin/Verify/` 后直接跑 `tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe`）。
 导航动画那组里 `Retargeted animation settles...` / `A live intermediate frame...` 两条会**自己红**（2026-09-25 实测：改动前后都会 3 次里红 1 次，量的是库的动画时钟，不是白板的账），
 而 `Check()` 一红就中断整条队列 —— 所以**基线要复跑两三次再取数**，单看一次的红绿不可信。注意本应用的 `.exe` 若在运行中会锁住 `bin/Debug`，构建一律带 `-p:OutputPath` 绕开。**跑之前先看 exe 的时间戳** —— 跑一份旧 exe 会安静地验一套旧检查，数字看着还挺像样（踩过一次：46 条全绿其实是几个月前的产物）。另外 Main 一进来就把 `ReduceMotion` 设成 true：第一拍就要量导航面板宽度，而面板打开带 0.2 秒过渡 —— 320ms 的第一拍实测仍会抖（6 个导航项那次就是它红的）；导航动画那组需要动的时候自己会再打开。
 
@@ -170,7 +170,9 @@ UiSmoke 现状：**364 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/Ui
 | `ToolbarTool.cs` | 一项的数据（扁平的，按 `Kind` 决定哪几个字段有意义）+ 按值比较的集合 |
 | `ToolbarTools.cs` | 模型：有哪些项、什么顺序、选中谁、增删改序、与笔锋的来回同步 |
 | `ToolbarToolVisuals.cs` | 外观：图标码点、色标、"40×40 一格长什么样"（批注栏与设置页共用） |
-| `ToolbarToolListEditor.cs` | 设置页「工具栏按钮」那份列表（增删换序） |
+| `ToolbarLayoutStrip.cs` | 设置页「工具栏」那一页：工具栏此刻那些项摆成一排，**拖动改序**、可删的带 × |
+| `ToolbarToolCatalog.cs` | 工具的**元数据表**（对应 Class Island 的 `ComponentInfo`）：名字 / 图标 / 描述 / 能否重复 |
+| `ToolbarToolLibrary.cs` | 设置页「工具菜单」那一页：**组件库**（WrapPanel 网格），每格可拖出 |
 | `AnnotationToolbarWindow.jalxaml.cs` | 只做三件事：渲染列表、把"点哪一颗"翻译成"选中哪一项"、转发二级菜单的编辑 |
 
 ### 十二条判断
@@ -216,7 +218,7 @@ UiSmoke 现状：**364 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/Ui
     教训很具体：把"全局值"改成"每项一份数据"时，旧代码里"改值 → 顺手应用到画布"的那一步
     是跟着旧通路走的；通路换了，这一步就丢了，而构建、渲染、菜单全都正常。
     **数据驱动的界面必须有一条"数据变了 → 界面跟着变"的完整清单，缺一步就是静默失效。**
-14. **工具栏的设置独立成页**（设置页导航六项：外观 / 墨迹 / 画布 / 工具栏 / 窗口与交互 / 关于）：
+14. **工具栏的设置独立成页**（设置页导航七项：外观 / 墨迹 / 画布 / 文件 / 工具栏 / 窗口与交互 / 关于）：
     「始终置顶工具栏」与「工具栏按钮」都搬了过去。用户点名的不是"多一个分组"，
     而是"工具栏这件事有自己的入口" —— 它会越长越多（对齐、吸附、透明度…），一开始就该有自己的页。
 15. **出现位置是算出来的，不是写死的**（`ToolbarPlacement`，在 `Program.cs` 里 Show 之前一次）：
@@ -228,11 +230,88 @@ UiSmoke 现状：**364 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/Ui
     而不是把右缘推出去 —— 用户摆的是一条居中的栏，加第二支笔就整条往右挪半颗钮，"居中"当场失真。
     已知边界：`WorkArea` 说的是主屏（任务栏在副屏时会落在主屏下方）。
 
+### 工具栏设置页：一页两段 + 组件库（2026-09-26 重构两次，原 `ToolbarToolListEditor` 已删）
+
+**一页，上下两段，不套标签页：**
+
+```
+┌ 工具栏 ────────────────────────────────┐
+│  下面这一排就是工具栏此刻的样子（横向）  │  ← ToolbarLayoutStrip：拖动改顺序
+│  [笔][笔][橡皮] | [撤销][重置][设置]…  │     拖过来 = 新建；选中才出现 ×
+├────────────────────────────────────────┤
+│ 工具菜单                              │
+│  ┌─────┐┌─────┐┌─────┐                │
+│  │ ✎ 笔 ││ ▨ 橡 ││ ┃ 分 │                │  ← ToolbarToolLibrary：WrapPanel 格子
+│  │描述… ││描述… ││描述… │ + │ …         │     拖到上面 = 新建；+ 加到末尾
+│  └─────┘└─────┘└─────┘                │
+└────────────────────────────────────────┘
+```
+
+拖动结构与元数据模型抄 **Class Island**（<https://github.com/ClassIsland/ClassIsland>），
+见下面那张对应表。**`FluentTabView` 用过一次、已撤掉**，理由是判断 3。
+
+### 与 Class Island 的对应关系
+
+| Class Island | 这里 | 抄的是什么 |
+|---|---|---|
+| `ComponentInfo`（Guid/Name/IconSource/Description/Type） | `ToolbarToolCatalog` + `ToolbarToolKind` | **元数据与实例是两张表**：`Kind` 说"这是支笔"，"红色 0.5 细的那支"是用户数据。不拆开就是"菜单里改颜色所有笔一起变" |
+| `ComponentSettings.AssociatedComponentInfo` | `ToolbarTool.Kind` | 实例指回元数据 |
+| `ComponentRegistryService` | `ToolbarToolCatalog.Entries` | 组件库**由元数据生成**，界面上没有一行手写的类别 |
+| `ComponentsPanelStyles`（`WrapPanel`） | 「工具菜单」的 `WrapPanel` | 组件库是**会换行的格子货架**，不是竖排一列 |
+| `EditableComponentsListBox` | `ToolbarLayoutStrip` | 容器**一个落点接两种拖** |
+| `EditableComponentsListBoxDropHandler.GetTargetIndex` | `ShowDropMarker` | 落点 = 落在目标**左半边插前 / 右半边插后** |
+| `DragEffects.Copy`（从库拖 `ComponentInfo` = 新建）/ `Move`（列表内 = 换序） | `OnDrop` 里 `fromKind.HasValue` 分流 | 同一条落点、靠拖动的东西分流 |
+| `EditableComponentsListBoxDragData` | `DataObject` 格式串 | 拖的是**标识 / 种类**，不是对象引用（拖动中列表会重建） |
+| adorner on selected | 操作条 `Visibility` 按选中翻 | 每项常驻按钮的话，一排十几个全亮着，没有一处能看 |
+
+### 十三条判断
+
+1. **不套标签页。** 曾经把两段拆成 `FluentTabView` 的两个页面，理由是"各答一个问题"——
+   看着整齐，实际把"**从下面拖到上面**"变成了"先切过去拿、再切过去放"：
+   **手势的方向被界面结构抹掉了**，而那是这一页唯一要表达的事。
+   而且这一页外面已经是设置页的导航，再套一层标签控件就是导航里套导航。
+2. **加进去靠拖，加号是第二条路。** 拖给"我知道我要放哪"的人，加号给"我就想再加一个"的人；
+   只留拖的话，后一类每次都得先想好落在哪。两条都通，且都顺手选中新项。
+3. **`FluentTabView` 的标签项只从 `TabItems` 那个集合取**（正文绑的是 `SelectedContent`）。
+   把 `<fluent:FluentTabViewItem>` 写成标记里的内容子元素，集合是空的 ——
+   **标签条是一条空行、正文也是空的，而界面上没有任何报错**（这一页曾这样坏掉，用户报的是"空行"）。
+   顺带：**集合非空也不等于有标签页显形**，`SelectedIndex` 默认 −1 而正文只画选中那一个。
+   两条都记在这里，是因为它们是同一类错误：控件建了不等于显形了。
+4. **落点判据必须在目标自己的坐标系里做。** 早先那版把中点 `TranslatePoint` 到宿主坐标
+   再去比 `ActualWidth / 2` —— 两个不同的坐标系，于是"左半边 / 右半边"**从来没生效**：
+   算出来永远是"右半边"，症状是"拖到哪都插在后面"，完全看不出是坐标算错了。
+   `DragEventArgs.GetPosition` 原样返回生产方给的点（`relativeTo` 被忽略），按约定传目标自己就对了。
+5. **零宽目标不能判成右半边。** 刚重建未排版时中线是 0，任何非负 x 都 `>= 0`，落点整体后移一格。
+   宁可按左半边（不移动）处理 —— 那是不动，而不是把东西放到用户没指的地方。
+6. **换序语义是"落在哪一格"，不是"往那边走几格"**（`ToolbarTools.MoveTo`）。
+   后者在拖过头再拖回来时会来回跳。`Move(id, delta)` 现在委托给它。
+7. **拖过头要夹到边上**，不是"不挪"：手指拖过头时人期望落在最后一项后面。
+8. **固定项在库里有格子，但拖不动、加号是灰的**，并说清为什么（本来就有一枚，拖进来就是第二枚）。
+   三个固定入口（退出画布 / 进白板 / 进图片）同时也是唯一入口，删掉等于把门从里面锁上。
+9. **固定项的 × 是"没有"，不是"有但按不动"。** 建一个不挂进视觉树的按钮，
+   界面上看不出来，但它仍是活对象：探针摸得到、自动化点得着，"能不能删"于是有了第二个来源。
+10. **键名写错是静默的。** 标签底色用库里真实发布的 `TabViewItemHeaderBackground` /
+    `TabViewItemHeaderBackgroundSelected`；写成想当然的名字 `SetResourceReference` 什么也不做，
+    于是整排标签没有底色 —— 而"标签没有底色"看着还挺像设计。
+    码点同样不许写空串：`Glyph = ""` 不报错，只是**什么也不画**。
+11. **一排工具可能比设置页还宽 → 外面套横向滚动。** 排不下就滚，而不是把项压扁或者换行
+    （换行会让"第几格"与用户看到的不一致，而落点正是按第几格算的）。
+12. **「已放 N 个」角标与数据逐类一致**，不把整格灰掉 —— 灰掉看着像"这一类不能用了"，
+    而事实是"这一类已经有了，还能再加"。
+13. **两个宿主面板在标记里，编辑器在 ctor 里建。** 不为了"由代码生成"而把宿主也搬进代码 ——
+    那一页的结构在标记里一眼看得完（上下两段），这正是它该有的样子。
+
 ### 验收
 
-`UiSmoke.CheckToolbarTools` 起一条真工具栏，钉的是：默认八项与顺序、加一支笔（复制了当前那支、插在它后面）、
+`UiSmoke.CheckToolbarTools` 里那几条：**组件库在那一排下面**（`TransformToVisual` 量上下位置）、
+每一项与每一格都量得出实际尺寸（元素建了但没排版时 `ActualWidth` 是 0，看着就是一条空行）、
+每一格都有加号、**拖入新建落在手指放开的那一格**、点加号也加、角标与数据一致、
+**固定项拖不进来且加号是灰的**、左右半边两个方向、夹边、拖不存在的项不动数据。
+### 验收（原「工具栏」那部分）
+
+`UiSmoke.CheckToolbarTools` 起一条真工具栏，钉的是：默认项与顺序、加一支笔（复制了当前那支、插在它后面）、
 **两支笔的颜色 / 粗细 / 笔锋互不影响**（含"手调之后切走再切回，那一支的形状还在"）、两把橡皮同理、
-固定项删不掉、删掉选中项之后选中态落回一个能用的工具、以及设置页那份列表的**行数必须等于数据项数**。
+固定项删不掉、删掉选中项之后选中态落回一个能用的工具、以及设置页那一排的**项数必须等于数据项数**。
 `CheckToolbarTouch` 另外钉住七颗钮仍是 40×40、焦点环仍在、"选中铺 accent / 未选透明 / 图标继承 on-accent 墨色"。
 `CheckToolbarPlacement` 钉摆位：算术（合成工作区，不碰真屏幕）、接线（摆的是实测宽高、加一颗钮之后中心不跑）、
 单位（框架那份 `WorkArea` 与 `GetMonitorInfo` 的物理矩形 ÷ 该屏 DPI 对得上）。本机 2560×1516 @175% 实测：
@@ -245,7 +324,7 @@ UiSmoke 现状：**364 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/Ui
 （`PassThrough` / `Freeze` / `BackgroundArgb`，进存档的 `PreferenceSnapshot.CanvasScenes`）+ `CanvasOptions`（按场景存取的**唯一**入口，
 `For(scene)` / `Set*(scene, value)`，`Changed` 带着"是哪个场景变了"）。加一个场景 = 加枚举成员 + 设置页给它一节，**数据模型不用动**。
 "此刻哪块画布在眼前"不在这里 —— 它是 `CanvasSceneState.Active`，**不落盘**（见下一节）。
-设置页因此有一页「画布」，导航六项：外观 / 墨迹 / 画布 / 工具栏 / 窗口与交互 / 关于。
+设置页因此有一页「画布」，导航七项：外观 / 墨迹 / 画布 / 文件 / 工具栏 / 窗口与交互 / 关于。
 
 两个开关都不是"点一下立刻改画面"，而是"下次进画布时按这个来"，所以它们的分支都挂在
 `AnnotationToolbarWindow.SyncAnnotationOverlay` 这条必经之路上（鼠标模式干什么 / 进入画布那一刻干什么），
@@ -379,6 +458,105 @@ UiSmoke 现状：**364 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/Ui
 
 仍需真手确认（写进 `tools/UiSmoke/README.md`，不假装验过）：物理双指的识别时序与手感、
 大选择集逐帧实墨跟随时是否掉帧、笔在白板上的落笔手感、白板压得住真正常驻置顶的应用吗。
+
+## Critical: 图片批注是第三块画布，而它的底是一张图
+
+自 2026-09-26 起第三块画布 `CanvasScene.ImageCanvas = 2`。它与白板共用 `PagedCanvasWindow`
+（分页 / 缩略图 / 缩放漫游 / 选区变换 / 批处理 / 撤销全在那儿），差别只有一件：底下**先铺一张图**，
+笔迹写在它上面。
+
+| 事实 | 位置 |
+|---|---|
+| 入口 | 工具栏固定项「图片」（`ToolbarToolKind.Image`，图标 `E8B9` Picture，实测 ink=433） |
+| 窗口 | `ImageViewerWindow` + `ImagePage`；一页一文件 |
+| 图的宿主 | `ImageViewerWindow.InkHost` 里 `Image` 是**独立子元素**，不是 `InkHost.Background` |
+| 位图类型 | **必须是 `BitmapImage`**（见下面第 1 条） |
+| 摆放 | 每次视口变动按 `View.WorldToScreen()` 重建 world→screen（见下面第 2 条） |
+| 打开方式 | `AppPreferences.ImageOpenMode`：`Window` / `FullScreen` |
+
+### 十四条判断
+
+1. **喂错位图类型<b>不报错，只是不画</b>。** 症状是"标题栏说已打开，窗口一片黑"——
+   而黑底 + 一张没画出来的图，和"还没选文件"在眼里完全同形，排查只能靠猜。
+   根因：`Image` 的解码与 GPU 上传只认 `BitmapImage`（`RequestBitmapDecode` 第一句
+   `if (Source is not BitmapImage) return;`），而 `BitmapDecoder.Frames[0]` 给的是 `BitmapFrame`，
+   它的 `NativeHandle` 恒为 0。所以读文件一律 `BitmapImage.FromFile(path)`，
+   测试造图一律 `BitmapImage.FromPixels(...)`，**都不许退回 `BitmapSource.Create` / `BitmapDecoder`**。
+2. **图不能挂在 `InkHost.Background` 上。** `Background` 属于元素坐标，不随 Dusk 视口平移缩放 ——
+   滚轮一缩放它就钉在屏幕上不动，而笔迹走了。所以它是独立 `Image` + `RenderTransform`，
+   每次 `Viewport.Changed` 重建矩阵。判据用 `View.WorldToScreen()`，**不用** `Viewport.Scale` 手乘
+   （那个不含平移，缩放中心一换图就跑偏）。
+3. **图永远不烘进位图。** 90° 旋转走 `Document.SelectAll() → Selection.Rotate → Clear()`，
+   笔迹一起转；`ImagePage.QuarterTurns` 只管**尺寸**（奇数步宽高对调），
+   位图保持原朝向 —— 烘进去就得复制一份几千万像素的缓冲。
+4. **批注栏在窗口模式下<b>是图片窗口的一个控件</b>，不是一个停在它下面的独立窗口。**
+   实现是 `AnnotationToolbarWindow.RehostInto`：把批注栏的根视觉从它自己的 `Content` 摘下来
+   挂进 `ImageViewerWindow.ToolbarHostGrid`。两个各画各的窗口永远对不齐 —— 图片窗口改尺寸它不知道、
+   拖手柄一动两者用两套坐标算位移，错位修不掉。
+   摘挂只有一条路：`Content = null`（`Window.Content` 是 DP，置空就是"视觉父亲变成 null"），
+   再 `host.Children.Add(...)`。框架**没给 Panel 暴露 `DetachFromVisualParent`**（那是 Popup 的内部办法）。
+5. **全屏模式下<b>不</b>搬。** 那时批注栏要盖在图上浮着，搬进去会占掉布局高度、把画面挤掉一块。
+6. **「批注栏该待在哪儿」只有 `ApplyToolbarHosting` 一处算，且是幂等的。**
+   这条是用户报的严重缺陷换来的：原先"搬进去"挂在 `PresentImageViewer` 上、"搬回来"散在几个分支里，
+   于是**在图片窗口里点白板**走的是白板那条分支 —— 没人负责搬，批注栏留在一个已经隐藏的图片窗口里，
+   屏幕上什么都没有；它又是 `app.MainWindow`，再关掉图片窗口就整条工具栏一起没了。
+   教训不是"少调了一个函数"，而是**位置不能由事件推动**：「此刻该在哪儿」本来就是当前状态的一个函数。
+   每条分支各自收拾，漏一条就是一个"东西消失了但没有任何报错"的状态。
+   兜底还有 `ImageViewerWindow.Closed` → `RestoreFromHost`：图片窗口从视觉树上消失那一刻必须已经搬回来。
+7. **窗口可见性只听 `Shown` / `Hiding`，不读 `IsVisible` / `Visibility`。**
+   实测"搬进图片窗口又搬回来"这一趟里 `Window.IsVisible` 两次都不可靠（窗口已 `Hide()` 它仍报 `true`）。
+   `AnnotationToolbarWindow.IsShown` 就是这对事件驱动的，验收与层级系统共用同一份真相。
+   量布局用 `TransformToVisual`（这个运行时没暴露 `ArrangeBounds`）。
+8. **位图要显式 `Dispose()`。** `BitmapImage` 是 `IDisposable` 且实现 `IReclaimableResource`，
+   一张 4000×3000 的 BGRA 常驻 48 MiB，开几十页就是几个 G。`DisposeDerivedResources()` 是
+   `PagedCanvasWindow` 给派生类留的唯一一个收尾钩子。
+9. **缩放控件在底栏右边，形状与页码那一块同一族**：左加号 / 中百分数 / 右减号（用户定的次序）。
+   粗调一步 1.25 倍，**锚在画布正中**而不是指针位置——底栏那排离图很远，指针多半不在图上，
+   按指针锚会得出"图往边上跑了"这种莫名其妙的缩放。百分数那颗**显式**给 `MinWidth` 与字号：
+   靠 Button 默认内容呈现器会按 "100%" 撑出一大块，整条控件于是又宽又高。
+10. **缩放的二级菜单只有「一条滑块 + 一个只读数字框」，216×44，浮在那排控件的<b>正上方</b>、右缘对齐。**
+    - **不要标题、不要说明、不要「适应窗口 / 原始大小」按钮**（第一版 264 宽带一堆字和两颗钮，
+      浮出来是一整块面板，挡图）。它是"临时拖一下"的东西，不是第二套设置页。
+    - **数字框是必需的**：滑块无级，而无级的东西不配一个数就没法"停到要的那一档"。
+    - 范围 **0~300%**（100 = 原始大小），`IsSnapToTickEnabled=False`；真落到 0 倍等于没有图，
+      所以**下限钉 10%**。控件范围（0.1~3.0）比引擎 `MinZoom/MaxZoom` 窄，好处是数字框与滑块
+      **永远说得出真话**——否则加号能走到 500% 而滑块只到 300%，拖到头会看到 300% 却实际 500%。
+    - 底栏百分数与菜单滑块**是同一个数的两次显示**，所以 `OnViewportChangedCore` 里一起刷。
+11. **浮层摆位有四条独立的坑，缺一条就飞掉**（用户报过两次"跑到左上角"）：
+    - **坐标走 `PointToScreen`，绝不加 `Left`/`Top`**：最大化窗口的 `Left`/`Top` 报的是**还原位置**，
+      不是它在屏幕上的位置。窗口模式下那两者恰好相等 —— **所以只测窗口模式的断言会全绿**，
+      一进全屏就整体偏出去。验收必须有一组**全屏下**的断言。
+    - **但 `PointToScreen` 返回物理像素，而 `Window.Left/Top` 要 DIP**：直接赋值差一个 DPI 倍数
+      （本机 175% → 1.75 倍）。缩放比用**公开 API 自己量**：同一元素上相隔 100 DIP 的两个点，
+      屏幕坐标差多少就是多少倍（`Window.DpiScale` 不是公开的，反射它属本项目明令禁止的那类补丁）。
+    - **尺寸必须在 `Show()` 之后再量**：`ActualWidth` 在刚 Show 时是 0，
+      而 `Width` 在 `SizeToContent` 之下可能没算。拿 0 去算居中会偏出去。
+    - **纵向只防"顶到屏幕上沿"，不按工作区下沿夹**：全屏盖的是整块屏，底栏落在**工作区下沿之下**
+      （任务栏那条），而菜单是相对那排控件算的、位置天然在屏内。拿 `WorkArea` 上下一起夹，
+      会把菜单压到控件上面还差一截 —— 看着就是"没落在那排控件上方"。
+12. **菜单开合自己记状态位，不读 `Window.IsVisible`**（同第 7 条那条理由，连点两下会读到上一次的旧值）。
+13. **全屏那一档的"形状"是与白板同一组属性，不只是 `WindowState=Maximized`**：
+   `WindowStyle=None` + 标题栏/最小化/最大化/关闭/系统菜单全关 + 不在任务栏 + `ResizeMode=NoResize`。
+   带窗框的窗口最大化只到工作区（底下露任务栏、顶上留一条边），那不是全屏。
+   **顺序是先摘窗框再最大化**：反过来外壳会按带框的尺寸算一次，留一条边再也补不回来。
+14. **窗口形状只在「那一档真的变了」时摆，且 `Show()` 不许对已在屏的窗口再走一遍。**
+   用户报的缺陷：「窗口最大化时在工具栏切一下工具就掉出最大化」。根因不是"摆错了"，
+   是**摆得太勤**：`SyncImageViewerOverlay` 的每个分支都调 `PresentImageViewer`，
+   而它每次都调 `ApplyOpenMode`，后者无条件 `WindowState = Normal` + 重设 `Left/Top`。
+   要命的是**给最大化窗口设 `Left/Top` 本身就会把它打回 Normal**（外壳按还原尺寸摆）——
+   所以"摆形状"与"改窗口状态"必须成对出现，不能分开做。
+   `ApplyOpenMode` 因此记一份 `_appliedOpenMode`：换档才摆，没换就什么都不碰
+   （用户自己拖的形状是他**当下的决定**，切个工具不该被"顺手复位"）。
+   另一条独立的路是 `Show()`：它语义是"从没有到有"，对已显形的窗口再走一遍外壳会重摆状态，
+   所以 `PresentImageViewer` 只在**从没收起转成收起**时 `Show`，而 `Activate` 保留（切工具该叫到前面）。
+
+### 验收
+
+`UiSmoke.CheckImageCanvas` 钉的是：多文件分页、宿主那一张的层序与尺寸、**源的运行时类型是
+`BitmapImage` 而非 `BitmapFrame`（这条是黑屏那个坑的正面钉子）**、缩放后重定位、
+90° 之后笔迹跟着转、批注栏搬进/搬出/再搬进、**页码与批注栏并排且离窗口边有边距**、
+最大化状态下切笔/橡皮/选择都不掉出最大化、也不动窗口位置、而设置里换档仍然摆出新形状，
+以及"在图片窗口里点白板 → 批注栏自己回来 → 再点图片 → 又搬进去"这条完整回路。
 
 ## Critical: 安装包走 CI（Windows 1 件 + Linux 每种架构 2 件），细节看 `packaging/README.md`
 

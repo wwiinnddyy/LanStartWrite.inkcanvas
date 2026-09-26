@@ -18,6 +18,9 @@
                 <fluent:FluentNavigationItem x:Name="CanvasNavButton" Content="画布">
                     <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE7F4;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
+                <fluent:FluentNavigationItem x:Name="FileNavButton" Content="文件">
+                    <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE8E5;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
+                </fluent:FluentNavigationItem>
                 <fluent:FluentNavigationItem x:Name="ToolbarNavButton" Content="工具栏">
                     <fluent:FluentNavigationItem.Icon><FontIcon Glyph="&#xE700;" FontFamily="Segoe Fluent Icons" FontSize="16" /></fluent:FluentNavigationItem.Icon>
                 </fluent:FluentNavigationItem>
@@ -172,6 +175,48 @@
                                 </Border>
                                 <TextBlock x:Name="WhiteboardBehaviorText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                             </StackPanel>
+                            <StackPanel x:Name="FileSectionPanel">
+                                <TextBlock Text="文件" Style="{StaticResource TitleTextBlockStyle}" />
+                                <TextBlock Text="打开图片的方式，以及要不要把本应用设成默认的图片查看器。" Style="{StaticResource HelperTextStyle}" Margin="0,8,0,0" />
+                                <TextBlock Text="打开图片" Style="{StaticResource SectionTextStyle}" />
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="图片批注的打开方式" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock Text="「窗口」是一个可缩放的窗口，批注栏会停靠在它正下方、跟着它一起挪；「全屏」占满整块屏幕，批注栏仍浮在屏幕底部。改完下一次点工具栏的「图片」生效。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="ImageOpenModeChoice" Width="160" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="启动时打开上次的图片" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock Text="关掉它就等于每次都从空白开始 —— 只打算临时看一眼时更省事。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <fluent:FluentToggleSwitch x:Name="ImageRestoreSwitch" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="上次打开的目录" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock x:Name="LastImageDirectoryText" Text="还没打开过图片" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <Button x:Name="OpenImageDirectoryButton" Content="打开这个目录" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <TextBlock Text="默认图片查看器" Style="{StaticResource SectionTextStyle}" />
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="把本应用设为双击图片时的打开程序" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock x:Name="DefaultViewerHintText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <Button x:Name="SetDefaultViewerButton" Content="去设置…" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                            </StackPanel>
                             <StackPanel x:Name="ToolbarSectionPanel">
                                 <TextBlock Text="工具栏" Style="{StaticResource TitleTextBlockStyle}" />
                                 <TextBlock Text="工具栏上有哪些按钮、要不要始终置顶。" Style="{StaticResource HelperTextStyle}" Margin="0,8,0,0" />
@@ -185,17 +230,33 @@
                                          <fluent:FluentToggleSwitch x:Name="KeepToolbarOnTopSwitch" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
-                                <TextBlock Text="工具栏按钮" Style="{StaticResource SectionTextStyle}" />
+                                <TextBlock Text="按钮" Style="{StaticResource SectionTextStyle}" />
                                 <TextBlock Text="每个按钮自带一套数据：两支笔可以各是一种颜色、粗细与笔锋，两支橡皮可以各是一种擦法与半径，互不影响。改某一项的数据在工具栏上做 —— 点中它（或选中后打开它的菜单），改颜色粗细当场生效；这里只管它的位置与去留。" Style="{StaticResource HelperTextStyle}" Margin="0,0,0,8" />
+                                <!--
+                                  一页两段，**不套标签页**：上面是工具栏此刻的样子（拖动改顺序），
+                                  下面是组件库（按住拖上来加一件）。
+
+                                  套一层 FluentTabView 就把两段拆到了两个页面里，于是"从下面拖到上面"
+                                  变成了"先切过去拿、再切过去放"—— 手势的方向被界面结构抹掉了，
+                                  而那正是这一页唯一要表达的事。（顺带：这一页外面已经是设置页的
+                                  导航，再套一层标签控件就是导航里套导航。）
+                                -->
                                 <Border Style="{StaticResource SettingsCardStyle}">
                                     <StackPanel Margin="0,12">
-                                        <StackPanel x:Name="ToolbarToolRows" />
-                                        <StackPanel Orientation="Horizontal" Margin="16,12,16,0">
-                                            <Button x:Name="AddPenToolButton" Content="加一支笔" />
-                                            <Button x:Name="AddEraserToolButton" Content="加一把橡皮" Margin="8,0,0,0" />
-                                            <Button x:Name="AddSeparatorToolButton" Content="加一条分隔线" Margin="8,0,0,0" />
-                                        </StackPanel>
-                                        <TextBlock x:Name="ToolbarToolHintText" Style="{StaticResource HelperTextStyle}" Margin="16,8,16,0" />
+
+                                        <TextBlock Text="工具栏" Style="{StaticResource SectionTextStyle}" Margin="16,0,16,4" />
+                                        <TextBlock Text="下面这一排就是工具栏此刻的样子，按显示顺序排。选中它可以调这一项的颜色与粗细；在这一排里拖动可以改顺序。" Style="{StaticResource HelperTextStyle}" Margin="16,0,16,8" />
+                                        <!-- 一排工具可能比设置页还宽，所以外面套一条横向滚动：排不下就滚 -->
+                                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                                            <StackPanel x:Name="ToolbarLayoutStripHost" Orientation="Horizontal" Margin="16,4,16,4" />
+                                        </ScrollViewer>
+                                        <TextBlock x:Name="ToolbarLayoutHintText" Style="{StaticResource HelperTextStyle}" Margin="16,4,16,0" TextWrapping="Wrap" />
+
+                                        <Border Height="1" Margin="16,12,16,12" Background="{StaticResource DividerStrokeColorDefaultBrush}" />
+
+                                        <TextBlock Text="工具菜单" Style="{StaticResource SectionTextStyle}" Margin="16,0,16,4" />
+                                        <TextBlock Text="所有能放到工具栏上的工具。按住一格拖到上面那一排就加进去；也可以点右边的加号，加到末尾。灰色的那几格是固定项（退出画布与改设置的唯一入口），本来就有一枚，不能再加。" Style="{StaticResource HelperTextStyle}" Margin="16,0,16,8" TextWrapping="Wrap" />
+                                        <WrapPanel x:Name="ToolbarLibraryTiles" Margin="12,0,8,0" />
                                     </StackPanel>
                                 </Border>
                             </StackPanel>

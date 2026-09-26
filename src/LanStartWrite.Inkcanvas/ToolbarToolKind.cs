@@ -41,4 +41,13 @@ internal enum ToolbarToolKind
     /// </para>
     /// </summary>
     Whiteboard = 7,
+
+    /// <summary>
+    /// 打开图片并进入图片批注。<b>固定有且只有一个</b>，理由与 <see cref="Whiteboard"/> 同：
+    /// 它是"看图批注"的唯一入口。
+    /// <para>
+    /// 它是<b>普通按钮</b>而不是选择态：点它换的是"眼前是哪块画布"，与"当前选中哪支笔"是两根轴。
+    /// </para>
+    /// </summary>
+    Image = 8,
 }

@@ -50,9 +50,16 @@ internal sealed record ToolbarTool
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public uint? WhiteboardColorArgb { get; init; }
 
-    internal uint ColorFor(CanvasScene scene) => scene == CanvasScene.Whiteboard
-        ? WhiteboardColorArgb ?? ColorArgb
-        : ScreenAnnotationColorArgb ?? ColorArgb;
+    /// <summary>
+    /// 这一支笔在<b>哪块画布</b>上是什么颜色。
+    /// <para>
+    /// 只有屏幕批注有一份自己的颜色；白板与图片批注共用另一份 —— 它们是"在某一页上写字"，
+    /// 同一支笔在它们上面该是同一个颜色，分成三份只会让人以为换场景就换笔。
+    /// </para>
+    /// </summary>
+    internal uint ColorFor(CanvasScene scene) => scene == CanvasScene.ScreenAnnotation
+        ? ScreenAnnotationColorArgb ?? ColorArgb
+        : WhiteboardColorArgb ?? ColorArgb;
 
     /// <summary>笔宽（设备无关单位）。</summary>
     public double Thickness { get; init; } = 4;

@@ -49,7 +49,7 @@ internal static class ToolbarToolVisuals
     {
         // 同一颗钮在两块画布上是两件事：批注里"鼠标"= 把桌面还回去，白板里 = 挑墨迹、挪墨迹。
         // 换的是呈现，不换身份（存档里的 Id 仍是 mouse、Name 仍不动）。
-        ToolbarToolKind.Mouse => CanvasSceneState.IsActive(CanvasScene.Whiteboard)
+        ToolbarToolKind.Mouse => CanvasSceneState.IsPageScene(CanvasSceneState.Active)
             ? (ushort)0xE8B3        // SelectAll，实测 ink=401
             : (ushort)0xE7C9,       // TouchPointer，ink=338
         ToolbarToolKind.Pen => 0xE76D,         // InkingTool
@@ -58,6 +58,7 @@ internal static class ToolbarToolVisuals
         ToolbarToolKind.Redo => 0xE7A6,        // Redo
         ToolbarToolKind.Settings => 0xE713,    // Setting
         ToolbarToolKind.Whiteboard => 0xE786,  // Slideshow，ink=389
+        ToolbarToolKind.Image => 0xE8B9,       // Picture，ink=433
         _ => 0xE76D,
     };
 
@@ -70,7 +71,7 @@ internal static class ToolbarToolVisuals
     /// </para>
     /// </summary>
     internal static string DisplayName(ToolbarTool tool) =>
-        tool.Kind == ToolbarToolKind.Mouse && CanvasSceneState.IsActive(CanvasScene.Whiteboard)
+        tool.Kind == ToolbarToolKind.Mouse && CanvasSceneState.IsPageScene(CanvasSceneState.Active)
             ? "选择"
             : tool.Name;
 

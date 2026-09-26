@@ -132,7 +132,16 @@ internal static class ToolbarTools
     /// 因为用户说的"再放一个"几乎总是"再放一个跟这个差不多的"；
     /// 空白的第二支笔只会让人再调一遍。
     /// </summary>
-    internal static ToolbarTool? Add(ToolbarToolKind kind)
+    /// <param name="kind">哪一类。</param>
+    /// <param name="insertAt">
+    /// 落在第几格；<c>null</c> 是"按老规矩插在选中那项后面"。
+    /// <para>
+    /// 拖动建新项必须有这个：从组件库把一支笔拖到那一排的第 3 格左半边，
+    /// 用户的期望就是<b>它出现在第 3 格</b>，不是"先落到默认位置再自己挪过去"。
+    /// 没有落点这一维，拖放就退化成"点一下加一个"，而那一排的顺序从此与用户的手势无关。
+    /// </para>
+    /// </param>
+    internal static ToolbarTool? Add(ToolbarToolKind kind, int? insertAt = null)
     {
         if (kind is not (ToolbarToolKind.Pen or ToolbarToolKind.Eraser or ToolbarToolKind.Separator))
             return null;
@@ -155,7 +164,8 @@ internal static class ToolbarTools
         };
 
         tool = Normalize(tool);
-        Tools.Insert(InsertIndex(), tool);
+        var at = insertAt is { } wanted ? Math.Clamp(wanted, 0, Tools.Count) : InsertIndex();
+        Tools.Insert(at, tool);
         LayoutChanged?.Invoke();
         return tool;
     }
@@ -179,14 +189,24 @@ internal static class ToolbarTools
     }
 
     /// <summary>在列表里挪一格。<paramref name="delta"/> 为 -1 向前、+1 向后；到边界就是没挪动。</summary>
-    internal static bool Move(string? id, int delta)
+    internal static bool Move(string? id, int delta) =>
+        MoveTo(id, (IndexOf(id) is var at && at >= 0 ? at : 0) + delta);
+
+    /// <summary>
+    /// 把某一项挪到 <paramref name="targetIndex"/>（<b>挪完之后的落点</b>，不是"往那边走几格"）。
+    /// <para>
+    /// 拖动改序要的就是这个语义：手指落在哪一格的左边就该停在哪一格，
+    /// 而"往那边走几格"在拖过头再拖回来时会来回跳 —— 落点与目标反了，于是顺序永远对不齐。
+    /// </para>
+    /// </summary>
+    internal static bool MoveTo(string? id, int targetIndex)
     {
         var tool = Find(id);
-        if (tool is null || delta == 0) return false;
+        if (tool is null) return false;
 
         var index = Tools.IndexOf(tool);
-        var target = index + delta;
-        if (target < 0 || target >= Tools.Count) return false;
+        var target = Math.Clamp(targetIndex, 0, Tools.Count - 1);
+        if (target == index) return false;
 
         Tools.RemoveAt(index);
         Tools.Insert(target, tool);
@@ -221,9 +241,9 @@ internal static class ToolbarTools
     internal static bool UpdateSelectedPenColor(uint color)
     {
         var scene = CanvasSceneState.Active;
-        return Selected is { Kind: ToolbarToolKind.Pen } pen && Update(pen.Id, tool => scene == CanvasScene.Whiteboard
-            ? tool with { WhiteboardColorArgb = color }
-            : tool with { ScreenAnnotationColorArgb = color });
+        return Selected is { Kind: ToolbarToolKind.Pen } pen && Update(pen.Id, tool => scene == CanvasScene.ScreenAnnotation
+            ? tool with { ScreenAnnotationColorArgb = color }
+            : tool with { WhiteboardColorArgb = color });
     }
 
     /// <summary>改<b>当前选中那把橡皮</b>的数据；选中的不是橡皮就什么都不做。</summary>
@@ -363,6 +383,7 @@ internal static class ToolbarTools
         ToolbarToolKind.Redo => "重做",
         ToolbarToolKind.Settings => "设置",
         ToolbarToolKind.Whiteboard => "白板",
+        ToolbarToolKind.Image => "图片",
         _ => "分隔线",
     };
 
@@ -375,9 +396,10 @@ internal static class ToolbarTools
     // ------------------------------------------------------------------ 内部
 
     /// <summary>
-    /// 默认工具栏 = 今天这一条：鼠标 / 白板 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置。
+    /// 默认工具栏 = 今天这一条：鼠标 / 白板 / 图片 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置。
     /// <para>
     /// 白板紧跟在鼠标后面：这两颗是一对（一个出这块画布、一个进那块）。
+    /// 图片紧跟在白板后面：它同样是"进另一块画布"，紧挨着才成一条路。
     /// 存档里补齐固定项时用的是同一个位置，所以"首启"与"从旧档升级"看到的是同一条顺序。
     /// </para>
     /// </summary>
@@ -385,6 +407,7 @@ internal static class ToolbarTools
     [
         new ToolbarTool { Id = "mouse", Kind = ToolbarToolKind.Mouse, Name = "鼠标模式" },
         new ToolbarTool { Id = "whiteboard", Kind = ToolbarToolKind.Whiteboard, Name = "白板" },
+        new ToolbarTool { Id = "image", Kind = ToolbarToolKind.Image, Name = "图片" },
         DefaultPen() with { Id = "pen.1", Name = "笔" },
         DefaultEraser() with { Id = "eraser.1", Name = "橡皮" },
         new ToolbarTool { Id = "undo", Kind = ToolbarToolKind.Undo, Name = "撤销" },
