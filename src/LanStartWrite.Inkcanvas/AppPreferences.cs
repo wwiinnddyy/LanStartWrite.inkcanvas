@@ -205,6 +205,20 @@ internal sealed record PreferenceSnapshot
     public bool ImageRestoreOnStartup { get; init; }
 
     /// <summary>
+    /// PDF 的浏览方式：<c>true</c> = <b>连续</b>（一份文档一个世界，滚轮连续翻页、页与页同时在屏），
+    /// <c>false</c> = <b>切页</b>（一次看一页，视口吸在页边界上，左边常驻胶片条）。
+    /// <para>
+    /// 默认 <b>false</b>（切页）：一份动辄几百页的 PDF，第一眼就该是"我在第几页"而不是
+    /// "我在文档的哪个像素位置"。连续是给"并排对看两页"用的，代价是多占一列胶片与更长的适应计算。
+    /// </para>
+    /// <para>
+    /// <b>只对 PDF 生效</b>，图片与白板那两块画布的浏览模型没有可切的两态 ——
+    /// 给它们加一个同名的开关只会让人以为那里也能这么用。
+    /// </para>
+    /// </summary>
+    public bool PdfContinuousBrowse { get; init; }
+
+    /// <summary>
     /// 上次打开图片时所在的那个目录，文件选择框从这儿起。
     /// <para>
     /// 存它是因为"每次都从文档目录开始翻"是那种很小但天天遇的烦。
@@ -212,6 +226,17 @@ internal sealed record PreferenceSnapshot
     /// </para>
     /// </summary>
     public string LastImageDirectory { get; init; } = "";
+
+    /// <summary>
+    /// 上次打开 PDF 所在的那个目录，文件框从这儿起。<b>空串</b>表示还没打开过任何 PDF。
+    /// <para>
+    /// 与 <see cref="LastImageDirectory"/> <b>分成两份</b>而不是共用一份：
+    /// 两者的用户群几乎不重叠（批图的人与读 PDF 合同的人不是同一批），
+    /// 而共用一份会让两边互相把对方的起始目录顶掉 —— 于是"刚看完一份 PDF，
+    /// 打开图片时起始目录跑到合同那个文件夹里了"。
+    /// </para>
+    /// </summary>
+    public string LastPdfDirectory { get; init; } = "";
 
     /// <summary>
     /// 最近打开过的图片文件（新的在前，最多 <see cref="MaxRecentImages"/> 个）。
@@ -458,6 +483,9 @@ internal static class AppPreferences
             {
                 ToolbarToolKind.Whiteboard => IndexAfterKind(kept, ToolbarToolKind.Mouse),
                 ToolbarToolKind.Image => IndexAfterKind(kept, ToolbarToolKind.Whiteboard),
+                // PDF 紧跟图片：两个都是"打开某个文件来批注"的入口，
+                // 挨着放才像一对，而分开会被中间的用户自定义笔隔开。
+                ToolbarToolKind.Pdf => IndexAfterKind(kept, ToolbarToolKind.Image),
                 _ => kept.Count,
             };
             kept.Insert(at, fallback);
@@ -481,7 +509,7 @@ internal static class AppPreferences
     /// </summary>
     private static readonly ToolbarToolKind[] FixedKinds =
     [
-        ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Image,
+        ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Image, ToolbarToolKind.Pdf,
         ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Settings,
     ];
 

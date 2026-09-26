@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    阶段 0 探针：**独立工程**，不引用主应用。
+
+    为什么要独立：PDF 功能的地基是「PDFium 能不能加载并光栅化」，而验证它**不该**要求
+    界面跑起来、也不该要求主应用那 433 条断言全绿。一进主工程就等于把"PDF 能不能用"
+    和"这个应用还正不正常"两件事绑在一起 —— 前者失败时后者也给不出信息。
+
+    它只编译 Pdf\PdfiumNative.cs 与 Pdf\PdfPageRasterizer.cs 两个文件（链接，不复制）：
+    <b>同一份源码</b>，所以探针量出来的数字对主应用有效；改一处两边同时变。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LanStartWrite.Inkcanvas.Tools</RootNamespace>
+    <AssemblyName>LanStartWrite.Inkcanvas.PdfProbe</AssemblyName>
+    <!-- 探针不参与安装包与 CI 门禁，它只是开发期的一把尺子。 -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\LanStartWrite.Inkcanvas\Pdf\PdfiumNative.cs" Link="Pdf\PdfiumNative.cs" />
+    <Compile Include="..\..\src\LanStartWrite.Inkcanvas\Pdf\PdfPageRasterizer.cs" Link="Pdf\PdfPageRasterizer.cs" />
+    <Compile Include="..\..\src\LanStartWrite.Inkcanvas\Tools\PdfProbe.cs" Link="Tools\PdfProbe.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="bblanchon.PDFium.Win32" Version="156.0.8066" />
+    <PackageReference Include="bblanchon.PDFium.Linux" Version="156.0.8066" />
+  </ItemGroup>
+
+</Project>

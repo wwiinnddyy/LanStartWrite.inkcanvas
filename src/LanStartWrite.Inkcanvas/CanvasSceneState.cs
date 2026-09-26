@@ -52,5 +52,5 @@ internal static class CanvasSceneState
     /// </para>
     /// </summary>
     internal static bool IsPageScene(CanvasScene scene) =>
-        scene is CanvasScene.Whiteboard or CanvasScene.ImageCanvas;
+        scene is CanvasScene.Whiteboard or CanvasScene.ImageCanvas or CanvasScene.PdfCanvas;
 }

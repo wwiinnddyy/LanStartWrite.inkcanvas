@@ -197,6 +197,21 @@
                                         <fluent:FluentToggleSwitch x:Name="ImageRestoreSwitch" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
+                                <!--
+                                  PDF 的浏览方式。**只对 PDF 生效**：白板与图片那两块画布
+                                  没有可切的两态，给它们加同名的开关只会让人以为那里也能这么用。
+                                  下面那行说明会把"此刻是哪一档"念出来（关掉它时没有任何即时反馈，
+                                  那是用户唯一能确认"它记住了"的地方）。
+                                -->
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="PDF 连续浏览（实验）" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock x:Name="PdfContinuousBrowseText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <fluent:FluentToggleSwitch x:Name="PdfContinuousBrowseSwitch" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
                                 <Border Style="{StaticResource SettingsCardStyle}">
                                     <fluent:FluentSettingsRow StackAtWidth="420">
                                         <StackPanel VerticalAlignment="Center">

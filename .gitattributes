@@ -1,2 +1,18 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# 随仓库带着的 NuGet 包是**二进制**（zip）。`* text=auto` 靠启发式判断，
+# 判错一次的后果是 34 MB 的 zip 被做行尾归一化 —— 那不是"多了几个字节"，
+# 而是整个包在 CI 上解不出来，而症状是"restore 失败"这种与包本身无关的话。
+# 这里显式钉住，别去猜启发式。
+*.nupkg binary
+*.pdb binary
+*.so binary
+*.dll binary
+*.pdf binary
+
+# 标记与打包脚本：明确用 LF。NSIS 的 BOM 已经由文件自己带（239,187,191），
+# 换行归一化不影响它，但写清楚省得下一个人再问一遍。
+*.nsi text eol=lf
+*.desktop text eol=lf
+*.yml text eol=lf

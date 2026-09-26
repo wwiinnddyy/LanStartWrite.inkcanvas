@@ -55,6 +55,8 @@ internal static class ToolbarToolCatalog
             "进 / 出白板这块画布。那块画布的唯一入口，固定有一枚，不可再加也不可删。", false),
         new(ToolbarToolKind.Image, "图片", 0xE8B9,
             "打开一张图并在它上面批注。看图批注的唯一入口，固定有一枚，不可再加也不可删。", false),
+        new(ToolbarToolKind.Pdf, "PDF", 0xE8C5,
+            "打开一份 PDF 并在上面批注。一份 PDF 开一个窗口，页与页之间连续滚动；固定项，只有一枚", false),
         new(ToolbarToolKind.Undo, "撤销", 0xE7A7,
             "退回上一步。基本盘，固定有一枚，不可再加也不可删。", false),
         new(ToolbarToolKind.Redo, "重做", 0xE7A6,

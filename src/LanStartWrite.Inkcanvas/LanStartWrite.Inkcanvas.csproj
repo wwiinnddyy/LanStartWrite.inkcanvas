@@ -36,6 +36,20 @@
     <!-- 闭源 SDK：单个混淆过的 Dusk.dll，来自 ../dusk-feed（见 NuGet.config）。 -->
     <PackageReference Include="Dusk" Version="1.0.3" />
     <!--
+      PDF 光栅化：Chromium 的 PDFium，**只有原生二进制，没有托管绑定**
+      （托管绑定在 PDFtoImage 里，而那一份会拖进 SkiaSharp）。
+
+      这里按用户定的「直连、不引 Skia」走：P/Invoke 由 Pdf\PdfiumNative.cs 自己写。
+      换来的代价是多写一个薄薄�� interop 层，换来的是
+      渲染链上**不出现第二个图形栈**（本项目的渲染器是 Jalium 的 Vello/DX12）。
+
+      只引两个平台包，**不引 bblanchon.PDFium 那个元包** —— 它会把 Android / iOS / macOS /
+      WebAssembly 一并拉进来，而 deb 与 AppImage 的体积与依赖审计都不该为它们付账。
+      nupkg 已 vendor 进 packaging/feed（守住 NuGet.config 的 <clear/>，CI 不用改）。
+    -->
+    <PackageReference Include="bblanchon.PDFium.Win32" Version="156.0.8066" />
+    <PackageReference Include="bblanchon.PDFium.Linux" Version="156.0.8066" />
+    <!--
       Fluent 控件层：FluentJalium（Astra），源码直引。
       库自己只依赖 Jalium.UI.Controls + .Xaml（都是 TFM 无关的 net10.0 程序集），
       路径见上面的 FluentJaliumProject 属性。

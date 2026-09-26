@@ -1,0 +1,126 @@
+<Window xmlns="http://schemas.jalium.ui/2024"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LanStartWrite.Inkcanvas.PdfViewerWindow"
+        Title="PDF 批注"
+        Width="1040" Height="820" MinWidth="520" MinHeight="400"
+        WindowStartupLocation="Manual"
+        ResizeMode="CanResize"
+        WindowStyle="SingleBorderWindow"
+        ShowInTaskbar="True"
+        AllowsTransparency="False"
+        SystemBackdrop="None">
+
+    <!--
+      与图片窗口同一副骨架，但**左侧多一条连续胶片**（PdfFilmstripHost），页面区域本身
+      不翻页：整份文档是**一个** InkHost 上的**一个**世界，滚轮与拖动都是"平移这个世界"。
+      胶片条与页面区域**双向**联动：滚页面它跟着挪高亮，点胶片它跳页。
+
+      那 N 张页图与 N 个页矩形都不在标记里声明：由 code-behind 按 PdfPageLayout 的几何
+      铺进 InkHost 里那张 WorldLayer（理由同 ImageViewerWindow 的图）。AGENTS 的规矩是
+      .jalxaml 里不出现 Dusk 的类型名；顺带 N 页时标记里那 N 个元素也没法维护。
+    -->
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Grid x:Name="FilmstripHost" Grid.Column="0" VerticalAlignment="Stretch" />
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid x:Name="InkHost" Grid.Row="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+
+            <!--
+              底栏与图片窗口同族：左边页码 + 批注栏，右边缩放控件，整条离边 12 DIP。
+              **没有"打开文件"那颗钮** —— 一份 PDF 就是一份文档，加第二个 PDF 应该是
+              另一个窗口而不是这一份里多一页（批注账、撤销账、页码都会串）。
+            -->
+            <Grid Grid.Row="1" Margin="12,0,12,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Bottom">
+
+                    <Border Height="56"
+                            Background="{StaticResource ToolbarSurfaceBrush}"
+                            CornerRadius="{StaticResource OverlayCornerRadius}"
+                            ClipToBounds="True"
+                            Padding="4,7">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="72" />
+                                <ColumnDefinition Width="40" />
+                            </Grid.ColumnDefinitions>
+
+                            <Button x:Name="PreviousPageButton"
+                                    Grid.Column="0"
+                                    Style="{StaticResource ToolActionButtonStyle}">
+                                <FontIcon Glyph="&#xE76B;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                            </Button>
+                            <!--
+                              页码是**可点的**：点了弹出胶片条（切页模式下弹一列，
+                              连续模式下那一列就是左边常驻的胶片）。字号显式给 12，
+                              与图片窗口同一个理由：靠 Button 默认呈现器会撑大。
+                            -->
+                            <Button x:Name="PageNumberButton"
+                                    Grid.Column="1"
+                                    MinWidth="64"
+                                    Margin="2,0"
+                                    Padding="4,0"
+                                    VerticalAlignment="Center"
+                                    HorizontalContentAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    ToolTip="点击可查看页面">
+                                <TextBlock x:Name="PageNumberText" Text="0 / 0" FontSize="12" />
+                            </Button>
+                            <Button x:Name="NextPageButton"
+                                    Grid.Column="2"
+                                    Style="{StaticResource ToolActionButtonStyle}">
+                                <FontIcon Glyph="&#xE76C;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <Grid x:Name="ToolbarHostGrid" Margin="12,0,0,0" VerticalAlignment="Bottom" />
+                </StackPanel>
+
+                <Grid x:Name="ZoomControlHost" Grid.Column="2" VerticalAlignment="Bottom">
+                    <Border Background="{StaticResource ToolbarSurfaceBrush}"
+                            CornerRadius="{StaticResource OverlayCornerRadius}"
+                            ClipToBounds="True"
+                            Padding="4,7">
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="ZoomInButton" Style="{StaticResource ToolActionButtonStyle}">
+                                <FontIcon Glyph="&#xE710;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                            </Button>
+                            <Button x:Name="ZoomPercentButton"
+                                    MinWidth="56"
+                                    Margin="2,0"
+                                    Padding="4,0"
+                                    VerticalAlignment="Center"
+                                    HorizontalContentAlignment="Center"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    ToolTip="点击可无级调节缩放">
+                                <TextBlock x:Name="ZoomPercentText" Text="100%" FontSize="12" />
+                            </Button>
+                            <Button x:Name="ZoomOutButton" Style="{StaticResource ToolActionButtonStyle}">
+                                <FontIcon Glyph="&#xE738;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                            </Button>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

@@ -1,3 +1,4 @@
+using Microsoft.Win32;
 using FluentJalium.Controls;
 using FluentJalium.Themes;
 using Jalium.UI;
@@ -31,6 +32,8 @@ public partial class AnnotationToolbarWindow : Window
     private AnnotationOverlayWindow? _annotationOverlay;
     private WhiteboardWindow? _whiteboard;
     private ImageViewerWindow? _imageViewer;
+    private PdfViewerWindow? _pdfViewer;
+    private bool _pdfViewerPresented;
     private SettingsWindow? _settingsWindow;
     private PenSecondaryMenuWindow? _penMenuWindow;
     private bool _penMenuVisible;
@@ -231,6 +234,9 @@ public partial class AnnotationToolbarWindow : Window
     {
         CanvasScene.Whiteboard => _whiteboard?.Surface,
         CanvasScene.ImageCanvas => _imageViewer?.Surface,
+        // PDF 那块面**住在 PDF 窗口里**，但"所有写到画布去的动作"仍要经 ActiveSurface ——
+        // 不这么做的症状是：在 PDF 上按撤销，安静地撤掉了另一块画布的历史。
+        CanvasScene.PdfCanvas => _pdfViewer?.Surface,
         _ => _annotationOverlay?.Surface,
     };
 
@@ -474,6 +480,9 @@ public partial class AnnotationToolbarWindow : Window
                 break;
             case ToolbarToolKind.Image:
                 action.Click += (_, _) => EnterImageCanvas();
+                break;
+            case ToolbarToolKind.Pdf:
+                action.Click += (_, _) => EnterPdfCanvas();
                 break;
         }
 
@@ -964,12 +973,157 @@ public partial class AnnotationToolbarWindow : Window
             case CanvasScene.ImageCanvas:
                 SyncImageViewerOverlay();
                 break;
+            case CanvasScene.PdfCanvas:
+                SyncPdfOverlay();
+                break;
             default:
                 SyncAnnotationOverlay();
                 break;
         }
 
         ApplyToolbarHosting();
+    }
+
+    /// <summary>
+    /// PDF 那块画布的显隐。<b>与其他两块不同：它由"有没有打开过一份 PDF"决定，不由工具决定</b>。
+    /// <para>
+    /// 白板与图片是"点一下进、再点一下回"，而 PDF 是"点一下弹文件框、选一份就开窗" ——
+    /// 用户没选文件时<b>不该开一个空窗口</b>（那是个没有内容的顶层窗口，
+    /// 用户只能关掉它，白白多一次点击），而选完之后就该一直在，
+    /// 直到用户明确关掉它或者切去别的画布。
+    /// </para>
+    /// </summary>
+    private void SyncPdfOverlay()
+    {
+        if (_settingsWindow is not null)
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+            SyncUndoRedoState();
+            return;
+        }
+
+        if (_pdfViewer is null || !_pdfViewer.HasDocument)
+        {
+            // 没有文档就别占屏：这时"鼠标模式"该做的事是让桌面可用。
+            if (_annotationOverlay is not null) _annotationOverlay.Hide();
+            _pdfViewerPresented = false;
+            SyncUndoRedoState();
+            return;
+        }
+
+        if (!_pdfViewerPresented)
+        {
+            _pdfViewerPresented = true;
+            _pdfViewer.Show();
+        }
+
+        _pdfViewer.Activate();
+        SyncUndoRedoState();
+    }
+
+    /// <summary>
+    /// 工具栏那顆「PDF」：没开过就问一份文件，开过就退回去。
+    /// <para>
+    /// <b>它是一个 toggle，与图片那颗同形</b>：点第二下是"我要回去用白板/桌面"，
+    /// 而不是"再开一份"。一份 PDF 一个窗口是刻意的 —— 两份 PDF 的页码、撤销账、
+    /// 渲染档位缓存全是各自一份，塞进同一个窗口会立刻开始互相串。
+    /// 想换一份就关掉这个窗口（或者用系统菜单）再点这颗。
+    /// </para>
+    /// </summary>
+    private void EnterPdfCanvas()
+    {
+        if (_pdfViewer is { HasDocument: true } && _pdfViewerPresented)
+        {
+            ToggleCanvasScene(CanvasScene.ScreenAnnotation);
+            return;
+        }
+
+        var dialog = new OpenFileDialog
+        {
+            Title = "打开 PDF",
+            Filter = "PDF 文档|*.pdf",
+            CheckFileExists = true,
+        };
+        var remembered = AppPreferences.Current.LastPdfDirectory;
+        if (!string.IsNullOrEmpty(remembered) && Directory.Exists(remembered)) dialog.InitialDirectory = remembered;
+
+        // 取消 = 什么都不发生（而不是退回去）：用户是"还没决定"，不是"决定不打开"。
+        if (dialog.ShowDialog((Window?)_pdfViewer ?? this) != true) return;
+
+        EnsurePdfViewer();
+        var viewer = _pdfViewer;
+        if (viewer is null)
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+            MessageBox.Show(this, "PDF 窗口没能建立。", "PDF 批注", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!viewer.TryOpenPdf(dialog.FileName, out var error))
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+            MessageBox.Show(this, error ?? "这份 PDF 打不开。", "PDF 批注", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        RememberPdfOpened(dialog.FileName);
+        _pdfViewerPresented = true;
+        CanvasSceneState.Active = CanvasScene.PdfCanvas;
+        SyncCanvasOverlay();
+    }
+
+    /// <summary>
+    /// 启动时开一份 PDF（文件关联那条路）。<b>不在这里弹文件框</b> ——
+    /// 用户已经双击过某一个具体文件了，再问一次"你开哪份"是把他的选择当没听见。
+    /// </summary>
+    internal void BeginStartupPdf(string path)
+    {
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            EnsurePdfViewer();
+            var viewer = _pdfViewer;
+            if (viewer is null) return;
+
+            if (!viewer.TryOpenPdf(path, out var error))
+            {
+                HidePenSecondaryMenu();
+                HideEraserSecondaryMenu();
+                MessageBox.Show(this, error ?? "这份 PDF 打不开。", "PDF 批注", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            RememberPdfOpened(path);
+            _pdfViewerPresented = true;
+            CanvasSceneState.Active = CanvasScene.PdfCanvas;
+            SyncCanvasOverlay();
+        }));
+    }
+
+    private void RememberPdfOpened(string path)
+    {
+        var directory = Path.GetDirectoryName(path);
+        AppPreferences.Update(AppPreferences.Current with
+        {
+            LastPdfDirectory = string.IsNullOrEmpty(directory) ? AppPreferences.Current.LastPdfDirectory : directory,
+        });
+    }
+
+    private void EnsurePdfViewer()
+    {
+        if (_pdfViewer is not null) return;
+        _pdfViewer = new PdfViewerWindow();
+        _pdfViewer.PreviewPointerDown += (_, _) =>
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+        };
+        _pdfViewer.HistoryStateChanged += OnHistoryStateChanged;
+        // 关掉 PDF 窗口必须把批注栏搬回来，否则它留在一个已经没了的窗口里 ——
+        // 症状与图片窗口那条一模一样：屏幕上什么都没有，而它又是 app.MainWindow。
+        _pdfViewer.Closed += (_, _) => RestoreFromHost();
     }
 
     /// <summary>
@@ -992,7 +1146,11 @@ public partial class AnnotationToolbarWindow : Window
             && _imageViewer is not null
             && AppPreferences.Current.ImageOpenMode == ImageOpenMode.Window;
 
-        if (wantsImageWindow && _imageViewer is { } viewer) RehostInto(viewer.ToolbarHost, viewer);
+        // PDF 窗口**永远**接着批注栏：它没有全屏那一档，
+        // 而一个接不到批注栏的 PDF 窗口就是"看得见但写不了"，
+        // 那是比"没有这个功能"更糟的一种半成品。
+        if (_pdfViewerPresented && _pdfViewer is { HasDocument: true } pdf) RehostInto(pdf.ToolbarHost, pdf);
+        else if (wantsImageWindow && _imageViewer is { } viewer) RehostInto(viewer.ToolbarHost, viewer);
         else RestoreFromHost();
     }
 

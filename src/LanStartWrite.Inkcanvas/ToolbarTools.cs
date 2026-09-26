@@ -408,6 +408,7 @@ internal static class ToolbarTools
         new ToolbarTool { Id = "mouse", Kind = ToolbarToolKind.Mouse, Name = "鼠标模式" },
         new ToolbarTool { Id = "whiteboard", Kind = ToolbarToolKind.Whiteboard, Name = "白板" },
         new ToolbarTool { Id = "image", Kind = ToolbarToolKind.Image, Name = "图片" },
+        new ToolbarTool { Id = "pdf", Kind = ToolbarToolKind.Pdf, Name = "PDF" },
         DefaultPen() with { Id = "pen.1", Name = "笔" },
         DefaultEraser() with { Id = "eraser.1", Name = "橡皮" },
         new ToolbarTool { Id = "undo", Kind = ToolbarToolKind.Undo, Name = "撤销" },

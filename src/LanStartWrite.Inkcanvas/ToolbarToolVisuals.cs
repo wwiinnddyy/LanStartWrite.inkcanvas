@@ -59,6 +59,9 @@ internal static class ToolbarToolVisuals
         ToolbarToolKind.Settings => 0xE713,    // Setting
         ToolbarToolKind.Whiteboard => 0xE786,  // Slideshow，ink=389
         ToolbarToolKind.Image => 0xE8B9,       // Picture，ink=433
+        // PDF 用 E8C5：它与 Picture 同一族（一张"纸"），而 E8B9 在 40×40 的小格里
+        // 与白板那颗 Slideshow 靠得太近，两个"打开文件"入口分不开。
+        ToolbarToolKind.Pdf => 0xE8C5,
         _ => 0xE76D,
     };
 

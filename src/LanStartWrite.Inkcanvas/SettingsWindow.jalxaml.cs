@@ -169,6 +169,8 @@ public partial class SettingsWindow : Window
         };
         BindSwitch((FluentToggleSwitch)ImageRestoreSwitch!, "启动时打开上次的图片", value =>
             AppPreferences.Update(AppPreferences.Current with { ImageRestoreOnStartup = value }));
+        BindSwitch((FluentToggleSwitch)PdfContinuousBrowseSwitch!, "PDF 连续浏览", value =>
+            AppPreferences.Update(AppPreferences.Current with { PdfContinuousBrowse = value }));
         OpenImageDirectoryButton.Click += (_, _) => OpenLastImageDirectory();
         SetDefaultViewerButton.Click += (_, _) => DefaultImageViewer.OpenSettingsFor(this);
         AutomationProperties.SetName(SetDefaultViewerButton, "去系统里设置默认图片查看器");
@@ -522,6 +524,12 @@ public partial class SettingsWindow : Window
             // 两档的东西做成"二选一"控件会多一份互斥状态要同步，而这里它就是一个枚举。
             ImageOpenModeChoice.SelectedItem = ImageOpenModeChoice.Items[(int)value.ImageOpenMode];
             ((FluentToggleSwitch)ImageRestoreSwitch!).IsChecked = value.ImageRestoreOnStartup;
+            ((FluentToggleSwitch)PdfContinuousBrowseSwitch!).IsChecked = value.PdfContinuousBrowse;
+            // 把当前行为念出来：切这一档时屏幕上没有任何变化（它要等下次打开 PDF 才显形），
+            // 而这一行是用户唯一能确认"它记住了"的地方。
+            ((TextBlock)PdfContinuousBrowseText!).Text = value.PdfContinuousBrowse
+                ? "滚轮连续翻页，页与页可以同时在屏幕上，左边不显示胶片条。只对 PDF 生效，下次打开 PDF 时生效。"
+                : "一次看一页，视口会吸在页边界上，左边常驻一条可点的页面胶片。只对 PDF 生效，下次打开 PDF 时生效。";
             var lastDirectory = value.LastImageDirectory;
             ((TextBlock)LastImageDirectoryText!).Text = lastDirectory.Length > 0
                 ? lastDirectory

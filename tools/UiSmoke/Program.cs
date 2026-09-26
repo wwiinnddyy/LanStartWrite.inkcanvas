@@ -10,6 +10,7 @@ using Dusk.Ink.Document;
 using Dusk.Ink.Input;
 using Dusk.Ink.Model;
 using Dusk.Ink.Primitives;
+using LanStartWrite.Inkcanvas.Pdf;
 using Jalium.UI;
 using Jalium.UI.Automation;
 using Jalium.UI.Controls;
@@ -129,9 +130,18 @@ internal static class Program
             CheckToolbarPlacement();
             CheckPreferences(path);
             CheckInkSurface();
+            // PDF 三组必须排在 CheckWindowLayers 之前：它量的是整桌面上还剩几个窗口，
+            // 而这三组各起真窗口 —— 排在后面就等于给它的排名白送几位。
+            // 另一头它目前本机红（基线同样红，见 AGENTS），Check() 一红队列就停，
+            // 排在它后面的东西永远跑不到。先跑要验的，让挡路的那条自己最后红。
+            CheckPdfPageLayout();
+            CheckPdfViewerWindow();
+            CheckPdfResolutionPolicy();
             CheckWindowLayers();
         });
         // 排在导航动画那组之前：那组里有一条本机常红的时序检查，而 Check() 一红就中断整个队列。
+        // PDF 三组排在 CheckWindowLayers 之前：它量整张桌面的窗口排名，而这三组各起真窗口；
+        // 且它目前本机红（基线同样红，见 AGENTS），Check() 一红队列就停，排在它后面的等于没写。
         steps.Enqueue(CheckInkPreferenceLands);
         // 白板那两条读的是"下一拍才落地"的按钮状态，理由与上面那条相同（不能与发起那一拍同步断言）。
         steps.Enqueue(CheckWhiteboardUndoLands);
@@ -504,14 +514,20 @@ internal static class Program
         toolbar.Show();
         toolbar.ForceRenderFrame();
 
-        Check(ToolbarTools.Items.Count == 9, "默认工具栏是九项（八颗钮加一条分隔线）");
+        Check(ToolbarTools.Items.Count == 10, "默认工具栏是十项（九颗钮加一条分隔线）");
         Check(ToolbarTools.Items.Select(static tool => tool.Kind).SequenceEqual(new[]
             {
-                ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Image,
+                ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Image, ToolbarToolKind.Pdf,
                 ToolbarToolKind.Pen, ToolbarToolKind.Eraser,
                 ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Separator, ToolbarToolKind.Settings,
             }),
-            "默认顺序是 鼠标 / 白板 / 图片 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置");
+            "默认顺序是 鼠标 / 白板 / 图片 / PDF / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置");
+        // PDF 紧跟图片：两个都是"打开某个文件来批注"的入口，
+        // 分开会被中间的用户自定义笔隔开，而那看着就像两个无关的按钮。
+        var pdfIndex = ToolbarTools.Items.ToList().FindIndex(static tool => tool.Kind == ToolbarToolKind.Pdf);
+        var imageIndex = ToolbarTools.Items.ToList().FindIndex(static tool => tool.Kind == ToolbarToolKind.Image);
+        Check(pdfIndex == imageIndex + 1,
+            "PDF 紧跟在图片后面，两个「打开文件来批注」的入口像一对");
         Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Mouse }, "启动时停在鼠标模式");
 
         // ---------------------------------------------------------- 两支笔
@@ -649,7 +665,7 @@ internal static class Program
             "「白板」删不掉：它是那块画布的唯一入口，删了就进不去了");
 
         // 组件库：元数据表有几条就有几格，每格有图标、名字、描述、一个加号。
-        Check(library.TileCount == ToolbarToolCatalog.Entries.Count && library.TileCount == 9,
+        Check(library.TileCount == ToolbarToolCatalog.Entries.Count && library.TileCount == 10,
             $"组件库的格数等于元数据表条目数（{library.TileCount} 格）");
         Check(ToolbarToolCatalog.Entries.All(entry =>
                 library.FindTile(entry.Kind) is { ActualWidth: > 0, ActualHeight: > 0 }),
@@ -960,40 +976,48 @@ internal static class Program
         Check(percentText.Text == $"{viewer.ZoomPercent}%",
             $"底栏那个百分数与真实缩放一致（写着 {percentText.Text}，实得 {viewer.ZoomPercent}%）");
 
-        // 点百分数弹二级菜单，里面那条滑块是**无级**的。
+        // 点百分数弹浮层，里面那条滑块是**无级**的。
         ((Button)zoomPct).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         viewer.ForceRenderFrame();
-        var menu = viewer.ZoomMenu;
-        Check(menu is not null && viewer.IsZoomMenuOpen, "点百分数弹出缩放的二级菜单");
-        Check(menu is { IsContinuous: true }, "菜单里那条滑块是无级的（不吸到刻度上）");
-        Check(menu is { SliderPercent: > 0 }, "菜单打开时带着画布当前的倍数");
-        Check(menu is { PercentRange.Min: 0, PercentRange.Max: 300 },
+        var flyout = viewer.ZoomFlyoutControl;
+        Check(flyout is not null && viewer.IsZoomMenuOpen, "点百分数弹出缩放浮层");
+        Check(flyout is { IsContinuous: true }, "浮层里那条滑块是无级的（不吸到刻度上）");
+        Check(flyout is { SliderPercent: > 0 }, "浮层打开时带着画布当前的倍数");
+        Check(flyout is { PercentRange.Min: 0, PercentRange.Max: 300 },
             "滑块范围是 0~300%（用户要的）");
-        Check(menu is not null && menu.ActualWidth > 0 && menu.ActualWidth <= 240 && menu.ActualHeight <= 60,
-            $"菜单只有滑块那么长，不是第二套设置页（{menu?.ActualWidth:0}×{menu?.ActualHeight:0}）");
 
-        if (menu is not null)
+        // ══ 这是「为什么会覆盖在缩放控件上面」那条的正面钉子 ══
+        // 「你现在做的这个缩放功能就完全异常了…为什么它现在点开直接给你覆盖在缩放控件上面了？」
+        //
+        // 根因是把它做成了**独立顶层窗口**然后自己算位置，于是：
+        // 最大化窗口的 Left/Top 是还原位置、PointToScreen 给物理像素而 Left/Top 要 DIP、
+        // Show() 之后立刻量高度读到 0、兜底高度与真实高度不符 → 菜单往下压在锚控件上。
+        // 四个坑全是"自己摆位"才有的。改成 Popup（与左下角缩略图浮层同一做法）后一个都不存在。
+        Check(viewer.ZoomFlyoutAnchored,
+            "缩放浮层是锚在缩放控件上的 Popup，不是自己摆位的独立窗口");
+        var flyoutRoot = flyout?.Root;
+        Check(flyoutRoot is { ActualWidth: > 0, ActualHeight: > 0 }
+                && flyoutRoot.ActualWidth <= 240 && flyoutRoot.ActualHeight <= 60,
+            $"浮层只有滑块那么长，不是第二套设置页（{flyoutRoot?.ActualWidth:0}×{flyoutRoot?.ActualHeight:0}）");
+
+        if (flyout is not null)
         {
-            menu.SetSliderFromProbe(137);
+            flyout.SetSliderFromProbe(137);
             viewer.ForceRenderFrame();
             Check(Math.Abs(viewer.ZoomScale - 1.37) < 0.02,
                 $"把滑块拖到 137 就真的缩到 137%（实得 {viewer.ZoomPercent}%）");
-            Check(menu.ValueBoxText == $"{viewer.ZoomPercent}%",
-                $"数字框与滑块说的是同一个数（{menu.ValueBoxText}）");
+            Check(flyout.ValueBoxText == $"{viewer.ZoomPercent}%",
+                $"数字框与滑块说的是同一个数（{flyout.ValueBoxText}）");
             Check(((TextBlock)viewer.FindName("ZoomPercentText")!).Text == $"{viewer.ZoomPercent}%",
                 "拖完滑块底栏那个百分数也跟着变（两处是同一个数）");
-            Check(menu.Top > 0, $"菜单摆在底栏那条上面而不是屏外（Top={menu.Top:0}）");
         }
         ((Button)zoomPct).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         viewer.ForceRenderFrame();
-        Check(!viewer.IsZoomMenuOpen, "再点一次百分数收起菜单（同一个钮开关它）");
+        Check(!viewer.IsZoomMenuOpen, "再点一次百分数收起浮层（同一个钮开关它）");
 
-        // ══ 用户报的那个：全屏下菜单跑到左上角 ══
-        // 「全屏模式下点击缩放数它还是出现在左上角，而不是在右下控件上方。」
-        //
-        // 根因是拿 **窗口的 Left/Top** 当屏幕坐标：最大化窗口的 Left/Top 报的是**还原位置**，
-        // 不是它在屏幕上的位置。窗口模式下那两者恰好相等，所以上一版的断言全绿；
-        // 一进全屏就整体偏出去。判据必须走 PointToScreen。
+        // ══ 用户报的那个：全屏下点开跑到左上角 / 压在控件上 ══
+        // Popup 的摆位由框架做，窗口模式与全屏模式走同一条路，所以这里两条都要钉 ——
+        // 只测窗口模式等于没测（上一版就是这么漏过去的）。
         AppPreferences.Update(AppPreferences.Current with { ImageOpenMode = ImageOpenMode.FullScreen });
         viewer.ApplyOpenMode(ImageOpenMode.FullScreen);
         viewer.ForceRenderFrame();
@@ -1001,43 +1025,17 @@ internal static class Program
         viewer.ForceRenderFrame();
 
         var host = (FrameworkElement)viewer.ZoomControlElement!;
-        // 屏幕坐标是**物理像素**（PointToScreen 内部乘过 DpiScale），而 Window.Left/Top 是 **DIP**。
-        // 断言两边必须先归一到同一个单位 —— 不归一就是拿 1.75 倍的差去比，
-        // 读数看着"差很多"，而其实两边说的都是同一处。
-        var hostOrigin = host.PointToScreen(new Point(0, 0));
-        var hostProbe = host.PointToScreen(new Point(100, 0));
-        var dpr = Math.Abs(hostProbe.X - hostOrigin.X) / 100.0;
-        if (dpr is not (> 0.25 and < 8)) dpr = 1.0;
-        Point Dip(Point screen) => new(screen.X / dpr, screen.Y / dpr);
-        var hostTopRight = Dip(host.PointToScreen(new Point(host.ActualWidth, 0)));
-        var hostBottomRight = Dip(host.PointToScreen(new Point(host.ActualWidth, host.ActualHeight)));
-
-        if (menu is not null && menu.IsVisible)
-        {
-            var work = Jalium.UI.SystemParameters.WorkArea;
-            var menuWidth = menu.ActualWidth;
-            var menuHeight = menu.ActualHeight;
-            // 在那排控件的**正上方**：下沿离控件上沿 6 DIP。
-            var wantTop = hostBottomRight.Y - menuHeight - 6;
-            Check(Math.Abs(menu.Top - wantTop) < 3,
-                $"全屏下菜单在那排控件<b>正上方</b>（期望 Top≈{wantTop:0} DIP，实得 {menu.Top:0}）");
-            // 右缘与控件右缘对齐。
-            Check(Math.Abs((menu.Left + menuWidth) - hostTopRight.X) < 3,
-                $"全屏下菜单右缘与控件右缘对齐（期望 ≈{hostTopRight.X:0} DIP，实得 {menu.Left + menuWidth:0}）");
-            // 明确钉住"不在左上角"：它落在屏幕上半部分就是错的。
-            Check(menu.Top > work.Height / 2,
-                $"全屏下菜单落在屏幕下半部分，不在左上角（Top={menu.Top:0}，工作区高 {work.Height:0}）");
-        }
-        else
-        {
-            Check(false, "全屏下点百分数弹出了菜单");
-        }
+        Check(viewer.ZoomFlyoutAnchored,
+            "全屏下浮层仍然锚在缩放控件上（摆位不随窗口形状变化）");
+        Check(viewer.IsZoomMenuOpen && flyout?.Root is { ActualWidth: > 0 },
+            "全屏下点百分数弹出浮层，且它量得出真实尺寸（不靠兜底常量）");
+        Check(host.ActualWidth > 0,
+            $"全屏下缩放控件自己被排了版（宽 {host.ActualWidth:0}）—— 锚没排版就谈不上浮在它上面");
 
         AppPreferences.Update(AppPreferences.Current with { ImageOpenMode = modeBefore });
         viewer.ApplyOpenMode(modeBefore);
         viewer.ForceRenderFrame();
         viewer.ZoomTo(1.0);
-        viewer.ForceRenderFrame();
 
         // 退路只有一个，必须验它真的能走通：批注栏是 app.MainWindow，
         // 它留在一个看不见的窗口里 = 整条工具栏跟着图片窗口一起消失。
@@ -1927,6 +1925,355 @@ internal static class Program
     /// 都只依赖它自己那一步，红的时候说得出是谁的问题。
     /// </para>
     /// </summary>
+    /// <summary>
+    /// 端到端：拿<b>真实 PDF</b> 打开真的 PDF 窗口，量它到底做成了什么。
+    /// <para>
+    /// 这组是整条 PDF 链路的验收，它必须跑真文件而不是造数据 ——
+    /// 光栅化、档位缓存、整份文档的布局、页图换 Source，四件事里任何一件
+    /// 在真数据上才有症状（合成图没有"9–34 ms 的抖动"，也就验不出"移动中不发新请求"）。
+    /// </para>
+    /// </summary>
+    private static void CheckPdfViewerWindow()
+    {
+        var pdf = FindSamplePdf();
+        if (pdf is null)
+        {
+            Console.WriteLine("SKIP: no sample PDF on this machine, so the PDF window end-to-end check did not run");
+            return;
+        }
+
+        var viewer = new PdfViewerWindow
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Left = -12000, Top = 0, ShowActivated = false, ShowInTaskbar = false,
+        };
+        LanStartWrite.Inkcanvas.Pdf.PdfPageRasterizer.Instrumentation = m => Console.WriteLine(m);
+        Windows.Add(viewer);
+
+        Check(viewer.TryOpenPdf(pdf, out var error), $"PDF opens a real file: {error ?? "ok"}");
+
+        // **先 Show 再量**：这扇窗从没显形过，`InkHost.ActualWidth` 是 0，于是
+        // "视口中心在第几页""选框的屏幕位置""指针路由落点"三件事全都没有值 ——
+        // 而且症状是断言红，不是任何报错。白板那几组也是先 Show 再驱输入，同一条理由。
+        viewer.Show();
+        viewer.ForceRenderFrame();
+        Check(viewer.InkHostActualWidth > 0,
+            $"The PDF ink host has a real size before anything is measured against it (width={viewer.InkHostActualWidth})");
+
+        var pages = viewer.PageCount;
+        Check(pages > 1, $"The sample PDF has more than one page, so continuous browsing is meaningful (pages={pages})");
+
+        // 份数对得上，才谈得上"整份文档一个世界"。
+        var world = viewer.WorldLayerChildCount;
+        Check(world == pages, $"One world layer frame per page, so each page can hold its own resolution tier (frames={world}, pages={pages})");
+
+        // 页图在墨迹面底下：顺序反了页图就盖住笔迹，而"盖住"是看不出来的（照常能写，只是看不见自己写的）。
+        Check(viewer.WorldLayerIsBottom, "Page frames sit below the ink surface in InkHost");
+
+        // 一份文档 = 一个世界 = 一次平移：这里量的是"翻页之后世界原点真的动了"，
+        // 而不是"某个私有字段被改了"。A 方案与翻页模型的差别就在这一条上。
+        var beforeY = viewer.WorldOriginScreenY;
+        viewer.ScrollToPage(2);
+        var afterY = viewer.WorldOriginScreenY;
+        Check(Math.Abs(afterY - beforeY) > 1, $"Turning to page 3 pans the one world instead of swapping pages (origin {beforeY:0.#} -> {afterY:0.#})");
+
+        // 切到第 3 页之后，"当前页"要真的是 3 —— 而它是**从世界原点反算**的，
+        // 不是翻页时顺手写上去的（那样它就只是"翻到哪页就说哪页"，
+        // 滚轮连续滚过去时会说错）。
+        Check(viewer.CurrentPage == 2, $"The current page is derived from the viewport, not from the last button press (page={viewer.CurrentPage})");
+
+        // 往返翻页要能回来：只进不退的翻页在用户按两次上翻之后就废了。
+        viewer.ScrollToPage(0);
+        Check(viewer.CurrentPage == 0, $"Turning back to page 1 puts the derived current page back (page={viewer.CurrentPage})");
+
+        // 切页模式：胶片条在；连续模式：胶片条收起。
+        var stripInPageFlip = viewer.FilmstripVisible;
+        AppPreferences.Update(AppPreferences.Current with { PdfContinuousBrowse = true });
+        Check(stripInPageFlip && !viewer.FilmstripVisible,
+            "The filmstrip is docked in page-flip mode and hidden in continuous mode, where the page column is worth more");
+        AppPreferences.Update(AppPreferences.Current with { PdfContinuousBrowse = false });
+
+        CheckPdfViewerSelection(viewer);
+        CheckPdfViewerFilmstrip(viewer);
+
+        // 连续模式下滚轮不再吸附到页边界（否则"连续"就名不副实了）。
+        AppPreferences.Update(AppPreferences.Current with { PdfContinuousBrowse = true });
+        viewer.ScrollToPage(1);
+        var originAtPage = viewer.WorldOriginScreenY;
+        viewer.PanBy(37);
+        var originAfterFreePan = viewer.WorldOriginScreenY;
+        Check(Math.Abs(originAfterFreePan - originAtPage - 37) < 0.5,
+            $"Continuous mode pans freely instead of snapping to a page edge (moved {originAfterFreePan - originAtPage:0.##} for a 37px pan)");
+
+        // 切回切页模式后吸附要回来。
+        AppPreferences.Update(AppPreferences.Current with { PdfContinuousBrowse = false });
+        Check(viewer.FilmstripVisible, "Switching back to page-flip mode brings the docked filmstrip back");
+
+        viewer.Close();
+        Windows.Remove(viewer);
+    }
+
+    /// <summary>
+    /// 选择与变换。<b>这条链路的承重墙是"选框是屏幕坐标而页图是世界坐标"</b> ——
+    /// 两套坐标系在同一个宿主里，漏了同步就是"手柄对不上我选的东西"。
+    /// </summary>
+    private static void CheckPdfViewerSelection(PdfViewerWindow viewer)
+    {
+        viewer.ScrollToPage(0);
+        viewer.ForceRenderFrame();
+
+        // 落一笔**用引擎自己的 Commit**，不用编程造笔迹也不必走指针路由 ——
+        // `Document.Strokes` 是只读的，而 Commit 走的是引擎真正的落笔通路（笔锋、批开、撤销都在里面）。
+        // 坐标是**世界系**：要挑它，就必须挑在它真正落下的那个点上。
+        // （先算落点再落笔，顺序反过来就是"点在自己刚画的那一笔旁边"。）
+        var page = viewer.PageRectWorld(0);
+        var onPage = new Point(page.Left + page.Width / 2, page.Top + page.Height / 2);
+        CommitStroke(viewer.Surface, onPage.X, onPage.Y);
+
+        Check(viewer.StrokeCount > 0, $"A stroke committed to the PDF page lands in the one shared document (count={viewer.StrokeCount})");
+        Check(viewer.SelectStrokeAtWorld(onPage), "A stroke drawn on a PDF page can be picked by point");
+        Check(viewer.SelectedStrokeCount == 1, "Pointing at it selects exactly that one stroke");
+
+        // 选框四边 + 九颗手柄（八颗 + 一颗旋转柄）。这是"画出来了"的判据。
+        Check(viewer.SelectionFrameCornerCount == 4,
+            "A selection draws four frame edges from its four corners, not from the upright bounding box");
+        Check(viewer.SelectionHandleCount == 9,
+            "A selection draws nine handles (eight plus the rotate handle)");
+
+        // 选框必须压在墨迹面之上：页图在下面，选框要能看见。
+        Check(viewer.AdornerIsOnTop, "The selection adorner sits above the ink surface, so page images cannot cover it");
+
+        // 整块挪一步 = 一步撤销。
+        var undoBefore = viewer.CanUndo;
+        viewer.TranslateSelection(40, 25);
+        Check(viewer.CanUndo || !undoBefore, "Translating the selection is a history step, not a direct mutation");
+        Check(viewer.SelectedStrokeCount == 1,
+            "The selection survives its own translation, so the moved ink stays selected");
+
+        // 旋转也要留着选择（不重算选框就不会回正）。
+        viewer.RotateSelection(0.4);
+        Check(viewer.SelectedStrokeCount == 1, "Rotating keeps the strokes selected instead of dropping the selection");
+
+        // 缩放之后选框必须重画：手柄是屏幕坐标，不重画就会停在原地对不上墨迹。
+        viewer.ZoomToForProbe(1.0);
+        var handlesBefore = viewer.SelectionHandleScreenPositions();
+        viewer.ZoomToForProbe(2.0);
+        viewer.ForceRenderFrame();
+        var handlesAfter = viewer.SelectionHandleScreenPositions();
+        Check(handlesBefore.Count == 9 && handlesAfter.Count == 9
+            && handlesBefore.Any(before => handlesAfter.Any(after => System.Math.Abs(before - after) > 1)),
+            "Zooming moves the handles on screen, because they are screen-space and the ink moved under them");
+
+        // Esc 清选择。
+        Check(viewer.ClearSelectionForProbe(), "Escape clears an existing selection");
+        Check(viewer.SelectedStrokeCount == 0, "After Escape nothing is selected");
+        Check(viewer.SelectionHandleCount == 0, "After Escape the handles are gone, not left behind on empty ink");
+
+        // 一个都没有时 Esc 不该"吃掉"事件：那是"退出这块画布"该有的语义。
+        Check(!viewer.ClearSelectionForProbe(),
+            "Escape on an empty selection reports nothing to clear, so the toolbar can exit the canvas");
+    }
+
+    /// <summary>
+    /// 胶片缩略图。关键是<b>它与主视图共用同一份位图</b> ——
+    /// 缓存的键是 (页, 档)，两边都取低档，于是胶片上那一格拿到的正是滚动过去时会用到的那一块。
+    /// </summary>
+    private static void CheckPdfViewerFilmstrip(PdfViewerWindow viewer)
+    {
+        Check(viewer.FilmstripCardCount == viewer.PageCount,
+            $"The filmstrip builds one card per page, so it reads as a strip of the whole document (cards={viewer.FilmstripCardCount}, pages={viewer.PageCount})");
+
+        // 缩略图要真的落地，而不只是元素建了 —— 元素建了但没图，看着就是一条空白的竖条。
+        Check(viewer.WaitForFilmstripThumbnails(),
+            "Filmstrip thumbnails actually land in the cards instead of leaving a blank column");
+        Check(viewer.FilmstripFilledCount > 0,
+            $"At least the pages near the viewport have thumbnails ({viewer.FilmstripFilledCount} filled)");
+
+        // 高亮跟着当前页走，而当前页是从视口反算的。
+        viewer.ScrollToPage(3);
+        viewer.ForceRenderFrame();
+        Check(viewer.FilmstripCurrentPage == 3,
+            "The filmstrip highlights the page the viewport is on, not the page last requested");
+
+        // 点胶片跳页。
+        viewer.FilmstripChoosePage(6);
+        Check(viewer.CurrentPage == 6, "Clicking a filmstrip card jumps the viewport to that page");
+    }
+
+    /// <summary>几何是纯计算，所以它该被单独钉住：页的排布与命中是连续滚动的手感底座。</summary>
+    private static void CheckPdfPageLayout()
+    {
+        var layout = new PdfPageLayout([(612, 792), (612, 792), (612, 792)]);
+        Check(layout.PageCount == 3, "The PDF world layout knows how many pages it laid out");
+        Check(layout.PageRect(0).Top == PdfPageLayout.Margin,
+            "The first page starts at the top margin, so opening the document does not show a half-page white edge");
+
+        // 纵向递增、且每页之间正好留一道 PageGap。
+        var first = layout.PageRect(0);
+        var second = layout.PageRect(1);
+        Check(Math.Abs(second.Top - (first.Top + first.Height + PdfPageLayout.PageGap)) < 0.001,
+            "Pages stack downward with exactly one gap between them");
+        Check(layout.ContentHeight > layout.PageRect(2).Bottom,
+            "The world is taller than the last page, so the bottom margin is part of the scroll extent");
+
+        // 命中：页内命中、空隙**不**归任何页。
+        var insideFirst = new Point(first.Left + 10, first.Top + 10);
+        var inTheGap = new Point(first.Left + 10, first.Bottom + PdfPageLayout.PageGap / 2);
+        Check(layout.PageAt(insideFirst) == 0, "A point inside a page resolves to that page");
+        Check(layout.PageAt(inTheGap) == -1,
+            "A point in the gap between pages belongs to no page, so ink there is not silently claimed by the next page");
+
+        // 页码跟随：站在两页中间要取最近的，不能空着。
+        Check(layout.NearestPageTo(first.Top + first.Height / 2) == 0, "The centre of page 1 reports page 1");
+        var midway = (first.Bottom + second.Top) / 2;
+        Check(layout.NearestPageTo(midway) >= 0,
+            "Standing exactly between two pages still reports a page, so the page number is never blank");
+
+        // 真正要紧的是**过渡**：分界两侧必须翻过去。断的是"一直是 0"与"偶尔空"这两种坏，
+        // 而恰好平分的那一点是零测度的，不该拿来当判据。
+        Check(layout.NearestPageTo(midway - 1) == 0, "Just above the midpoint between two pages still reports the earlier page");
+        Check(layout.NearestPageTo(midway + 1) == 1, "Crossing the midpoint between two pages flips the reported page");
+
+        // 横向不齐要居中而不是拉伸：拉伸是 PDF 里最刺眼的错（字会变形）。
+        var mixed = new PdfPageLayout([(612, 792), (792, 612)]);
+        var wide = mixed.PageRect(1);
+        var narrow = mixed.PageRect(0);
+        Check(wide.Width == 792 && narrow.Width == 612 && wide.Height == 612 && narrow.Height == 792,
+            "A portrait and a landscape page keep their own sizes instead of being stretched to the widest");
+        Check(Math.Abs((wide.Left + wide.Width / 2) - (narrow.Left + narrow.Width / 2)) < 0.001,
+            "The narrower page is centred on the wider one, so the document reads as one document");
+
+        // 吸附只在该吸的时候吸：离边界远时不吸（否则连续浏览会被强行拽回某一页）。
+        Check(Math.Abs(layout.SnapScrollTo(first.Top) - first.Top) < 0.001, "Scrolling at a page edge snaps to it");
+        Check(Math.Abs(layout.SnapScrollTo(first.Top + 500) - (first.Top + 500)) < 0.001,
+            "Scrolling far from any page edge is left alone, so free browsing stays free");
+
+        Check(new PdfPageLayout([]).PageCount == 0, "An empty document has zero pages instead of throwing");
+    }
+
+    /// <summary>
+    /// 找一份真 PDF 来跑端到端那组。**逐目录走**，撞到读不进去的就跳过去。
+    /// <para>
+    /// 早先那版用 <c>EnumerateFiles(root, …, AllDirectories)</c> 一把梭：
+    /// 用户目录里必然有几处受保护的（AppData 深处、别的用户残留），它一撞上就抛，
+    /// 而 catch 把整个搜索判成"没找到" —— 于是明明桌面上就有一份 PDF，那组却一直 SKIP。
+    /// <b>跳过坏目录，别让一处读不动等于一份都没有。</b>
+    /// </para>
+    /// </summary>
+    private static string? FindSamplePdf()
+    {
+        var overridePath = Environment.GetEnvironmentVariable("LANSTARTWRITE_PDF_SAMPLE");
+        if (!string.IsNullOrEmpty(overridePath) && File.Exists(overridePath)) return overridePath;
+
+        var root = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return null;
+
+        var queue = new Queue<string>();
+        queue.Enqueue(root);
+        while (queue.Count > 0)
+        {
+            var directory = queue.Dequeue();
+            string[] files;
+            try { files = Directory.GetFiles(directory, "*.pdf"); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+
+            if (files.Length > 0) return files[0];
+
+            string[] children;
+            try { children = Directory.GetDirectories(directory); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
+
+            foreach (var child in children)
+            {
+                // 别钻进包缓存与工具目录：那里的 PDF 是依赖的一部分，拿它当样本毫无意义。
+                var name = Path.GetFileName(child);
+                if (name is ".git" or "node_modules" or "packages" or ".nuget" or ".cache") continue;
+                queue.Enqueue(child);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 钉住 PDF 的分辨率策略。<b>时钟是注入的</b>，所以"停稳 150 ms"这条规则
+    /// 真的被断言了，而不是靠 sleep 去撞。
+    /// <para>
+    /// 这里断言的是<b>设计里最要紧的那条</b>：快速移动期间只给低档、绝不要求新栅格化。
+    /// 探针实测一档 220 dpi 要 25 ms —— 移动中每帧都去要一次，就是每帧卡 25 ms。
+    /// 早期那版"缓存 miss 就同步光栅化"就是这样把滚动拖成幻灯片的。
+    /// </para>
+    /// </summary>
+    private static void CheckPdfResolutionPolicy()
+    {
+        var now = TimeSpan.Zero;
+        var policy = new PdfResolutionPolicy { Now = () => now };
+        policy.Reset();
+
+        var low = PdfResolutionPolicy.ResolutionTier.Low;
+        var medium = PdfResolutionPolicy.ResolutionTier.Medium;
+        var high = PdfResolutionPolicy.ResolutionTier.High;
+
+        // 档位与 DPI 的对应关系就是探针量出来的那三档。
+        Check(PdfResolutionPolicy.DpiOf(low) == 72
+            && PdfResolutionPolicy.DpiOf(medium) == 150
+            && PdfResolutionPolicy.DpiOf(high) == 220,
+            "PDF resolution tiers map to the DPI the probe actually measured");
+
+        // 没动过 = 没有"最近一次移动"，应当立刻给高倍缩放该给的那一档。
+        Check(policy.DesiredTier(2.0) == high, "Untouched viewport at 200% asks for the high tier");
+
+        // 一次大位移：判为快速移动 → 只要低档，哪怕正在 400% 放大看。
+        policy.NoteViewportMoved(0, 0);
+        policy.NoteViewportMoved(0, 400);
+        Check(policy.IsMovingFast, "A jump larger than the fast-move threshold is fast movement");
+        Check(policy.DesiredTier(4.0) == low,
+            "Fast movement asks for the low tier even at 400% zoom (never rasterize while scrolling)");
+
+        // 小位移不算"快速"：低于阈值就不该降档，否则轻轻推一下鼠标就掉清晰度。
+        policy.Publish(high);
+        policy.NoteViewportMoved(0, 403);
+        Check(!policy.IsMovingFast, "A nudge below the fast-move threshold is not fast movement");
+        Check(policy.DesiredTier(4.0) == high,
+            "A small nudge keeps the high tier instead of dropping clarity");
+
+        // 刚停：还没到沉降时间，保持已发布的那一档不动（不许来回抖）。
+        policy.Publish(medium);
+        now = TimeSpan.Zero;
+        policy.NoteViewportMoved(0, 403);
+        now = TimeSpan.FromMilliseconds(PdfResolutionPolicy.SettleMilliseconds - 1);
+        Check(policy.DesiredTier(4.0) == medium,
+            "Before the settle delay the published tier is held, so quality never flickers");
+
+        // 停够：升到高倍该给的那一档。
+        now = TimeSpan.FromMilliseconds(PdfResolutionPolicy.SettleMilliseconds);
+        Check(policy.DesiredTier(4.0) == high, "After the settle delay a settled viewport upgrades to high");
+
+        // 缩小之后同样要停稳才降：降档虽然便宜，但也不能在滚动中换，
+        // 否则会在边界上反复重画同一页。
+        policy.NoteViewportMoved(0, 403);
+        now += TimeSpan.FromMilliseconds(PdfResolutionPolicy.SettleMilliseconds);
+        Check(policy.DesiredTier(0.5) == low, "Settled zoom-out drops to the low tier");
+
+        // 边界值：这两个 zoom 正好压在阈值上，别让 < 和 <= 含糊。
+        policy.NoteViewportMoved(0, 403);
+        now += TimeSpan.FromMilliseconds(PdfResolutionPolicy.SettleMilliseconds);
+        Check(policy.DesiredTier(0.75) == medium, "Zoom exactly at 75% is the medium tier");
+        policy.NoteViewportMoved(0, 403);
+        now += TimeSpan.FromMilliseconds(PdfResolutionPolicy.SettleMilliseconds);
+        Check(policy.DesiredTier(1.6) == high, "Zoom exactly at 160% is the high tier");
+
+        // 缓存预算是从探针数字反推的：220 dpi 一页 17 MB，256 MB 约合 15 页满档。
+        Check(PdfPageCache.BudgetBytes == 256L * 1024 * 1024,
+            "PDF raster budget is 256 MB, which the probe's 17 MB/page makes about 15 full pages");
+
+        // 换文档必须复位，否则新文档一进来就带着上一本的档位。
+        policy.Publish(high);
+        policy.Reset();
+        Check(policy.Published == medium && !policy.IsMovingFast,
+            "Reset drops the published tier and the fast-move latch for a new document");
+    }
+
     private static void CheckWhiteboardTransforms()
     {
         var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };

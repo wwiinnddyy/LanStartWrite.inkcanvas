@@ -93,13 +93,162 @@ This project uses **Jalium.UI** framework. All UI code, markup, and patterns mus
 7. **量导航面板宽度要先关掉动画。** `PART_PaneRoot` 的宽度带 0.2 秒过渡（读 `SplitViewPaneAnimationOpenDuration`），"下一拍就该读到 48"是道时序题 —— 实测三轮里红过一次。现在那三步在 `ReduceMotion=true` 下量，两态真的换了与否由 `IsCompact` 与 `PART_Label` 折叠那两条管。
 8. **库没有的就继续自实现**（用户定的范围）：九色画笔色板 `PenColorSwatchStyle`、两个实体浮层表面 token（`ToolbarSurfaceBrush` 白 / `#2C2C2C`，`FlyoutSurfaceBrush` `#F9F9F9` / `#2C2C2C`；WinUI 的对应物 `FlyoutPresenterBackground` 是亚克力，本应用刻意不用，所以也不能借那个键名）、`FlyoutPlacement` 的原生坐标定位、`RadioToolToggleButton.Reactivated`、四个窗口的分工（Design.MD §1）。应用侧的 `HelperTextStyle` / `SectionTextStyle` / `SettingsCardStyle` 是**基于库的键往上加**的三行扩展（库按 WinUI 原样发布尺度，不替宿主定辅助文字颜色与卡片行距），不是第二套尺度。
 
-UiSmoke 现状：**433 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/UiSmoke.csproj -c Debug -p:OutputPath=bin/Verify/` 后直接跑 `tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe`）。
+UiSmoke 现状：**493 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/UiSmoke.csproj -c Debug -p:OutputPath=bin/Verify/` 后直接跑 `tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe`）。
+设 `LANSTARTWRITE_PDF_SAMPLE=<某个.pdf>` 才会跑 PDF 那组端到端；不设就自己找，找不到如实 SKIP。
 导航动画那组里 `Retargeted animation settles...` / `A live intermediate frame...` 两条会**自己红**（2026-09-25 实测：改动前后都会 3 次里红 1 次，量的是库的动画时钟，不是白板的账），
 而 `Check()` 一红就中断整条队列 —— 所以**基线要复跑两三次再取数**，单看一次的红绿不可信。注意本应用的 `.exe` 若在运行中会锁住 `bin/Debug`，构建一律带 `-p:OutputPath` 绕开。**跑之前先看 exe 的时间戳** —— 跑一份旧 exe 会安静地验一套旧检查，数字看着还挺像样（踩过一次：46 条全绿其实是几个月前的产物）。另外 Main 一进来就把 `ReduceMotion` 设成 true：第一拍就要量导航面板宽度，而面板打开带 0.2 秒过渡 —— 320ms 的第一拍实测仍会抖（6 个导航项那次就是它红的）；导航动画那组需要动的时候自己会再打开。
 
 另有一处会骗人的陈旧产物：`src/LanStartWrite.Inkcanvas/obj/Debug/net10.0-windows/generated/Jalium.UI.Xaml.SourceGenerator/` 里那份 `*.g.cs` 停在 2026-09-17 没再更新过（**当前管线真正用的是 `obj/<cfg>/net10.0-windows/Jalxaml/Razor/*.jalxaml`** —— 想确认"标记改动进了构建没有"就 `grep` 那里，别 `grep` 那份 `.g.cs`）。
 
 
+
+## Critical: PDF 是第四块画布，而它是唯一「整份文档一个世界」的
+
+`CanvasScene.PdfCanvas = 3`，窗口 `PdfViewerWindow` + `PdfViewerFilmstrip`，入口是工具栏固定项「PDF」。
+
+| 事实 | 位置 |
+|---|---|
+| **一页一个世界** vs **一份文档一个世界** | 白板与图片是前者（`PagedCanvasWindow` 一次只挂一块 `CanvasSurface`，翻页 = 换挂）；PDF 是后者 |
+| 翻页 = **挪视口** | `ScrollToPage` → `PanByScreen`。**不换任何东西** |
+| 世界几何 | `Pdf/PdfPageLayout`：页矩形纵向排、单位是**点**（100% 时 Letter = 612 DIP = 8.5 英寸真纸大小） |
+| 每页一个图层 | `Border`（纸色）里套 `Image`。**不是一张大图** —— 每页的档位必须能独立换 |
+| 页图宿主 | `InkHost` 里一张 `Canvas` 插在**索引 0**（墨迹面底下） |
+| 缩略图来源 | **缓存里那一份低档位图**（与主视图共用，键是 (页,档)）。不是另渲一遍 |
+| 工具栏 | 永远接进 PDF 窗口（它没有全屏档） |
+| 命令行 | `Program.Main(string[] args)` → `FirstPdfArgument` → `BeginStartupPdf`（排到队列尾，等批注栏显形） |
+| 关联注册 | Windows 只写 `ProgId`+`OpenWithProgids`，**不碰 UserChoice**（Win10 1703 后有哈希保护，碰了会被系统静默还原） |
+| **选择与变换** | `InkSelectionController`（从 `PagedCanvasWindow` 抽出的一块，与底下铺什么无关） |
+
+### 十一条判断
+
+1. **它不能继承 `PagedCanvasWindow`。** 那个基类的 `ActivatePage` 会把上一页的
+   `CanvasSurface` **从视觉树上摘掉**再挂新的（`PagedCanvasWindow.cs:489-512`），
+   所以"N 页同时在屏"在它那里根本无法表达；而 A 方案要的正是这个。
+   它的选择/变换又全是 `private`。**继承它会被迫在"翻页模型"里实现连续滚动。**
+2. **不继承的代价是选择/变换要自己写一遍 —— 已经写完了，在 `InkSelectionController`。**
+   它是**从 `PagedCanvasWindow` 里抽出来**的那一块（点选 / 框选 / 套索 / 整块挪 /
+   九颗手柄 / 旋转柄 / 双指平移捏合），**与"底下铺的是什么"无关**。
+   PDF 用它接上了选择与变换，验收 15 条全绿。
+   **`PagedCanvasWindow` 还在用它自己那份 `private` 副本**（那份也还在原地），
+   所以**这里有两份同源实现** —— 改任何一条规则都要记得同步另一条。
+   改成委托是下一步，而那一步的验收判据是"**那份副本被删掉之后断言还绿**"，
+   不是"新副本也能跑"。
+3. **选框是屏幕坐标、页图是世界坐标，两套坐标系在同一个宿主里。**
+   漏了 `OnViewportChanged` → `PushFrameGeometry` 的同步，症状是"缩小之后九颗手柄
+   停在屏幕上不动，而选中的墨迹已经缩走了"。验收钉的是"缩放后手柄的屏幕 y 真的变了"。
+4. **选择层必须压在墨迹面之上**（`InkHost` 的最后一个子元素）。压错了页图会盖住选框，
+   而"看不见选框"很容易被当成"没选中"。
+5. **程序化变换要走 `TransformSelectionBatch`**，不能直接调 `Selection.Translate` ——
+   引擎重写点数据时会发一串 `Document.Changed`，而 `IsTransforming` 只在拖拽期间为真，
+   所以直接调会让选择**当场消失**。症状与"引擎外部改了选择集"无法区分。
+6. **页矩形之间的空隙返回 −1，不归任何页。** `PageAt` 在空隙里给 −1（"这一笔没有归属"），
+   而 `NearestPageTo` 取最近的（页码不许空着）。两个函数**故意不一样**：
+   前者问"这一点属于哪页"，后者问"用户正在看哪页"。混成一个就会出现
+   "空隙里的笔迹跟着下一页跑"。
+7. **恰好平分时归前一页**（`NearestPageTo` 用严格小于）。用户是从上往下滚过来的，
+   卡在分界上时他还在上一页末尾；报下一页会让胶片先跳一步再回弹。
+   **断言要钉"过渡"（中线 ±1 分别报两页），不要钉那一点** —— 那是零测度的。
+8. **横向不齐按最宽的居中，不拉伸。** 拉伸是 PDF 里最刺眼的错（字会变形）。
+   不变量是"中心对齐 + 各自尺寸不变"，**不是"左边缘对齐"**（居中的话左边缘本来就不同）。
+9. **`Image` 没有 `Background`**，页矩形外面要包一层 `Border` 当纸 ——
+   否则空隙透出窗口底色，整份文档看着像浮在空中的散页。
+10. **每页一个档位，不是整份一个档位。** 第 1 页看清了、第 2 页还在糊（用户正在滚第 2 页），
+    这是对的。合成一张大图就退化成"整份一个档位"，而那恰好是连续滚动最不能要的东西。
+11. **滚轮翻页、Ctrl+滚轮缩放。** 同一个滚轮事件不能既翻又缩，两者在 PDF 里都有人要。
+    `PreviewMouseWheel` 里 `Handled = true` 是必须的，否则引擎那份默认缩放会同时生效。
+12. **胶片缩略图与主视图的预加载是同一批请求。** 两边都要 72 dpi 低档，
+    缓存键是 (页, 档)，所以胶片上那一格拿到的**正是**主视图滚动过去时会用到的那一块 ——
+    一份位图两处用。分成两条路就得把每一页光栅化两遍（各 4 ms），
+    300 页的文档光这一项就多花一秒多。
+13. **PDF 入口是 toggle。** 点第二下是"我要回去"，不是"再开一份"。
+    一份 PDF 一个窗口是刻意的：两份 PDF 的页码、撤销账、档位缓存各一份，
+    塞进同一窗口会立刻开始互相串。命令线路径**不弹文件框**（用户已经双击过具体文件了）。
+14. **取消文件框 = 什么都不发生**，不是退回去。用户是"还没决定"，不是"决定不打开"。
+15. **`LastPdfDirectory` 与 `LastImageDirectory` 分成两份。** 两类用户几乎不重叠，
+    共用一份会互相顶掉起始目录（"刚看完合同，打开图片时起始目录跑到合同文件夹了"）。
+
+### 两条关于**验收顺序**的判断（`CheckWindowLayers` 教出来的）
+
+`CheckWindowLayers` 量的是"整桌面上还剩几个窗口"，而**前面每多留一个窗口，
+它的排名就整体挪一位** —— 于是它对**跑在它之前的任何一组**都敏感。
+PDF 那三组各起真窗口，所以它们必须排在它**前面**；反过来 `Check()` 一红队列就停，
+排在它后面的组**永远跑不到**，等于没写。
+
+顺带查出的：PDF 窗口**从没 `Show()` 过**时 `InkHost.ActualWidth` 是 0，
+于是"视口中心在第几页""选框的屏幕位置""指针路由落点"三件事全都没有值，
+而症状只是断言红、没有任何报错。**先 `Show()` 再量**，白板那几组也是同一件事。
+
+### 验收
+
+`UiSmoke.CheckPdfViewerWindow`（**跑真 PDF**，样本搜索逐目录走、跳过读不进去的，
+可用 `LANSTARTWRITE_PDF_SAMPLE` 指定）：真文件能开、每页一个图层、页图压在墨迹面底下、
+**翻页是世界原点真的动了**（量 `WorldOriginScreenY`，-32 → -1664）、
+当前页是**从视口反算**的（不是"翻到哪页说哪页"，否则滚轮连续滚过去会说错）、
+往返能回来、切页/连续两种模式下胶片条的显隐、连续模式下平移不被吸附。
+`CheckPdfPageLayout` 钉几何（纯计算，17 条）。
+
+**`INSTALLER.NSI` 的关联段没在本机验过**（这台机器没装 NSIS），只做了 BOM 与语法的人工核对。
+
+## Critical: 阻塞项 — PDFium 156.0.8066 在 page_index ≥ 1 时访问违例
+
+`bblanchon.PDFium 156.0.8066` 的 `FPDF_RenderPageBitmap` **渲染第 2 页起就崩**
+（`0xC0000005`，托管层 try/catch 与 Task 异常**都接不到**，整个进程走）。
+
+**最小复现**（`tools/PdfProbe <某个.pdf> --minimal`）：3 页手写 PDF、绑定无误、
+`FPDF_LoadPage(1)` 返回**有效句柄**、同一份位图、page 0 成功 → page 1 崩。
+换另一份 10 页的真实 PDF 同样崩，所以**不是文件的问题，也不是并发/生命周期的问题**。
+
+**已排除的假设**（每一条都花了一轮，别再走一遍）：
+
+| 假设 | 结果 |
+|---|---|
+| 并发 / 文档已释放 | 探针是**单线程**的，且换文件、换档位都一样崩 |
+| 线程池 | 同上，探针不走 `Task.Run` |
+| `LoadPage`→`ClosePage`→再按页号渲染 | 尺寸改成打开时一次取全，**照样崩** |
+| 页号越界 | 页号合法、页尺寸十页全对 |
+| 渲染标志位 | 三个常量原本**全是错的**（见下），改正后**照样崩** |
+| 两份 pdfium 抢符号 | 输出目录里只有一份 |
+
+**顺带查出的一个真 bug（已修）**：`RenderNoAnnotations = 0x01` 名字与值相反 ——
+PDFium 的 `0x01` 是 `FPDF_ANNOT`，含义是"**要**画注释"。而 `0x02` 是 `LCD_TEXT`，
+`PRINTING` 是 `0x8000`。现在 `RenderContentOnly = 0` 并把六个标志都按真值列全。
+**教训：标志位不能凭名字推，而"名字写反"在这里彻底静默** —— 它不会少画什么，
+只会在带注释的某一页上崩，而那一页与出错的那行代码隔着十万八千里。
+
+**当前的处理**：`PdfViewerWindow.CanRasterize(pageIndex) => pageIndex == 0`，
+是**整个窗口唯一的闸口**。没有闸口的症状是"用户双击一份 PDF，应用整个消失"。
+策略层照旧给出该要哪一档，只是不送进 PDFium。
+**换掉那份原生库之后，把这一行改成 `true` 即可，其余代码不用动** ——
+分辨率阶梯、预加载、胶片与主视图共用同一份位图那套都是照着"能渲染多页"写的。
+
+**未在本机验证**：`installer.nsi` 的新版脚本**没有跑过 makensis**（这台机器装不上
+NSIS，choco 锁文件 + 权限都不行，官方 zip 下载返回的是 HTML 页面）。
+CI 里已把 NSIS 钉到 3.12 并加了四道门禁（版本自证、日志扫 `no sections will be executed`、
+扫 `could not be opened`、产物大小与存在性），所以**第一次真跑是在 CI 上**。
+
+## Critical: Windows 安装器换成了 MUI2（NSIS 3.12）
+
+上一版是 NSIS 3 的**裸页面**流程（`Page Directory` + `Page InstFiles`），
+也就是 NSIS 1.x 那个"选目录 → 进度条 → 完事"的骨架。现在是 MUI2 四页向导
+（欢迎 / 目录 / 安装 / 完成），中英双语，装完有"立即运行"勾选，深色系统随主题。
+
+**改这个脚本前先读文件顶部那四条自查清单**，每条都踩过：
+
+1. **`MUI_*` 的 `!define` 必须在 `!include "MUI2.nsh"` 之前。** 顺序反了它读到空值，
+   症状是"界面还是默认那套、没有任何报错"。
+2. **不要引用不存在的文件。** 本仓库**既没有 LICENSE 也没有 .ico**，所以
+   `MUI_PAGE_LICENSE` 与 `MUI_ICON` 故意没写 —— 写一个不存在的路径进去，
+   makensis 在 CI 上直接红，比少一页严重得多。
+3. **安装器与卸载器的 `LangString` 分开写**（`MUI_LANGUAGE` / `MUI_UNLANGUAGE`）。
+   同一个键名两边各写一遍，卸载器取到的会是安装器那份。
+4. **字符串里没有 markdown**：`\*\*粗体\*\*` 在 NSIS 标签里是字面的星号。
+
+CI 侧：`choco install nsis --version 3.12`，**跑完拿 `makensis /VERSION` 与点名值对账**。
+不钉版本的话，下个月跑出来的包可能由另一个版本编出来，
+而症状是一条与本仓库任何一行都无关的 NSIS 语法报错。
+
+`SHChangeNotify` 的后两个参数是 `LPCVOID`，脚本里用 `p` 而不是 `i`：
+x64 上按 int 传会让后面的栈参数错位。
 
 ## Critical: 窗口层级由 WindowLayerManager 统一排
 
@@ -474,7 +623,7 @@ UiSmoke 现状：**433 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/Ui
 | 摆放 | 每次视口变动按 `View.WorldToScreen()` 重建 world→screen（见下面第 2 条） |
 | 打开方式 | `AppPreferences.ImageOpenMode`：`Window` / `FullScreen` |
 
-### 十四条判断
+### 十条判断
 
 1. **喂错位图类型<b>不报错，只是不画</b>。** 症状是"标题栏说已打开，窗口一片黑"——
    而黑底 + 一张没画出来的图，和"还没选文件"在眼里完全同形，排查只能靠猜。
@@ -514,32 +663,33 @@ UiSmoke 现状：**433 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/Ui
    粗调一步 1.25 倍，**锚在画布正中**而不是指针位置——底栏那排离图很远，指针多半不在图上，
    按指针锚会得出"图往边上跑了"这种莫名其妙的缩放。百分数那颗**显式**给 `MinWidth` 与字号：
    靠 Button 默认内容呈现器会按 "100%" 撑出一大块，整条控件于是又宽又高。
-10. **缩放的二级菜单只有「一条滑块 + 一个只读数字框」，216×44，浮在那排控件的<b>正上方</b>、右缘对齐。**
+10. **缩放的浮层只有「一条滑块 + 一个只读数字框」，216×44，锚在右下角那排缩放控件上、正上方弹出。**
+    *（判断 4 里"窗口模式工具栏是图片窗口的控件"与判断 6 一起决定了浮层该用 Popup 还是窗口。）*
+    - **它是一个 `Popup`，不是窗口。** 判据：**锚在同一个窗口里的浮层就用 `Popup`**
+      （`PlacementMode.Top` + `PlacementTarget` + `IsLightDismissEnabled` + `ShouldConstrainToRootBounds`，
+      挂在窗口根 `Grid` 上）—— 与缩略图浮层（`PagedCanvasWindow.CreateThumbnailPopup`）完全同一手法。
+      **锚在别的窗口里的才用登记过的独立浮窗**（笔 / 橡皮菜单就是：它们锚工具栏，
+      而工具栏会被搬进图片窗口，跨窗口就不能用 Popup 了）。
+      早先把缩放浮层做成了独立窗口，于是踩了四个坑，**每一个都是"自己摆位"独有的**：
+      最大化窗口 `Left/Top` 报的是**还原位置**（窗口模式下两者恰好相等，所以只测窗口模式的断言全绿，
+      一进全屏就偏出去）；`PointToScreen` 返回**物理像素**而 `Left/Top` 要 **DIP**；
+      `Show()` 之后立刻量 `ActualHeight` 读到 **0**；兜底高度与真实高度不符时
+      **菜单往下压在锚控件上面**（用户原话：「点开直接给你覆盖在缩放控件上面了」）。
+      改成 Popup 后这四个问题一个都不存在——所以**别再自己算浮层的位置**。
     - **不要标题、不要说明、不要「适应窗口 / 原始大小」按钮**（第一版 264 宽带一堆字和两颗钮，
       浮出来是一整块面板，挡图）。它是"临时拖一下"的东西，不是第二套设置页。
     - **数字框是必需的**：滑块无级，而无级的东西不配一个数就没法"停到要的那一档"。
     - 范围 **0~300%**（100 = 原始大小），`IsSnapToTickEnabled=False`；真落到 0 倍等于没有图，
       所以**下限钉 10%**。控件范围（0.1~3.0）比引擎 `MinZoom/MaxZoom` 窄，好处是数字框与滑块
       **永远说得出真话**——否则加号能走到 500% 而滑块只到 300%，拖到头会看到 300% 却实际 500%。
-    - 底栏百分数与菜单滑块**是同一个数的两次显示**，所以 `OnViewportChangedCore` 里一起刷。
-11. **浮层摆位有四条独立的坑，缺一条就飞掉**（用户报过两次"跑到左上角"）：
-    - **坐标走 `PointToScreen`，绝不加 `Left`/`Top`**：最大化窗口的 `Left`/`Top` 报的是**还原位置**，
-      不是它在屏幕上的位置。窗口模式下那两者恰好相等 —— **所以只测窗口模式的断言会全绿**，
-      一进全屏就整体偏出去。验收必须有一组**全屏下**的断言。
-    - **但 `PointToScreen` 返回物理像素，而 `Window.Left/Top` 要 DIP**：直接赋值差一个 DPI 倍数
-      （本机 175% → 1.75 倍）。缩放比用**公开 API 自己量**：同一元素上相隔 100 DIP 的两个点，
-      屏幕坐标差多少就是多少倍（`Window.DpiScale` 不是公开的，反射它属本项目明令禁止的那类补丁）。
-    - **尺寸必须在 `Show()` 之后再量**：`ActualWidth` 在刚 Show 时是 0，
-      而 `Width` 在 `SizeToContent` 之下可能没算。拿 0 去算居中会偏出去。
-    - **纵向只防"顶到屏幕上沿"，不按工作区下沿夹**：全屏盖的是整块屏，底栏落在**工作区下沿之下**
-      （任务栏那条），而菜单是相对那排控件算的、位置天然在屏内。拿 `WorkArea` 上下一起夹，
-      会把菜单压到控件上面还差一截 —— 看着就是"没落在那排控件上方"。
-12. **菜单开合自己记状态位，不读 `Window.IsVisible`**（同第 7 条那条理由，连点两下会读到上一次的旧值）。
-13. **全屏那一档的"形状"是与白板同一组属性，不只是 `WindowState=Maximized`**：
+    - 底栏百分数与浮层滑块**是同一个数的两次显示**，所以 `OnViewportChangedCore` 里一起刷。
+    - 开合读 `Popup.IsOpen`（那是我们自己设的，可靠），**不读 `Window.IsVisible`**——
+      后者在"刚 Show / 刚 Hide"之后不是立刻准的，连点两下会读到上一次的旧值。
+11. **全屏那一档的"形状"是与白板同一组属性，不只是 `WindowState=Maximized`**：
    `WindowStyle=None` + 标题栏/最小化/最大化/关闭/系统菜单全关 + 不在任务栏 + `ResizeMode=NoResize`。
    带窗框的窗口最大化只到工作区（底下露任务栏、顶上留一条边），那不是全屏。
    **顺序是先摘窗框再最大化**：反过来外壳会按带框的尺寸算一次，留一条边再也补不回来。
-14. **窗口形状只在「那一档真的变了」时摆，且 `Show()` 不许对已在屏的窗口再走一遍。**
+12. **窗口形状只在「那一档真的变了」时摆，且 `Show()` 不许对已在屏的窗口再走一遍。**
    用户报的缺陷：「窗口最大化时在工具栏切一下工具就掉出最大化」。根因不是"摆错了"，
    是**摆得太勤**：`SyncImageViewerOverlay` 的每个分支都调 `PresentImageViewer`，
    而它每次都调 `ApplyOpenMode`，后者无条件 `WindowState = Normal` + 重设 `Left/Top`。
@@ -557,6 +707,48 @@ UiSmoke 现状：**433 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/Ui
 90° 之后笔迹跟着转、批注栏搬进/搬出/再搬进、**页码与批注栏并排且离窗口边有边距**、
 最大化状态下切笔/橡皮/选择都不掉出最大化、也不动窗口位置、而设置里换档仍然摆出新形状，
 以及"在图片窗口里点白板 → 批注栏自己回来 → 再点图片 → 又搬进去"这条完整回路。
+
+## Critical: PDF 的动态分辨率是按实测数字定的，不是拍的（阶段 0 已跑通）
+
+`tools/PdfProbe`（**独立工程，不引用主应用**，用 `<Compile Include="..." Link="..."/>`
+链进主工程的**同一份** `Pdf/PdfiumNative.cs` 与 `Pdf/PdfPageRasterizer.cs`）
+已经对真实 10 页 PDF 量过（`tools/PdfProbe/bin/P0g/LanStartWrite.Inkcanvas.PdfProbe.exe <某个.pdf>`）：
+
+| 档位 | DPI | 像素 | 单页字节 | 耗时 |
+|---|---|---|---|---|
+| 低 | 72 | 612×792 | 1 MB | **3–4 ms** |
+| 中 | 150 | 1275×1650 | 8 MB | **9–34 ms** |
+| 高 | 220 | 1870×2420 | 17 MB | **21–25 ms** |
+
+**这些耗时是抖的**（同一台机、同一份文件，两次 Release 跑出 150 dpi = 9 ms 与 34 ms）：
+JIT 预热与机器负载都吃进来。所以**别拿单次读数去调阈值**，上表只够支撑"三档差一个数量级"这个结论。
+流畅性真正的保障不是把数字调准，而是"停稳才升档"这条规则本身——
+它对耗时抖动不敏感：抖一次也只是升档晚 100 ms，不会掉帧。
+要更准的数就重复采样取中位数，那是性能优化阶段的事，不是现在。
+
+三条由此而来的硬决定，别再改回去：
+- **220 dpi 一页 25 ms**。滚动时每帧都发起一次高/中档光栅化 = 每帧卡 25 ms，
+  所以 `PdfResolutionPolicy.DesiredTier` 在 `IsMovingFast` 时**只给 `Low`**，
+  移动期间**一个像素都不新栅格化**（宁可糊）。`PdfPageCache.TryGet` 的 miss 因此**不是错误**，
+  它只是"这一格现在没有"——早期那版"miss 就同步光栅化"就是滚动变幻灯片的原因。
+- **`FromPixels` 会再拷一份**，所以 220 dpi 一页的**瞬时**内存是 17 MB × 2 = 34 MB。
+  缓存预算按一份算（256 MB ≈ 15 页满档 ≈ 200+ 页低档），但排 LRU 时要记得峰值是两份。
+- **三档而不是连续值**。档位多了，"该换档"就会频繁发生，而每次换档都是一次重画。
+  `Publish` 只在真的画上去之后才调，否则就成了"以为升过了"。
+
+沉降时间是**手感**而非性能决定的：150 ms。短于此则用户还在滚、每次上档都被下一次滚动打掉；
+长于此则用户已停手却在看糊的图。`FastMoveDip = 6`（约一行行高）：小于它的移动肉眼看不出滚动，
+那时候升档只是白花钱。
+
+**策略必须自己可测**：`PdfResolutionPolicy.Now` 是可注入的 `Func<TimeSpan>`。
+用真实 `Stopwatch` 测"停稳 150 ms"只能写成"睡 150 ms 再看"，那种测试要么慢要么 flaky，
+于是这条规则实际上永远没被测过。`UiSmoke.CheckPdfResolutionPolicy` 13 条断言就是这么钉的
+（`SettleMilliseconds - 1` 那一刻必须**保持**已发布档位，靠的就是注入的时钟）。
+
+这 13 条断言当场抓出过一个真缺陷：`_lastMoveAt` 零初始化会让"距上次移动"从 0 算起，
+于是**文档刚打开的第一帧永远升不到高档**，得先随便动一下鼠标才升得上去。
+修法是 `_hasLastMove == false` 时直接按缩放给档（"没动过 = 已经静止了很久"），
+**不是**改断言。写这类策略时先想清楚"初始状态"是哪一种。
 
 ## Critical: 安装包走 CI（Windows 1 件 + Linux 每种架构 2 件），细节看 `packaging/README.md`
 

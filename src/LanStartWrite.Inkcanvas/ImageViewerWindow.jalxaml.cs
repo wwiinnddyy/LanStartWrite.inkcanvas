@@ -6,6 +6,7 @@ using FluentJalium.Controls;
 using Jalium.UI;
 using Jalium.UI.Automation;
 using Jalium.UI.Controls;
+using Jalium.UI.Controls.Primitives;
 using Jalium.UI.Input;
 using Jalium.UI.Media;
 using Jalium.UI.Media.Imaging;
@@ -68,6 +69,7 @@ public partial class ImageViewerWindow : PagedCanvasWindow
             AddPageButton,
             PageNumberText);
         InitializeSharedCanvas();
+        CreateZoomFlyout();
         WireZoomControls();
     }
 
@@ -100,17 +102,58 @@ public partial class ImageViewerWindow : PagedCanvasWindow
     }
 
     /// <summary>
-    /// 二级菜单<b>开</b>没有。
+    /// 缩放浮层：<b>一个 <see cref="Popup"/>，不是窗口</b>。
     /// <para>
-    /// <b>自己记，不读 <c>_zoomMenu.IsVisible</c></b>：窗口那个属性在"刚 Show / 刚 Hide"
-    /// 之后不是立刻准的（同一个钮连点两次时读到的还是上一次的值），
-    /// 于是"同一个钮开关它"这条会变成"第一次点开、第二次点没反应"。
-    /// 层级系统那边也是这个理由才只听 <c>Shown</c> / <c>Hiding</c>。
+    /// 与左下角那个缩略图浮层<b>同一套做法</b>（<c>CreateThumbnailPopup</c> 就在基类里）：
+    /// 锚在同一个窗口内的那个控件上，<c>PlacementMode.Top</c>，摆位由框架做。
+    /// <para>
+    /// 之前做成独立窗口，于是要自己算位置，踩了四个坑：最大化窗口的 <c>Left/Top</c> 是还原位置、
+    /// <c>PointToScreen</c> 给物理像素而 <c>Left/Top</c> 要 DIP、<c>Show()</c> 后立刻量高度读到 0、
+    /// 兜底高度与真实高度不符时菜单压在锚控件上面。四个全是"自己摆位"才有的问题 ——
+    /// <b>同一个窗口里的浮层不该自己摆位</b>。笔/橡皮那两个菜单仍然是窗口：
+    /// 它们锚在工具栏上，而工具栏会被搬进图片窗口，跨窗口就不能用 Popup 了。
     /// </para>
     /// </summary>
-    internal bool IsZoomMenuOpen { get; private set; }
+    private void CreateZoomFlyout()
+    {
+        _zoomFlyout = new ZoomFlyout();
+        _zoomFlyout.ZoomChanged += percent =>
+        {
+            // 滑块给的是「我要百分之几」，这里换算成相对倍数去动视口。
+            // 滑块范围到 300 而 ZoomBy 还要能往上走，所以真正夹范围的是 ZoomTo。
+            var current = ZoomScale <= 0 ? 1.0 : ZoomScale;
+            ZoomBy((percent / 100.0) / current);
+        };
 
-    private ZoomSecondaryMenuWindow? _zoomMenu;
+        _zoomPopup = new Popup
+        {
+            PlacementTarget = ZoomControlHost,
+            Placement = PlacementMode.Top,
+            HorizontalOffset = 0,
+            VerticalOffset = -8,
+            IsLightDismissEnabled = true,
+            StaysOpen = false,
+            ShouldConstrainToRootBounds = true,
+            Child = _zoomFlyout.Root,
+        };
+        ((Grid)Content!).Children.Add(_zoomPopup);
+    }
+
+    private ZoomFlyout? _zoomFlyout;
+
+    private Popup? _zoomPopup;
+
+    /// <summary>缩放浮层现在是不是开着（<b>读 Popup 自己的 <c>IsOpen</c></b>，那是我们自己设的，可靠）。</summary>
+    internal bool IsZoomMenuOpen => _zoomPopup?.IsOpen == true;
+
+    /// <summary>验收读它：浮层内容（<c>Window.IsVisible</c> 那套一律不用）。</summary>
+    internal ZoomFlyout? ZoomFlyoutControl => _zoomFlyout;
+
+    /// <summary>验收读它：浮层是不是真的挂在缩放控件上（而不是一个摆到别处的独立窗口）。</summary>
+    internal bool ZoomFlyoutAnchored =>
+        _zoomPopup?.PlacementTarget is not null
+        && ReferenceEquals(_zoomPopup.PlacementTarget, ZoomControlHost)
+        && _zoomPopup.Placement == PlacementMode.Top;
 
     /// <summary>
     /// 建一张<b>还没有图</b>的页。
@@ -584,7 +627,7 @@ public partial class ImageViewerWindow : PagedCanvasWindow
     }
 
     /// <summary>
-    /// 底栏那一排（百分数）与二级菜单里的滑块是<b>同一个数</b>的两次显示。
+    /// 底栏那一排（百分数）与浮层里的滑块是<b>同一个数</b>的两次显示。
     /// 所以每次视口变了都要两处一起刷 —— 只刷一处的话，
     /// 用户拖了滑块之后底栏还写着旧数字，而两处本该一致。
     /// </summary>
@@ -593,97 +636,22 @@ public partial class ImageViewerWindow : PagedCanvasWindow
         var text = $"{ZoomPercent}%";
         ((TextBlock)ZoomPercentText!).Text = text;
         AutomationProperties.SetName(ZoomPercentButton!, $"缩放 {text}（点开可无级调节）");
-        _zoomMenu?.ShowScale(ZoomScale);
-    }
-
-    /// <summary>把二级菜单摆在百分数那颗按钮下面。</summary>
-    private void EnsureZoomMenu()
-    {
-        if (_zoomMenu is not null) return;
-
-        _zoomMenu = new ZoomSecondaryMenuWindow { Owner = this };
-        _zoomMenu.ZoomChanged += scale =>
-        {
-            ZoomBy(scale / 100 / (ZoomScale <= 0 ? 1 : ZoomScale));
-        };
-        _zoomMenu.DismissRequested += HideZoomMenu;
+        _zoomFlyout?.ShowScale(ZoomScale);
     }
 
     private void ShowZoomMenu()
     {
-        EnsureZoomMenu();
-        if (_zoomMenu is null) return;
-        IsZoomMenuOpen = true;
-        _zoomMenu.ShowScale(ZoomScale);
-        _zoomMenu.Show();
-        PlaceZoomMenu();
+        if (_zoomPopup is null || _zoomFlyout is null) return;
+        _zoomFlyout.ShowScale(ZoomScale);
+        _zoomPopup.IsOpen = true;
     }
-
-    // IsShown 这条同样适用：可见性听自己这一趟 Show / Hide，不问窗口。
 
     private void HideZoomMenu()
     {
-        IsZoomMenuOpen = false;
-        _zoomMenu?.Hide();
+        if (_zoomPopup is null) return;
+        _zoomPopup.IsOpen = false;
     }
 
-    /// <summary>
-    /// 把二级菜单摆在右下角那排缩放控件的<b>正上方</b>、右缘对齐，并夹在屏幕之内。
-    /// <para>
-    /// <b>坐标走 <c>PointToScreen</c>，绝不加 <c>Left</c>/<c>Top</c>。</b>
-    /// 最大化（全屏）窗口的 <c>Left</c>/<c>Top</c> 报的是<b>还原位置</b>，不是它在屏幕上的位置 ——
-    /// 所以"控件在窗口里的偏移 + 窗口 Left/Top"这条路在窗口模式下碰巧对，一进全屏就整体偏出去。
-    /// <para>
-    /// <b>但 <c>PointToScreen</c> 返回的是<b>物理像素</b>，而 <c>Window.Left/Top</c> 要 <b>DIP</b></b>
-    /// —— 直接赋值就是差一个 DPI 倍数（本机 175% → 差 1.75 倍，看着就是"飞到别处去了"）。
-    /// 缩放比用<b>公开 API 自己量</b>：同一元素上相隔 100 DIP 的两个点，屏幕坐标差多少就是多少倍。
-    /// （<c>Window.DpiScale</c> 不是公开的，而反射它正是本项目明令禁止的那类补丁。）
-    /// <para>
-    /// <b>摆在上面而不是下面</b>：那排控件贴着屏幕下沿，摆在下面会有一半掉出屏外。
-    /// <b>尺寸在 <c>Show()</c> 之后再量</b>：<c>ActualWidth</c> 在刚 Show 时还是 0。
-    /// </para>
-    /// </summary>
-    private void PlaceZoomMenu()
-    {
-        if (_zoomMenu is null) return;
-        var host = (FrameworkElement)ZoomControlHost!;
-        var width = _zoomMenu.ActualWidth > 0 ? _zoomMenu.ActualWidth : ZoomMenuFallbackWidth;
-        var height = _zoomMenu.ActualHeight > 0 ? _zoomMenu.ActualHeight : ZoomMenuFallbackHeight;
-
-        // 缩放比：屏幕上 100 DIP 实际有多长。
-        var origin = host.PointToScreen(new Point(0, 0));
-        var probe = host.PointToScreen(new Point(100, 0));
-        var scale = Math.Abs(probe.X - origin.X) / 100.0;
-        if (scale is not (> 0.25 and < 8)) scale = 1.0;
-
-        // 屏幕坐标（物理像素）→ DIP，才能拿去赋给 Left/Top。
-        var topRight = ToDip(host.PointToScreen(new Point(host.ActualWidth, 0)), scale);
-        var bottomRight = ToDip(host.PointToScreen(new Point(host.ActualWidth, host.ActualHeight)), scale);
-        var work = Jalium.UI.SystemParameters.WorkArea;
-
-        // 横向按工作区夹：左右本来就离窗口边 12 DIP，夹一下保证不出屏。
-        var left = topRight.X - width;
-        left = Math.Clamp(left, work.X + 8, Math.Max(work.X + 8, work.Right - width - 8));
-
-        // 纵向<b>只</b>防"顶到屏幕上沿"（那才真的看不见），<b>不按工作区下沿夹</b>。
-        // 理由：全屏那一档盖的是<b>整块屏</b>，底栏落在工作区下沿之下（任务栏那条），
-        // 而菜单是<b>相对那排控件</b>算的 —— 位置天然在屏内。
-        // 早先那版拿 WorkArea 上下一起夹，于是被压到 814：控件上沿在 852，
-        // 菜单只有 44 高，夹完正好压在控件上面还差一截。看着就是"没落在那排控件上方"。
-        var top = bottomRight.Y - height - 6;
-        if (top < work.Y + 8) top = bottomRight.Y + 6;
-        if (top < work.Y + 8) top = work.Y + 8;
-
-        _zoomMenu.Left = left;
-        _zoomMenu.Top = top;
-    }
-
-    private static Point ToDip(Point screen, double scale) => new(screen.X / scale, screen.Y / scale);
-
-    /// <summary>菜单刚 Show、还没量到尺寸时用的兜底尺寸（与标记里那两处一致）。</summary>
-    private const double ZoomMenuFallbackWidth = 216;
-
-    private const double ZoomMenuFallbackHeight = 44;
 
     /// <summary>
     /// 验收读它：图当前那个 world→screen 变换。缩放前后<b>必须不一样</b> ——
@@ -716,9 +684,6 @@ public partial class ImageViewerWindow : PagedCanvasWindow
 
     /// <summary>验收读它：宿主里那一张的源本身（判"是不是带 GPU 后端的那种"）。</summary>
     internal ImageSource? HostedImageSource => _image?.Source;
-
-    /// <summary>缩放的二级菜单（还没建就是 null）。探针据此验"点百分数会弹出菜单"。</summary>
-    internal ZoomSecondaryMenuWindow? ZoomMenu => _zoomMenu;
 
     /// <summary>底栏那一排缩放控件，验它的次序（左加号 / 中百分数 / 右减号）。</summary>
     internal FrameworkElement? ZoomControlElement => ZoomControlHost;

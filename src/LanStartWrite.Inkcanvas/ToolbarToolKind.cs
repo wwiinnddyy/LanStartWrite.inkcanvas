@@ -50,4 +50,11 @@ internal enum ToolbarToolKind
     /// </para>
     /// </summary>
     Image = 8,
+
+    /// <summary>
+    /// 打开一份 PDF 并批注。<b>固定项且只放一枚</b>，与 <see cref="Whiteboard"/> / <see cref="Image"/> 同理：
+    /// "PDF 批注"是**一个**窗口的入口，而那个窗口一次只开一份文档 ——
+    /// 点第二下要开第二份，而不是把第二份塞进第一份里（那样页码、撤销账、渲染档位缓存全串了）。
+    /// </summary>
+    Pdf = 9,
 }

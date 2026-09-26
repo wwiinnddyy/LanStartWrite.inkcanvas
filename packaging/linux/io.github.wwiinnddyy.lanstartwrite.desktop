@@ -10,5 +10,11 @@ Exec=lanstartwrite
 Icon=io.github.wwiinnddyy.lanstartwrite
 Terminal=false
 Categories=Graphics;Office;
+# 文件关联。`application/pdf` 让"用本应用打开 PDF"出现在桌面的右键菜单里；
+# 注册项是程序自己带的那份（deb 装到 /usr/share/applications、AppImage 自带、
+# 玲珑模板照抄），所以这一行是**唯一**一处声明，三种包不会各说各的。
+# 图像那几个 MIME **刻意不加**：图片走的是应用内"打开图片"入口，
+# 而把它注册成系统默认会抢走别的看图软件的活 —— 那不是本应用该做的事。
+MimeType=application/pdf;
 StartupNotify=true
 StartupWMClass=LanStartWrite.Inkcanvas

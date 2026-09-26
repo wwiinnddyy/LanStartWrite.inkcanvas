@@ -184,12 +184,19 @@ jobs:
         shell: pwsh
         env:
           VERSION: ${{ needs.resolve.outputs.version }}
+          # **钉死 NSIS 版本**：choco 的 `nsis` 包是滚动的，下个月跑出来的包
+          # 可能由另一个版本编出来，于是"本地能编、CI 编不出"或者反过来，
+          # 而症状是一条与本仓库任何一行都无关的 NSIS 语法报错。
+          # 3.12（2026-04-19）是当前最新；升版时改这一行，并看一眼 installer.nsi
+          # 顶部那条"换版要看什么"。
+          NSIS_VERSION: '3.12'
         run: |
           # choco 装的 makensis 在本进程的 PATH 上还没有（PATH 是进程启动时那份），
           # 所以先找、找不到就装、装完按安装位置点名。
           $makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
           if (-not $makensis) {
-            choco install nsis -y --no-progress | Out-Null
+            # --version 一起钉住：装的是不是我们点名的那一版，跑完要能自证。
+            choco install nsis --version $env:NSIS_VERSION -y --no-progress | Out-Null
             $candidates = @(
               "$env:ProgramFiles\NSIS\makensis.exe",
               "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
@@ -198,6 +205,20 @@ jobs:
           }
           if (-not $makensis) { Write-Error "makensis 没找到（choco 装完了也不在预期位置）"; exit 1 }
           Write-Host "makensis: $makensis"
+
+          # 拿实际版本与点名的那一版对一次。NSIS 的版本串长这样：
+          #   "NSIS 3.12 - Unicode Installer Generator"
+          # 3.12 之前的版本串是 "V3.xx" 带 V，更早的根本没有这个格式 ——
+          # 所以只比数字，不比整行（整行还含平台与位数，比整行必然误报）。
+          $banner = (& $makensis /VERSION 2>&1 | Out-String)
+          $actual = ([regex]::Match($banner, '(\d+)\.(\d+)')).Groups
+          if (-not $actual.Success) { Write-Error "读不出 NSIS 版本，输出是：$banner"; exit 1 }
+          $actualVersion = "$($actual[1].Value).$($actual[2].Value)"
+          Write-Host "NSIS: $actualVersion（点名 $env:NSIS_VERSION）"
+          if ($actualVersion -ne $env:NSIS_VERSION) {
+            Write-Error "NSIS 版本对不上：要 $($env:NSIS_VERSION)，装出来是 $actualVersion。改 workflow 里的 NSIS_VERSION 或把 choco 那条钉死。"
+            exit 1
+          }
 
           # 版本资源要四段数字，预发布后缀进不去 —— 从 VERSION 抠出三段数字补 .0。
           $version4 = if ($env:VERSION -match '^(\d+\.\d+\.\d+)') { $Matches[1] + '.0' } else { '0.0.0.0' }
@@ -209,11 +230,26 @@ jobs:
                        "/DBINDIR=$env:GITHUB_WORKSPACE\publish" `
                        installer.nsi 2>&1 | Tee-Object -FilePath makensis.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          # 有一类警告不是噪音，是"装/卸的动作其实没接上"：
-          # "Uninstall page instfiles not used, no sections will be executed!" 意味着卸载器一节都不跑
-          # （退出码照样是 0，安装包照样产出，只有真去卸载才发现什么都没删）—— 当场红掉。
+
+          # 三类"退出码 0 但包是错的"，只有读日志才看得见：
+          #   1) "no sections will be executed" —— 卸载器一节都不跑（那条警告不是噪音）。
+          #   2) MUI2 缺页/缺字符串时 NSIS 会给 warning 而不是 error。
+          #   3) "File: ... could not be opened" —— 打包目录里少东西。
           $fatal = Select-String -Path makensis.log -Pattern "no sections will be executed" -SimpleMatch
           if ($fatal) { Write-Error "NSIS 警告：$($fatal[0].Line)"; exit 1 }
+          $warnings = Select-String -Path makensis.log -Pattern "^(warning|Warning):" | Select-Object -First 5
+          if ($warnings) {
+            Write-Warning "makensis 有警告（多数无害，但装完点不出来就难查，所以念出来）："
+            $warnings | ForEach-Object { Write-Warning "  $($_.Line)" }
+          }
+          $missing = Select-String -Path makensis.log -Pattern "could not be opened" -SimpleMatch
+          if ($missing) { Write-Error "有文件打不开：$($missing[0].Line)"; exit 1 }
+
+          # 产物必须在：脚本一次没跑也照样"成功"是有的，那属于最坏的一类绿。
+          $setup = Get-ChildItem ../dist -Filter "*-windows-x64-setup.exe" | Select-Object -First 1
+          if (-not $setup) { Write-Error "dist 下没有 setup.exe（脚本可能整段没执行）"; exit 1 }
+          if ($setup.Length -lt 1MB) { Write-Error "setup.exe 只有 $($setup.Length) 字节，明显不完整"; exit 1 }
+          Write-Host "setup: $($setup.Name) $([math]::Round($setup.Length/1MB,1)) MiB"
           Get-ChildItem ../dist | Format-Table Name, Length
 
       # ELF 门禁：产物里的原生代码得声明它能在多大的页内核上被映射。
