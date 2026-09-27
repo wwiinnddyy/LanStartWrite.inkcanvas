@@ -614,8 +614,8 @@ public partial class PdfViewerWindow : Window
     /// <summary>让某一页在缓存里待命，并在落地时换上去。</summary>
     private void EnsureTier(int pageIndex, PdfResolutionPolicy.ResolutionTier tier)
     {
-        // 同一个原生缺陷的同一个闸口（见 CanRasterize）。策略层照旧给出该要哪一档，
-        // 但送进 PDFium 之前先过这一关 —— 崩在原生里，这里是唯一拦得住的地方。
+        // 同一个闸口（见 CanRasterize）。策略层照旧给出该要哪一档，
+        // 送进 PDFium 之前先过这一关 —— 原生崩溃托管侧接不住，这里是唯一拦得住的地方。
         if (!CanRasterize(pageIndex)) return;
 
         if (_cache.TryGet(pageIndex, tier, out var cached) && cached is not null)
@@ -663,33 +663,29 @@ public partial class PdfViewerWindow : Window
     /// 而 300 页的文档光这一项就多花一秒多。
     /// </para>
     /// <para>
-    /// <b>目前只预加载当前这一页</b>，因为 PDFium 156.0.8066 有一个已实测的原生缺陷：
-    /// <c>FPDF_RenderPageBitmap</c> 在 <c>page_index &gt;= 1</c> 时访问违例（0xC0000005，
-    /// 托管层 catch 不到，整个进程走）。最小复现见 <c>tools/PdfProbe --minimal</c>，
-    /// 3 页手写 PDF、绑定无误、page 0 成功 page 1 崩。
-    /// 在换掉那份原生库之前，**碰第 2 页就是崩** —— 那宁可慢，也不能让用户开一份 PDF
-    /// 就丢整个进程。理由与最小复现都记在 AGENTS 里。
+    /// <b>预加载当前页的相邻页</b>（胶片与主视图共用同一批低档位图）。
+    /// 曾经只预加载当前这一页，理由是当时以为 PDFium 有个"第 2 页起访问违例"的原生缺陷 ——
+    /// 那个缺陷是<b>我们自己绑定的问题</b>（<c>FPDF_RenderPageBitmap</c> 的第二个参数
+    /// 是<b>页句柄</b>，被当成了页号传：页号 0 正好是空指针 → 函数直接 return →
+    /// "第 1 页渲染成功"而其实一格没画；页号 ≥ 1 被当成指针 0x1、0x2 → 解引用 → 0xC0000005）。
+    /// 改正之后 16 页实测全部渲出，理由与最小复现见 AGENTS.md 与 <c>tools/PdfProbe</c>。
     /// </para>
     /// </summary>
     /// <summary>
     /// 能不能安全地把这一页送去光栅化。
     /// <para>
-    /// 目前<b>只有第 1 页</b>（页号 0）能渲染：PDFium 156.0.8066 的
-    /// <c>FPDF_RenderPageBitmap</c> 在 <c>page_index &gt;= 1</c> 时访问违例，
-    /// 0xC0000005、托管层接不到、整个进程走。最小复现是 3 页手写 PDF
-    /// （<c>tools/PdfProbe &lt;pdf&gt; --minimal</c>）：绑定无误，page 0 成功、page 1 崩。
+    /// <b>现在恒为 true。</b> 它曾经是 <c>pageIndex == 0</c>，而那是个误判：
+    /// 当时的现象（"第 1 页好、第 2 页起 0xC0000005 硬崩"）被归给了原生库，
+    /// 于是换了六七个版本的 pdfium、逐个换了缓冲归属与渲染入口，全部一样 ——
+    /// 因为根因是 <c>FPDF_RenderPageBitmap</c> 的第二个参数要页句柄而我们传了页号。
     /// </para>
     /// <para>
-    /// 这一句是<b>整个窗口唯一的闸口</b>，而它必须存在：崩溃发生在原生里，
-    /// <c>try/catch</c> 接不到，<c>Task</c> 的异常也接不到。
-    /// 没有闸口的症状是"用户双击一份 PDF，应用整个消失"。
-    /// </para>
-    /// <para>
-    /// <b>换掉那份原生库之后，把这里改成 <c>true</c> 即可</b>，其余代码不用动 ——
-    /// 分辨率策略、预加载、胶片共用同一份位图那套都是照着"能渲染多页"写的。
+    /// <b>闸口本身仍然留着</b>，因为它挡的是另一类故障：
+    /// 光栅化抛得出托管异常（尺寸不可用、位图建不出来、超出页数），
+    /// 那一层 <c>catch</c> 得住；而原生崩溃接不住，所以宁可先把能算出来的情形挡在门外。
     /// </para>
     /// </summary>
-    private bool CanRasterize(int pageIndex) => pageIndex == 0;
+    private bool CanRasterize(int pageIndex) => true;
 
     private void PreloadNeighbours()
     {

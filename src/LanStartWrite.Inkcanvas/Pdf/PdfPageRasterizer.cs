@@ -123,10 +123,6 @@ internal sealed class PdfPageRasterizer
     /// 按 <paramref name="dpi"/> 光栅化一页。
     /// <para>
     /// <b>页尺寸由调用方给</b>（<paramref name="sizePoints"/>），不在这里重新查 ——
-    /// 查一次意味着 <c>FPDF_LoadPage</c> + <c>FPDF_ClosePage</c> 一轮，
-    /// 而"先 Load 再 Close、然后按<b>页号</b>去渲染"这个序列实测会让 PDFium
-    /// 在换页时崩：第 1 页成功、第 2 页 <b>0xC0000005 硬崩</b>（托管层 catch 不到，整个进程走）。
-    /// 单线程、同一份文件、探针与窗口里都复现，所以它是调用序列的问题，不是并发或生命周期。
     /// 尺寸本来就在打开文档时一次取全了（<see cref="PageSizes"/>），每次重查纯属多余。
     /// </para>
     /// <para>
@@ -146,9 +142,10 @@ internal sealed class PdfPageRasterizer
 
             // 页号越界**在进原生之前**挡掉。
             //
-            // FPDF_RenderPageBitmap 收的是一个页号，越界时 PDFium 内部会拿到空页句柄再
-            // 解引用 —— 那是 0xC0000005 的**硬崩**，托管层的 try/catch 接不到，
-            // 整个进程跟着走。所以凡是能算出来的越界，都要在这一行之前解决。
+            // `FPDF_RenderPageBitmap` 收的是 `FPDF_LoadPage` 的**页句柄**，
+            // 越界时 `FPDF_LoadPage` 返回空、而渲染函数对空句柄是直接 return
+            // （连崩都不崩）—— 那意味着"这一页静静地变成空白纸片"。
+            // 宁可在这里明明白白地返回 null，也不要一个查不出理由的空图。
             if ((uint)pageIndex >= (uint)_document.PageCount) return null;
 
             var size = sizePoints ?? PageSize(pageIndex);
@@ -162,15 +159,21 @@ internal sealed class PdfPageRasterizer
             var stopwatch = Stopwatch.StartNew();
             try
             {
+                // 页与位图都是"用完立刻释放"：一次几百页的文档，
+                // 几十个页对象同时开着既费内存也让 PDFium 的内部缓存失效。
+                // 曾经为了"少一轮 Load/Close"改成按页号渲染 —— 那正是把
+                // 页号当句柄传出去的那版，见 PdfiumNative.FPDF_RenderPageBitmap。
+                using var page = new PdfiumNative.PageHandle(_document.Handle, pageIndex);
                 using var bitmap = new PdfiumNative.BitmapHandle(width, height);
                 // 整页铺满：起点 0、尺寸就是整块位图。rotate=0 是因为**页的朝向由我们自己管**
                 // （用户能转 90°，那是我们的变换，不该被 PDF 的 /Rotate 又转一次）。
                 Instrumentation?.Invoke($"[pdf] render page={pageIndex} dpi={dpi} {width}x{height}");
-                bitmap.RenderPage(pageIndex, PdfiumNative.RenderContentOnly);
+                bitmap.RenderPage(page.Handle, PdfiumNative.RenderContentOnly);
                 var pixels = bitmap.CopyToManaged();
                 stopwatch.Stop();
                 return new PdfPageRaster(pixels, width, height, dpi, stopwatch.ElapsedMilliseconds);
             }
+
             catch (Exception ex) when (ex is PdfNativeException or OutOfMemoryException)
             {
                 Instrumentation?.Invoke($"[pdf] 第 {pageIndex + 1} 页 {dpi}dpi 光栅化失败：{ex.Message}");
