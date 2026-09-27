@@ -26,6 +26,12 @@
 #   - choco 装的 makensis 在**同一步**里不会出现在 PATH 上（PATH 是进程启动时那份），
 #     所以要按安装位置点名。
 #   - installer.nsi 的 OutFile 是 ..\dist\ —— 相对它自己算，所以工作目录必须是 packaging/windows。
+#   - **makensis 的 warning 与 error 分两类，MUI2 顺序写错全落在 warning 里。**
+#     run 36256606331 就是这样红的：exit 1 + 一句
+#     `Error in script "installer.nsi" on line 98 -- aborting creation process`（只有行号），
+#     而真正的线索是它前面六条 `MUI_PAGE_* inserted after MUI_LANGUAGE` 之类的警告。
+#     本机装不上 NSIS，所以 NSIS 那一步之前插了 check-mui2-order.py，
+#     红的理由是"哪个宏排错了"而不是"某一行"。
 
 name: release
 
@@ -178,6 +184,19 @@ jobs:
             -p:Version="$VERSION" \
             -p:FluentJaliumProject="$FLUENT_JALIUM" \
             -o publish
+
+      # 装 NSIS 要几十秒，而 MUI2 顺序写错时 makensis 报出来的是
+      # `Error in script "installer.nsi" on line 98 -- aborting creation process`
+      # —— 只有行号、没有解释，真线索在它前面那几条 warning 里。
+      # 所以先用一条一秒的门禁把顺序契约查掉：红的理由是"哪个宏排错了"，
+      # 而不是"某一行"。（本机装不上 NSIS，这门禁的主要价值正是把本地十分钟的
+      # CI 往返变成一秒 —— 见 packaging/windows/check-mui2-order.py 的说明。）
+      - name: Windows · MUI2 顺序门禁
+        if: matrix.kind == 'windows'
+        shell: pwsh
+        run: |
+          python packaging/windows/check-mui2-order.py packaging/windows/installer.nsi
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Windows · NSIS 安装包
         if: matrix.kind == 'windows'

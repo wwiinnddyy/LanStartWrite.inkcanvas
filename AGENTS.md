@@ -221,10 +221,13 @@ PDFium 的 `0x01` 是 `FPDF_ANNOT`，含义是"**要**画注释"。而 `0x02` �
 **换掉那份原生库之后，把这一行改成 `true` 即可，其余代码不用动** ——
 分辨率阶梯、预加载、胶片与主视图共用同一份位图那套都是照着"能渲染多页"写的。
 
-**未在本机验证**：`installer.nsi` 的新版脚本**没有跑过 makensis**（这台机器装不上
-NSIS，choco 锁文件 + 权限都不行，官方 zip 下载返回的是 HTML 页面）。
-CI 里已把 NSIS 钉到 3.12 并加了四道门禁（版本自证、日志扫 `no sections will be executed`、
-扫 `could not be opened`、产物大小与存在性），所以**第一次真跑是在 CI 上**。
+**本机跑不了 makensis**（这台机器装不上 NSIS，choco 锁文件 + 权限都不行，
+官方 zip 下载返回的是 HTML 页面）。CI 里已把 NSIS 钉到 3.12 并加了四道门禁
+（版本自证、日志扫 `no sections will be executed`、扫 `could not be opened`、
+产物大小与存在性），所以**第一次真跑是在 CI 上**（run 36256606331，2026-09-26）——
+**而那一跑就是红的**，红在 `installer.nsi:98` 的 MUI2 语言块结构，
+详见下一节第 3 条。**Linux 两条腿那一跑全绿**（deb / AppImage 照旧产出），
+所以"本机跑不了"这件事的代价就是每次改脚本都得付一次十分钟的 CI。
 
 ## Critical: Windows 安装器换成了 MUI2（NSIS 3.12）
 
@@ -239,9 +242,39 @@ CI 里已把 NSIS 钉到 3.12 并加了四道门禁（版本自证、日志扫 `
 2. **不要引用不存在的文件。** 本仓库**既没有 LICENSE 也没有 .ico**，所以
    `MUI_PAGE_LICENSE` 与 `MUI_ICON` 故意没写 —— 写一个不存在的路径进去，
    makensis 在 CI 上直接红，比少一页严重得多。
-3. **安装器与卸载器的 `LangString` 分开写**（`MUI_LANGUAGE` / `MUI_UNLANGUAGE`）。
-   同一个键名两边各写一遍，卸载器取到的会是安装器那份。
+3. **页面全在 `MUI_LANGUAGE` 之前；一种语言只有一个 `MUI_LANGUAGE` 块**
+   （安装器与卸载器的键都写在那一个块里）。**这两条都只给一行不带说明的错** ——
+   首跑（run 36256606331）就红在 `installer.nsi:98`，日志里是
+   `Error in script "installer.nsi" on line 98 -- aborting creation process`，
+   没有任何解释；**真正的线索是它前面那六条警告**：
+   `MUI_LANGUAGE[EX] should be inserted after the MUI_[UN]PAGE_* macros` 两条、
+   `MUI_PAGE_* inserted after MUI_LANGUAGE` 四条、`MUI_UNPAGE_*` 两条。
+   - 页面写在语言块**之后**是错，反过来同样错（MUI2 靠"读到某行为止声明了哪些页面"生成向导）。
+   - 同一种语言出现**第二个** `MUI_LANGUAGE` 块是错：MUI2 内部那个栈后进先出，
+     第二遍读到的是上一次压进去的那种语言，于是随后的 `MUI_UNLANGUAGE` 必然对不上而中止。
+   - **卸载器的键不需要 `MUI_UNLANGUAGE` 另起一块**：键名以 `MUI_UN` 开头
+     （`MUI_UNCONFIRMPAGE_*`），MUI2 按前缀自己认。
 4. **字符串里没有 markdown**：`\*\*粗体\*\*` 在 NSIS 标签里是字面的星号。
+5. **别用全局 `!define` 给"运行期才取值"的外观键加文案 —— 也不会有更糟的写法。**
+   `MUI_FINISHPAGE_TITLE` / `MUI_FINISHPAGE_RUN_TEXT` 在
+   `Contrib/MUI2/Pages/Finish.nsh:155` 是这么给默认值的：
+
+   ```nsi
+   !insertmacro MUI_DEFAULT MUI_FINISHPAGE_TITLE "$(MUI_${MUI_PAGE_UNINSTALLER_PREFIX}TEXT_FINISH_INFO_TITLE)"
+   !insertmacro MUI_DEFAULT MUI_FINISHPAGE_RUN_TEXT "$(MUI_TEXT_FINISH_RUN)"
+   ```
+
+   默认值是**运行期字符串表引用**（`$(...)`），不是字面量。于是：
+   - `!define` 覆盖它 = 一个值对两种语言 → 英文机器上最后一页写着中文标题。**这是现状。**
+   - **想按语言给，要改 `MUI_TEXT_FINISH_INFO_TITLE` / `MUI_TEXT_FINISH_RUN` 这两个
+     字符串表键。给 `MUI_FINISHPAGE_TITLE` 加一条 `LangString` 看着最像那么回事，
+     而没有任何代码去读它** —— 界面照旧用 `!define` 那个值，脚本照样编得过。
+     **这一条改过一次又撤回来了**：本机跑不了 makensis，为一个验不了的 NSIS 细节
+     赌一次十分钟的 CI 不划算，于是连同"怎么改对"一起记在这里。
+
+**教训：NSIS 的 warning 与 error 分两类，而这一类全在 warning 里。**
+退出码 1 只告诉你"第 98 行"，不告诉你为什么；把上面那六条警告当装饰就永远查不出来。
+
 
 CI 侧：`choco install nsis --version 3.12`，**跑完拿 `makensis /VERSION` 与点名值对账**。
 不钉版本的话，下个月跑出来的包可能由另一个版本编出来，

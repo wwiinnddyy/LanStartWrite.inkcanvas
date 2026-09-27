@@ -23,9 +23,27 @@
 ; 2. **不要引用不存在的文件。** `MUI_PAGE_LICENSE "…\LICENSE"` 与 `MUI_ICON "….ico"`
 ;    指向缺失文件时，makensis 在 CI 上直接红。**本仓库现在既没有 LICENSE 也没有 .ico**，
 ;    所以这两项故意没写 —— 真要加，先把文件放进仓库再改脚本。
-; 3. **安装器的 LangString 与卸载器的 LangString 分开写。** 同一个键名在
-;    `MUI_LANGUAGE` 与 `MUI_UNLANGUAGE` 下各写一遍，卸载器取到的会是安装器那份。
+; 3. **页面全在 `MUI_LANGUAGE` 之前；一种语言只有一个 `MUI_LANGUAGE` 块。**
+;    这两条是 MUI2 的顺序契约，**破了都只给一行不带说明的错**（首跑就红在第 98 行）：
+;      * `MUI_LANGUAGE` 放在页面之前 → 六条 "inserted after MUI_LANGUAGE" 警告，页序走偏。
+;      * 同一种语言出现第二个 `MUI_LANGUAGE` 块 → 内部那个栈是后进先出，
+;        第二遍读到的是上一次压进去的那种语言，于是 `MUI_UNLANGUAGE` 必然对不上而中止。
+;    **卸载器的键不需要 `MUI_UNLANGUAGE` 另起一块**：键名以 `MUI_UN` 开头
+;    （`MUI_UNCONFIRMPAGE_*`），MUI2 按前缀自己认。写在同一个 `MUI_LANGUAGE` 块里即可。
 ; 4. **字符串里没有 markdown。** `**粗体**` 在 NSIS 标签里是字面的星号。
+; 5. **finish 页那两个键现在是一视同仁的中文（已知未做，按 MUI2 源码记录）**：
+;    `MUI_FINISHPAGE_TITLE` 与 `MUI_FINISHPAGE_RUN_TEXT` 的默认值是运行期字符串表引用
+;    —— MUI2 在 `Contrib/MUI2/Pages/Finish.nsh:155` 写的是
+;      `!insertmacro MUI_DEFAULT MUI_FINISHPAGE_TITLE "$(MUI_...TEXT_FINISH_INFO_TITLE)"`
+;      （`RUN_TEXT` 对应 `$(MUI_TEXT_FINISH_RUN)`）。所以：
+;      * 用 `!define` 覆盖它 = **一个值对两种语言**，英文机器上最后一页写着中文标题。
+;        这就是现状。
+;      * **想按语言给，要改 `MUI_TEXT_FINISH_INFO_TITLE` / `MUI_TEXT_FINISH_RUN`
+;        这两个字符串表键，不是 `MUI_FINISHPAGE_*`。** 给 `MUI_FINISHPAGE_TITLE`
+;        加一条 `LangString` 看着最像那么回事，而**没有任何代码去读它** ——
+;        界面照旧用 `!define` 那个值，脚本照样编得过。
+;        （这条改过一次又撤回来了：改一个本机验不了的 NSIS 细节，
+;        要拿一次十分钟的 CI 去赌，不值得。）
 ;
 ; ## 仍然是每用户安装 —— 产品的决定，不是 NSIS 的限制
 ;
@@ -52,6 +70,10 @@ Unicode true
 !define UNINSTKEY   "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPBASENAME}"
 
 ; ── MUI2 的外观键：必须在 include 之前（清单第 1 条）────────────────────────
+; **带文案的两个键（标题 / "立即运行"）是一视同仁的，英文机器上会看到中文。**
+; 这不是疏忽，是还没做：见文件顶部第 5 条 —— 要按语言给得改
+; `MUI_TEXT_FINISH_INFO_TITLE` / `MUI_TEXT_FINISH_RUN` 这两个字符串表键，
+; **不是** `MUI_FINISHPAGE_TITLE`（给同名加 `LangString` 不会被读，见第 5 条）。
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN          "$INSTDIR\${EXENAME}"
 !define MUI_FINISHPAGE_RUN_TEXT     "立即运行 ${APPNAME}"
@@ -78,12 +100,9 @@ VIAddVersionKey /LANG=2052 "FileVersion"     "${VERSION}"
 VIAddVersionKey /LANG=2052 "ProductVersion"  "${VERSION}"
 VIAddVersionKey /LANG=2052 "LegalCopyright"  "GPL-3.0"
 
-; 语言。**简体中文放第一个**：它在没有 Language 字符串表时是回退项，
-; 而 English 放第二个，用户在英文机器上仍能得到英文界面而不是中文。
-!insertmacro MUI_LANGUAGE "SimpChinese"
-!insertmacro MUI_LANGUAGE "English"
-
 ; ── 页面（顺序即向导顺序）────────────────────────────────────────────────────
+; **页面必须全部写在下面那个语言块之前**（清单第 3 条）。MUI2 是"读到某行为止
+; 已经声明了哪些页面"来生成向导的，语言块插在中间会让它对着半套页面生成。
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -95,25 +114,25 @@ VIAddVersionKey /LANG=2052 "LegalCopyright"  "GPL-3.0"
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 
-!insertmacro MUI_UNLANGUAGE "SimpChinese"
-!insertmacro MUI_UNLANGUAGE "English"
-
-; ── 字符串表 ────────────────────────────────────────────────────────────────
-; 安装器的键只写在 MUI_LANGUAGE 下，卸载器的只写在 MUI_UNLANGUAGE 下（清单第 3 条）。
+; ── 语言与字符串表 ──────────────────────────────────────────────────────────
+; **一种语言一个块，安装器的键与卸载器的键都写在这个块里**（清单第 3 条）。
+; 卸载器的键名以 `MUI_UN` 开头，MUI2 按前缀自己认，不需要 MUI_UNLANGUAGE。
+;
 ; 页面上那两行字全靠这些键：**不给它们，MUI 就落到内置英文** ——
 ; 而一个中文产品装出来第一页写着 Welcome，是那种用户会记住的错。
+;
+; 简体中文放**第一个**：它是"没有 Language 字符串表"时的回退项，
+; 而 English 放第二个，用户在英文机器上仍能得到英文界面而不是中文。
 !insertmacro MUI_LANGUAGE "SimpChinese"
-  LangString MUI_WELCOMEPAGE_TITLE  ${LANG_SIMPCHINESE} "欢迎使用 ${APPNAME}"
-  LangString MUI_WELCOMEPAGE_TEXT   ${LANG_SIMPCHINESE} "全屏批注与书写工具。$r$n$r$n本安装程序会装到你的用户目录，不需要管理员权限。$r$n$r$n已装过的话直接覆盖成新版本，不卸旧的。$r$n$r$n你的笔锋、工具栏与主题存在另一个文件夹里，升级与卸载都不会动它。$r$n$r$n将要安装到：$INSTDIR"
-  LangString INSTALLUNINSTALLED     ${LANG_SIMPCHINESE} "已卸载 ${APPNAME}。"
-!insertmacro MUI_LANGUAGE "English"
-  LangString MUI_WELCOMEPAGE_TITLE  ${LANG_ENGLISH} "Welcome to ${APPNAME}"
-  LangString MUI_WELCOMEPAGE_TEXT   ${LANG_ENGLISH} "Full-screen annotation and handwriting.$r$n$r$nThis installer writes to your per-user folder and does not need administrator rights.$r$n$r$nAn existing install is overwritten in place.$r$n$r$nYour pen tips, toolbar and theme live in a different folder and survive both upgrade and uninstall.$r$n$r$nInstalling to: $INSTDIR"
-  LangString INSTALLUNINSTALLED     ${LANG_ENGLISH} "${APPNAME} has been uninstalled."
-!insertmacro MUI_UNLANGUAGE "SimpChinese"
+  LangString MUI_WELCOMEPAGE_TITLE   ${LANG_SIMPCHINESE} "欢迎使用 ${APPNAME}"
+  LangString MUI_WELCOMEPAGE_TEXT    ${LANG_SIMPCHINESE} "全屏批注与书写工具。$r$n$r$n本安装程序会装到你的用户目录，不需要管理员权限。$r$n$r$n已装过的话直接覆盖成新版本，不卸旧的。$r$n$r$n你的笔锋、工具栏与主题存在另一个文件夹里，升级与卸载都不会动它。$r$n$r$n将要安装到：$INSTDIR"
+  LangString INSTALLUNINSTALLED      ${LANG_SIMPCHINESE} "已卸载 ${APPNAME}。"
   LangString MUI_UNCONFIRMPAGE_TITLE ${LANG_SIMPCHINESE} "卸载 ${APPNAME}"
   LangString MUI_UNCONFIRMPAGE_TEXT  ${LANG_SIMPCHINESE} "安装目录（含你在其中存的笔记）会被删除。$r$n$r$n笔锋、工具栏、主题等设置在另一个文件夹，会保留。"
-!insertmacro MUI_UNLANGUAGE "English"
+!insertmacro MUI_LANGUAGE "English"
+  LangString MUI_WELCOMEPAGE_TITLE   ${LANG_ENGLISH} "Welcome to ${APPNAME}"
+  LangString MUI_WELCOMEPAGE_TEXT    ${LANG_ENGLISH} "Full-screen annotation and handwriting.$r$n$r$nThis installer writes to your per-user folder and does not need administrator rights.$r$n$r$nAn existing install is overwritten in place.$r$n$r$nYour pen tips, toolbar and theme live in a different folder and survive both upgrade and uninstall.$r$n$r$nInstalling to: $INSTDIR"
+  LangString INSTALLUNINSTALLED      ${LANG_ENGLISH} "${APPNAME} has been uninstalled."
   LangString MUI_UNCONFIRMPAGE_TITLE ${LANG_ENGLISH} "Uninstall ${APPNAME}"
   LangString MUI_UNCONFIRMPAGE_TEXT  ${LANG_ENGLISH} "The install folder (including any notes you keep in it) will be removed.$r$n$r$nYour pen tips, toolbar and theme live elsewhere and are kept."
 
