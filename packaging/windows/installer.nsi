@@ -44,6 +44,11 @@
 ;        界面照旧用 `!define` 那个值，脚本照样编得过。
 ;        （这条改过一次又撤回来了：改一个本机验不了的 NSIS 细节，
 ;        要拿一次十分钟的 CI 去赌，不值得。）
+; 6. **`${RunningX64}` 来自 `x64.nsh`，不是 `WinVer.nsh`。** 写成后者时那个宏未定义，
+;    makensis 报的是 `Error in script "installer.nsi" on line 143 -- aborting creation
+;    process` —— 而第 143 行是 `${IfNot} ${RunningX64}`，**看不出任何问题**。
+;    两个宏别混：`${RunningX64}` = "这个安装器跑在 64 位 Windows 上吗"（本项目要的
+;    就是它，包是 x64 的）；`${IsWow64}` = "32 位程序跑在 64 位系统上"。
 ;
 ; ## 仍然是每用户安装 —— 产品的决定，不是 NSIS 的限制
 ;
@@ -81,9 +86,16 @@ Unicode true
 !define MUI_FINISHPAGE_TITLE        "${APPNAME} 已装好"
 
 !include "MUI2.nsh"
-; LogicLib 给 .onInit 里的条件判断；WinVer 给 ${RunningX64}（NSIS 3.09+ 自带 WinVer.nsh）。
+; LogicLib 给 .onInit 里的条件判断。
+; **${RunningX64} 来自 x64.nsh，不是 WinVer.nsh** —— 它问的是"这个安装器跑在 64 位
+; Windows 上吗"，而 `IsWow64` 才是"32 位程序跑在 64 位系统上"（那把 x64 装到
+; ARM64 上当作原生的场合）。NSIS 自带的 System Information 例子三个都 include。
+; （写成 `!include "WinVer.nsh"` 的后果是 `${RunningX64}` 未定义，makensis 报的是
+;   `Error in script "installer.nsi" on line 143 -- aborting creation process`
+;  —— 又是只有行号，而那一行是个看不出任何问题的 `${IfNot} ${RunningX64}`。
+;  本脚本用不到 WinVer 的任何宏，所以不 include 它。）
 !include "LogicLib.nsh"
-!include "WinVer.nsh"
+!include "x64.nsh"
 
 Name        "${APPNAME} ${VERSION}"
 OutFile     "..\dist\${APPPDN}-${VERSION}-windows-x64-setup.exe"

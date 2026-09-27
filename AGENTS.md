@@ -221,13 +221,15 @@ PDFium 的 `0x01` 是 `FPDF_ANNOT`，含义是"**要**画注释"。而 `0x02` �
 **换掉那份原生库之后，把这一行改成 `true` 即可，其余代码不用动** ——
 分辨率阶梯、预加载、胶片与主视图共用同一份位图那套都是照着"能渲染多页"写的。
 
-**本机跑不了 makensis**（这台机器装不上 NSIS，choco 锁文件 + 权限都不行，
-官方 zip 下载返回的是 HTML 页面）。CI 里已把 NSIS 钉到 3.12 并加了四道门禁
-（版本自证、日志扫 `no sections will be executed`、扫 `could not be opened`、
-产物大小与存在性），所以**第一次真跑是在 CI 上**（run 36256606331，2026-09-26）——
-**而那一跑就是红的**，红在 `installer.nsi:98` 的 MUI2 语言块结构，
-详见下一节第 3 条。**Linux 两条腿那一跑全绿**（deb / AppImage 照旧产出），
-所以"本机跑不了"这件事的代价就是每次改脚本都得付一次十分钟的 CI。
+**本机跑不了 makensis，原因已查清是"执行被拒"，不是下载不了。**
+官方 setup.exe **现在能正常下下来**（SourceForge 的 `nsis-3.12-setup.exe`，1,566,914 字节，
+带 `NullsoftInst` 标记，PE 头合法，curl 要重试几次才拿全），但**这份可执行文件被本机
+策略拒绝执行**（`cmd /c` 直接回"拒绝访问"，`Start-Process` 报
+`An error occurred trying to start process`）。choco 那条路是锁文件 + 权限都不行。
+所以每次改脚本仍然只能靠 CI 验。
+**这正是 `packaging/windows/check-mui2-order.py` 存在的理由**（见下一节第 3 条）——
+但它只覆盖 MUI2 的顺序契约，"引用了未定义的宏"那一类它管不着
+（`${RunningX64}` 写错 include 就属于那一类，run 36301326091 就是这么红的）。
 
 ## Critical: Windows 安装器换成了 MUI2（NSIS 3.12）
 
@@ -235,7 +237,7 @@ PDFium 的 `0x01` 是 `FPDF_ANNOT`，含义是"**要**画注释"。而 `0x02` �
 也就是 NSIS 1.x 那个"选目录 → 进度条 → 完事"的骨架。现在是 MUI2 四页向导
 （欢迎 / 目录 / 安装 / 完成），中英双语，装完有"立即运行"勾选，深色系统随主题。
 
-**改这个脚本前先读文件顶部那四条自查清单**，每条都踩过：
+**改这个脚本前先读文件顶部那六条自查清单**，每条都踩过：
 
 1. **`MUI_*` 的 `!define` 必须在 `!include "MUI2.nsh"` 之前。** 顺序反了它读到空值，
    症状是"界面还是默认那套、没有任何报错"。
@@ -269,8 +271,18 @@ PDFium 的 `0x01` 是 `FPDF_ANNOT`，含义是"**要**画注释"。而 `0x02` �
    - **想按语言给，要改 `MUI_TEXT_FINISH_INFO_TITLE` / `MUI_TEXT_FINISH_RUN` 这两个
      字符串表键。给 `MUI_FINISHPAGE_TITLE` 加一条 `LangString` 看着最像那么回事，
      而没有任何代码去读它** —— 界面照旧用 `!define` 那个值，脚本照样编得过。
-     **这一条改过一次又撤回来了**：本机跑不了 makensis，为一个验不了的 NSIS 细节
-     赌一次十分钟的 CI 不划算，于是连同"怎么改对"一起记在这里。
+      **这一条改过一次又撤回来了**：本机跑不了 makensis，为一个验不了的 NSIS 细节
+      赌一次十分钟的 CI 不划算，于是连同"怎么改对"一起记在这里。
+6. **`${RunningX64}` 来自 `x64.nsh`，不是 `WinVer.nsh`。** 写成后者的话那个宏未定义，
+   makensis 报的是 `Error in script "installer.nsi" on line 143 -- aborting creation
+   process`（run 36301326091）—— 而第 143 行是 `${IfNot} ${RunningX64}`，
+   **看不出任何问题**。两个宏别混：`${RunningX64}` = "这个安装器跑在 64 位 Windows 上吗"
+   （本项目要的就是它，包是 x64 的），`${IsWow64}` = "32 位程序跑在 64 位系统上"
+   （那是把 x64 包当作 ARM64 上原生的那种场合）。
+   NSIS 自带的 System Information 例子 `LogicLib.nsh` / `WinVer.nsh` / `x64.nsh` 三个都 include。
+   **本脚本用不到 WinVer 的任何宏，所以不 include 它** —— 多一个用不到的 include
+   就是多一个"它到底给了什么"的疑问，而这次就是被它带偏的。
+
 
 **教训：NSIS 的 warning 与 error 分两类，而这一类全在 warning 里。**
 退出码 1 只告诉你"第 98 行"，不告诉你为什么；把上面那六条警告当装饰就永远查不出来。
