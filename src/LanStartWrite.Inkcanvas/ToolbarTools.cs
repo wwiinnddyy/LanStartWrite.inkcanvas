@@ -384,6 +384,10 @@ internal static class ToolbarTools
         ToolbarToolKind.Settings => "设置",
         ToolbarToolKind.Whiteboard => "白板",
         ToolbarToolKind.Image => "图片",
+        // 少了这一支，一份<b>旧存档</b>里带展台项（而 Name 读不出来时）会被叫成"分隔线" ——
+        // 症状是工具栏上出现一个空白格，而不是少一项。
+        ToolbarToolKind.Pdf => "PDF",
+        ToolbarToolKind.DocumentCamera => "视频展台",
         _ => "分隔线",
     };
 
@@ -409,6 +413,7 @@ internal static class ToolbarTools
         new ToolbarTool { Id = "whiteboard", Kind = ToolbarToolKind.Whiteboard, Name = "白板" },
         new ToolbarTool { Id = "image", Kind = ToolbarToolKind.Image, Name = "图片" },
         new ToolbarTool { Id = "pdf", Kind = ToolbarToolKind.Pdf, Name = "PDF" },
+        new ToolbarTool { Id = "camera", Kind = ToolbarToolKind.DocumentCamera, Name = "视频展台" },
         DefaultPen() with { Id = "pen.1", Name = "笔" },
         DefaultEraser() with { Id = "eraser.1", Name = "橡皮" },
         new ToolbarTool { Id = "undo", Kind = ToolbarToolKind.Undo, Name = "撤销" },

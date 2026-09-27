@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    阶段 0 探针：**先量后写**。视频展台（实物展台）能不能做、怎么做，取决于三件
+    本仓库没有先例的事，全部要先量出来：
+
+      1) **Jalium 自带的采集栈在本进程里能不能用。** `CameraView` / `INativeCameraSource` /
+         `MediaFrame` 都在 `Jalium.UI.Managed.dll` 里，`jalium.native.media.dll`
+         （Media Foundation 后端）也已随包发布。但本应用**不用 AppBuilder**
+         （`Program.cs` 是 `new Application()`），所以 `UseNativeMediaPipeline` 那条
+         DI 注册从未发生 —— `CameraView` 在没有 DI 时能不能自己兜底，是未知的。
+      2) **逐帧贴一张图能不能撑住目标帧率**，以及那张图的生命周期对不对。
+         `BitmapImage` 是 `IDisposable`/`IReclaimableResource`；30fps 下一帧一换
+         而不释放上一张，就是每秒 30 次 GPU 资源泄漏。
+      3) **换设备/换分辨率时墨迹坐标不能动** —— 所以世界坐标必须是固定的逻辑页面，
+         而视频按 Stretch=Fill 铺上去。这个能不能做到取决于 `Image.RenderTransform`
+         那条路在实时刷新下稳不稳。
+
+    为什么单独一个工程而不是并进 PdfProbe：那份探针的结论（"三档差一个数量级"）
+    已经落进 AGENTS.md 成为策略依据；而这一份的结论会决定展台的默认分辨率与
+    逐帧路径，**两者要能各自单独复跑**。
+
+    这个工程**不引用主应用**（探针不该把窗口、主题、四百多条断言一起拖进来），
+    只引用 Jalium.UI —— 跟 PdfProbe 只链进 Pdf/ 两个源文件的做法同一个道理。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LanStartWrite.Inkcanvas.Tools</RootNamespace>
+    <AssemblyName>LanStartWrite.Inkcanvas.CameraProbe</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jalium.UI" Version="26.10.9" />
+  </ItemGroup>
+
+</Project>

@@ -56,6 +56,28 @@ public enum CanvasScene
     /// </para>
     /// </summary>
     PdfCanvas = 3,
+
+    /// <summary>
+    /// 视频展台（实物展台）：<b>活着的一个面</b>，不是一份文件
+    /// <para>
+    /// 前三块画布底下铺的东西都是<b>静态</b>的 —— 一张图、一份文档、一页笔记，
+    /// 铺上去之后世界原点就不再动。而展台底下是<b>摄像头</b>：
+    /// 每秒二三十帧新像素推进来，而墨迹在它上面不动。
+    /// </para>
+    /// <para>
+    /// <b>它不是第五种"页"。</b> 页是可以翻的，而这里只有一面；
+    /// 所以它固定为<b>一张逻辑页面</b>（横向 A4），视频按 Stretch=Fill 铺上去 ——
+    /// 这样换分辨率、换设备、设备掉线重连时，<b>墨迹坐标一动不动</b>。
+    /// 若把世界设成视频像素大小，用户在设备重新协商到 720p 时会看见自己的字"跑到别处去了"。
+    /// </para>
+    /// <para>
+    /// 与图片画布的另一处不同：那一块"底"是一张 <c>BitmapImage</c>，可以整个搬走；
+    /// 这里是<b>每帧换一张</b>，于是"上一张必须释放"成了硬要求
+    /// （<c>BitmapImage</c> 是 <c>IDisposable</c>，30fps 下一帧一换而不释放
+    /// 就是每秒 30 次 GPU 资源堆积）。
+    /// </para>
+    /// </summary>
+    DocumentCamera = 4,
 }
 
 /// <summary>
@@ -102,6 +124,21 @@ internal sealed record CanvasSceneSettings
     /// </para>
     /// </summary>
     public uint BackgroundArgb { get; init; } = CanvasBackgroundPalette.DefaultArgb;
+
+    /// <summary>
+    /// 视频展台<b>水平镜像</b>。
+    /// <para>
+    /// 实物展台是架在纸<b>上方</b>往下拍的，所以用户看到的是左右反的 ——
+    /// 于是他写在纸右边的话在自己眼里是反的，几分钟就能把一个习惯矫正的书写者逼疯。
+    /// 这一项就是那面镜子。
+    /// </para>
+    /// <para>
+    /// <b>只在展台这一块有意义</b>，所以它是按场景存的而不是全局的：
+    /// 同一个开关对白板与图片毫无意义，共用一个值就等于给无关的场景加了一个旋钮。
+    /// </para>
+    /// <para><b>当场生效</b>：展台在屏时改它，下一帧就正过来（改的是铺在墨迹面下的那张图的变换）。</para>
+    /// </summary>
+    public bool CameraMirror { get; init; }
 }
 
 /// <summary>

@@ -38,6 +38,21 @@ internal static class CanvasOptions
     internal static void SetBackground(CanvasScene scene, uint argb) =>
         Update(scene, settings => settings with { BackgroundArgb = CanvasBackgroundPalette.Normalize(argb) });
 
+    /// <summary>
+    /// 视频展台的水平镜像。见 <see cref="CanvasSceneSettings.CameraMirror"/> 的说明（当场生效）。
+    /// </summary>
+    /// <remarks>
+    /// 收窄成<b>只管展台</b>而不是"按场景存"，是刻意的：另外几个场景没有"画面左右反"这回事，
+    /// 给它们各留一份 <c>false</c> 只会让人以为那儿也能开。
+    /// 走 <see cref="Update"/> 仍然按场景写进存档，所以展台那一份会跟着
+    /// <c>CanvasScenes</c> 一起落盘。
+    /// </remarks>
+    internal static void SetCameraMirror(bool value) =>
+        Update(CanvasScene.DocumentCamera, settings => settings with { CameraMirror = value });
+
+    /// <summary>展台当前的镜像状态（读侧，展台窗口每帧要问它）。</summary>
+    internal static bool CameraMirror => For(CanvasScene.DocumentCamera).CameraMirror;
+
     /// <summary>从存档装回。缺的场景按默认值补一个，"没配过"与"全关"不是一回事。</summary>
     internal static void Load(CanvasSceneCollection collection)
     {

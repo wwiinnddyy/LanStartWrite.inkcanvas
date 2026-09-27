@@ -486,6 +486,9 @@ internal static class AppPreferences
                 // PDF 紧跟图片：两个都是"打开某个文件来批注"的入口，
                 // 挨着放才像一对，而分开会被中间的用户自定义笔隔开。
                 ToolbarToolKind.Pdf => IndexAfterKind(kept, ToolbarToolKind.Image),
+                // 展台紧跟 PDF：它们是同一族"打开一块外来内容并批注"，而 Undo/Redo/Settings
+                // 在后面。与上面那句同一个道理 —— 补齐时落在它该在的那一格，不是一律追加到尾巴。
+                ToolbarToolKind.DocumentCamera => IndexAfterKind(kept, ToolbarToolKind.Pdf),
                 _ => kept.Count,
             };
             kept.Insert(at, fallback);
@@ -510,6 +513,7 @@ internal static class AppPreferences
     private static readonly ToolbarToolKind[] FixedKinds =
     [
         ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Image, ToolbarToolKind.Pdf,
+        ToolbarToolKind.DocumentCamera,
         ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Settings,
     ];
 

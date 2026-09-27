@@ -1,0 +1,95 @@
+<Window xmlns="http://schemas.jalium.ui/2024"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LanStartWrite.Inkcanvas.DocumentCameraWindow"
+        Title="视频展台"
+        WindowState="Maximized"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        IsShowTitleBar="False"
+        IsShowMinimizeButton="False"
+        IsShowMaximizeButton="False"
+        IsShowCloseButton="False"
+        HasSystemMenu="False"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        AllowsTransparency="False"
+        SystemBackdrop="None"
+        ResizeMode="NoResize">
+
+    <!--
+      形状与白板**完全一致**（全屏、无边框、不在任务栏），因为这两块画布的处境相同：
+      都是"盖住整个桌面，用户在上面写字"，而批注栏**仍然是独立浮窗** ——
+      所以这里**没有** ToolbarHostGrid，批注栏不需要被搬进来。
+      （图片与 PDF 那两块才需要搬，因为它们有"窗口模式"，那时批注栏要贴着窗口边。）
+
+      底栏那一排**复用了 PagedCanvasWindow 点名要的那几个命名元素**，
+      但语义换掉了（理由见 DocumentCameraWindow 的类注释）：
+        · PreviousPageButton / NextPageButton → 折叠起来（只有一面，翻页没有意义）
+        · PageNumberText                  → **状态文字**（已就绪 / 降级原因都在这儿）
+        · AddPageButton                   → **「存成页」**（冻结后把这一页交给图片画布）
+
+      那张活的画面不在标记里声明：它由 code-behind 按世界坐标铺在墨迹面**底下**，
+      理由与 ImageViewerWindow 那张图完全一样（Background 是元素坐标，笔迹是世界坐标）。
+      AGENTS 的规矩是 .jalxaml 里不出现 Dusk 的类型名，也不在标记里写引擎接线。
+    -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid x:Name="InkHost" Grid.Row="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+
+        <!--
+          状态横幅。**盖在画面上面**而不是待在底栏：设备打不开时用户要立刻看见原因，
+          而底栏那一排很小、又在画面最下面，正是最容易被忘掉的位置。
+          没打开任何设备时它是空的（Visibility=Collapsed），不占地方。
+        -->
+        <Border x:Name="StatusBanner" Grid.Row="0"
+                VerticalAlignment="Top" HorizontalAlignment="Center"
+                Margin="0,48,0,0" Padding="20,14"
+                CornerRadius="8" Background="#E6303030" Visibility="Collapsed">
+            <TextBlock x:Name="StatusText" Foreground="#F2F2F2" FontSize="15"
+                       TextWrapping="Wrap" MaxWidth="720" />
+        </Border>
+
+        <Grid Grid.Row="1" Margin="12,0,12,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Grid x:Name="PageControlHost" Grid.Column="0" VerticalAlignment="Bottom">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!--
+                  翻页在展台上没有意义（只有一面），所以这两颗直接折叠。
+                  仍然声明它们：PagedCanvasWindow.InitializeCanvasHost 点名要这两个元素，
+                  给 null 会抛 ArgumentNullException。
+                -->
+                <Button x:Name="PreviousPageButton" Grid.Column="0" Visibility="Collapsed" />
+                <Button x:Name="NextPageButton" Grid.Column="1" Visibility="Collapsed" />
+            </Grid>
+
+            <!-- 状态与设备 -->
+            <StackPanel Grid.Column="1" VerticalAlignment="Bottom" Margin="8,0,0,0">
+                <TextBlock x:Name="PageNumberText" VerticalAlignment="Center" Text="尚未打开摄像头" />
+            </StackPanel>
+
+            <!-- 右侧：设备 / 分辨率 / 镜像 / 冻结 / 存成页 -->
+            <StackPanel x:Name="CameraControls" Grid.Column="3" Orientation="Horizontal"
+                        VerticalAlignment="Bottom">
+                <ComboBox x:Name="DeviceCombo" Width="220" Margin="0,0,8,0" VerticalAlignment="Center" />
+                <ComboBox x:Name="FormatCombo" Width="132" Margin="0,0,8,0" VerticalAlignment="Center" />
+                <Button x:Name="MirrorButton" Margin="0,0,8,0" VerticalAlignment="Center" />
+                <Button x:Name="FreezeButton" Margin="0,0,8,0" VerticalAlignment="Center" />
+                <Button x:Name="AddPageButton" VerticalAlignment="Center" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

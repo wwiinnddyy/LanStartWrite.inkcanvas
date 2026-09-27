@@ -34,6 +34,8 @@ public partial class AnnotationToolbarWindow : Window
     private ImageViewerWindow? _imageViewer;
     private PdfViewerWindow? _pdfViewer;
     private bool _pdfViewerPresented;
+    private DocumentCameraWindow? _documentCamera;
+    private bool _documentCameraPresented;
     private SettingsWindow? _settingsWindow;
     private PenSecondaryMenuWindow? _penMenuWindow;
     private bool _penMenuVisible;
@@ -237,6 +239,9 @@ public partial class AnnotationToolbarWindow : Window
         // PDF 那块面**住在 PDF 窗口里**，但"所有写到画布去的动作"仍要经 ActiveSurface ——
         // 不这么做的症状是：在 PDF 上按撤销，安静地撤掉了另一块画布的历史。
         CanvasScene.PdfCanvas => _pdfViewer?.Surface,
+        // 展台没有"驻留某份文件"这回事 —— 它永远就是那一个面，
+        // 所以这里不需要 PDF 那条注释里的额外分支。
+        CanvasScene.DocumentCamera => _documentCamera?.Surface,
         _ => _annotationOverlay?.Surface,
     };
 
@@ -321,6 +326,10 @@ public partial class AnnotationToolbarWindow : Window
             DisposeAnnotationOverlay();
             DisposeWhiteboard();
             DisposeImageViewer();
+            // 展台要**停掉摄像头**再关窗：它不像图片那样只是读一个文件，
+            // 而是一直占着那台设备。不显式收，整个进程退出会把设备带着一起挂住，
+            // 下次别的应用打开它会拿到"设备被占用"。
+            DisposeDocumentCamera();
         };
 
         SyncToolControls();
@@ -483,6 +492,9 @@ public partial class AnnotationToolbarWindow : Window
                 break;
             case ToolbarToolKind.Pdf:
                 action.Click += (_, _) => EnterPdfCanvas();
+                break;
+            case ToolbarToolKind.DocumentCamera:
+                action.Click += (_, _) => EnterDocumentCamera();
                 break;
         }
 
@@ -792,6 +804,19 @@ public partial class AnnotationToolbarWindow : Window
         SyncUndoRedoState();
     }
 
+    private void DisposeDocumentCamera()
+    {
+        if (_documentCamera is null) return;
+
+        // 展台<b>不搬批注栏</b>，所以不需要图片那处"先摘再关"的顺序 ——
+        // 而那一步在那儿是必须的，正因为此处不需要才值得写一句：照抄过来会让人以为这里也有坑。
+        _documentCamera.HistoryStateChanged -= OnHistoryStateChanged;
+        _documentCamera.Close();      // Closed 里会停掉采集源并释放两张位图
+        _documentCamera = null;
+        _documentCameraPresented = false;
+        SyncUndoRedoState();
+    }
+
     private void PresentImageViewer()
     {
         EnsureImageViewer();
@@ -931,6 +956,9 @@ public partial class AnnotationToolbarWindow : Window
         ConcealCanvas();
         ConcealWhiteboard();
         ConcealImageViewer();
+        // 展台的窗口**不搬批注栏**（它跟白板一样，批注栏是独立浮窗），
+        // 所以离开时只要收起来 —— 与图片/PDF 那两处要走 RestoreFromHost 不同。
+        if (CanvasSceneState.Active != CanvasScene.DocumentCamera) ConcealDocumentCamera();
 
         RefreshToolVisuals();
         SyncCanvasOverlay();
@@ -975,6 +1003,9 @@ public partial class AnnotationToolbarWindow : Window
                 break;
             case CanvasScene.PdfCanvas:
                 SyncPdfOverlay();
+                break;
+            case CanvasScene.DocumentCamera:
+                SyncDocumentCameraOverlay();
                 break;
             default:
                 SyncAnnotationOverlay();
@@ -1021,6 +1052,124 @@ public partial class AnnotationToolbarWindow : Window
         _pdfViewer.Activate();
         SyncUndoRedoState();
     }
+
+    // ────────────────────────────────────────────── 视频展台
+
+    /// <summary>
+    /// 进 / 出视频展台这块画布。<b>与图片强制同步的那处不同，这里不强制开</b> ——
+    /// 打不开摄像头是一个<b>完全合法</b>的状态（没插、驱动没装、系统缺组件），
+    /// 而窗口自己会挂出原因。所以点一下就该开窗口，让用户看见那句人话，
+    /// 而不是"打不开就干脆什么都不发生"（那是"取消"的语义，不是失败）。
+    /// </summary>
+    private void EnterDocumentCamera()
+    {
+        if (_documentCamera is not null && _documentCameraPresented)
+        {
+            ToggleCanvasScene(CanvasScene.ScreenAnnotation);
+            return;
+        }
+
+        EnsureDocumentCamera();
+        CanvasSceneState.Active = CanvasScene.DocumentCamera;
+    }
+
+    private void EnsureDocumentCamera()
+    {
+        if (_documentCamera is not null) return;
+
+        _documentCamera = new DocumentCameraWindow();
+
+        // "存成页"由**宿主**接管：窗口只负责交出那一帧与那一页，
+        // 至于"新建一页、把笔迹搬过去、切到图片画布"全在图片窗口那边 ——
+        // 那样展台窗口不必知道图片画布的存在，两者也就不会互相拖住。
+        _documentCamera.CaptureAsPageRequested = OnCameraCaptureAsPage;
+        _documentCamera.HistoryStateChanged += OnHistoryStateChanged;
+
+        RefreshToolVisuals();
+    }
+
+    private void SyncDocumentCameraOverlay()
+    {
+        if (_settingsWindow is not null)
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+            SyncUndoRedoState();
+            return;
+        }
+
+        if (_documentCamera is null)
+        {
+            if (_annotationOverlay is not null) _annotationOverlay.Hide();
+            _documentCameraPresented = false;
+            SyncUndoRedoState();
+            return;
+        }
+
+        if (!_documentCameraPresented)
+        {
+            _documentCameraPresented = true;
+            _documentCamera.Show();
+        }
+
+        _documentCamera.Activate();
+        SyncUndoRedoState();
+    }
+
+    private void ConcealDocumentCamera()
+    {
+        if (_documentCamera is null) return;
+        _documentCamera.Hide();
+        _documentCameraPresented = false;
+    }
+
+    /// <summary>
+    /// 展台上"存成页"：把冻结那一刻的画面 + 那一页上的笔迹，交给图片画布变成一页。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>笔迹跟着走，靠的是"搬"而不是"把墨迹烤进图里"</b> ——
+    /// 那两套世界坐标是重合的（展台的页恒为横向 A4，抓拍也按那个尺寸来），
+    /// 所以把 <c>Strokes</c> 读出来塞进新页的文档即可，<b>不需要任何光栅化</b>。
+    /// 而"把墨迹烤进位图"需要引擎导出能力（没有），且之后那页就再也选不中、擦不掉了。
+    /// </para>
+    /// <para>
+    /// <b>搬完两边都要 <c>History.Clear()</c></b>：引擎"换文档不清历史"，
+    /// 而撤��一旦跨到另一份文档上，就会把用户"上一步真操作"弹掉 ——
+    /// 症状是"我什么都没干，撤销把字擦了"，与"文档坏了"完全同形。
+    /// </para>
+    /// </remarks>
+    private void OnCameraCaptureAsPage(Jalium.UI.Media.Imaging.BitmapImage snapshot, DocumentCameraPage cameraPage)
+    {
+        EnsureImageViewer();
+
+        var strokes = cameraPage.Surface.Document.Strokes.ToArray();
+        if (!_imageViewer!.OpenImageAndActivate(snapshot, $"展台 {DateTime.Now:yyyyMMdd-HHmmss}"))
+        {
+            snapshot.Dispose();
+            SetCameraCaptureNotice("这一帧没能存成页（画面尺寸不对）。");
+            return;
+        }
+
+        // 展台那页交出墨迹：先取出来，再把自己清空（它已经不属于展台了）。
+        // 两边都 History.Clear()，理由见上面那段 remarks。
+        cameraPage.Surface.Document.Replace([]);
+        cameraPage.Surface.History.Clear();
+
+        _imageViewer.AdoptStrokesFrom(strokes);
+
+        // 切到图片画布并让用户看见新那一页 —— 存完还停在展台上，
+        // 用户会以为没存（那一页现在在另一个窗口里）。
+        CanvasSceneState.Active = CanvasScene.ImageCanvas;
+        SyncImageViewerOverlay();
+    }
+
+    private string? _cameraCaptureNotice;
+
+    private void SetCameraCaptureNotice(string? text) => _cameraCaptureNotice = text;
+
+    /// <summary>展台侧的一句提示（"存成页"失败时用）。正常情况下是 null。</summary>
+    internal string? CameraCaptureNotice => _cameraCaptureNotice;
 
     /// <summary>
     /// 工具栏那顆「PDF」：没开过就问一份文件，开过就退回去。
@@ -1151,6 +1300,10 @@ public partial class AnnotationToolbarWindow : Window
         // 那是比"没有这个功能"更糟的一种半成品。
         if (_pdfViewerPresented && _pdfViewer is { HasDocument: true } pdf) RehostInto(pdf.ToolbarHost, pdf);
         else if (wantsImageWindow && _imageViewer is { } viewer) RehostInto(viewer.ToolbarHost, viewer);
+        // 展台<b>没有这一支</b>，而那不是漏了：它跟白板一样是全屏画布，
+        // 批注栏理应作为独立浮窗浮在画面之上。给它硬塞一个 ToolbarHost 的话，
+        // 批注栏就变成了展台窗口的一个控件 —— 展台一旦隐藏，批注栏跟着一起消失
+        // （那正是图片画布当初出的那个严重缺陷：没人负责搬回来，整条工具栏没了）。
         else RestoreFromHost();
     }
 

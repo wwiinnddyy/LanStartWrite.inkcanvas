@@ -222,6 +222,10 @@ public partial class SettingsWindow : Window
 
         BuildBackgroundSwatches();
 
+        // 展台的镜像。只这一项：设备与分辨率是**每台机器自己的**，
+        // 放进通用档案就等于把本机状态抄到另一台电脑上必然对不上。
+        BindSwitch((FluentToggleSwitch)CameraMirrorSwitch!, "水平镜像", CanvasOptions.SetCameraMirror);
+
         CanvasOptions.Changed += SyncCanvasSection;
         SyncCanvasSection();
     }
@@ -271,12 +275,14 @@ public partial class SettingsWindow : Window
     {
         var annotation = CanvasOptions.For(CanvasScene.ScreenAnnotation);
         var whiteboard = CanvasOptions.For(CanvasScene.Whiteboard);
+        var camera = CanvasOptions.For(CanvasScene.DocumentCamera);
 
         _sync = true;
         try
         {
             ((FluentToggleSwitch)PassThroughSwitch!).IsChecked = annotation.PassThrough;
             ((FluentToggleSwitch)FreezeSwitch!).IsChecked = annotation.Freeze;
+            ((FluentToggleSwitch)CameraMirrorSwitch!).IsChecked = camera.CameraMirror;
 
             var selected = CanvasBackgroundPalette.NearestIndex(whiteboard.BackgroundArgb);
             for (var i = 0; i < _backgroundRings.Length; i++)
@@ -291,6 +297,15 @@ public partial class SettingsWindow : Window
         ((TextBlock)WhiteboardBehaviorText!).Text =
             $"现在的背景：{CanvasBackgroundPalette.Names[CanvasBackgroundPalette.NearestIndex(whiteboard.BackgroundArgb)]}。"
             + (CanvasSceneState.IsActive(CanvasScene.Whiteboard) ? "白板正在屏上，改一档立刻看得见。" : "");
+
+        // 展台那句同理，但**"当场生效"是真的当场**：镜像改的是铺在墨迹面下的那张图的变换，
+        // 展台开着时下一帧就正过来。所以这里要说的是"现在正不正着"，
+        // 而不是"下次进入时按这个来"—— 后者对这一项是假话。
+        ((TextBlock)CameraBehaviorText!).Text = camera.CameraMirror
+            ? (CanvasSceneState.IsActive(CanvasScene.DocumentCamera)
+                ? "画面正在左右翻转。展台开着，改一下下一帧就正过来。"
+                : "画面会左右翻转。展台开着时改，下一帧就正过来。")
+            : "画面按摄像头原样显示。实物展台架在纸上方往下拍，所以通常是反的 —— 开着更顺手。";
     }
 
     /// <summary>把两个开关翻译成人话。<b>不是装饰</b>：这两个开关生效的时机在别处

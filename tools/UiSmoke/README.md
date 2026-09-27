@@ -118,6 +118,59 @@ Note that this group **really does capture the full screen and show it on the ca
 (the canvas is maximised and resizing a maximised window does not take effect). That is the feature
 behaving, not a test artifact — but it does mean the acceptance run flashes the screen briefly.
 
+### Document camera (fifth canvas) — driven by **synthetic frames**, deliberately
+
+`CheckDocumentCamera` covers the fifth canvas. It does **not** open a camera, and that is
+not a shortcut — there is no honest alternative on a build machine:
+
+- CI runners have no camera at all;
+- **machines that do have one may still not produce a single frame.** Measured on this
+  box (Windows 11 25H2 build 26200.9457): `CameraView.IsCaptureSupported` is `True` and
+  `EnumerateDevices()` returns two devices (a `USB Camera` with 16 formats and a virtual
+  camera with one), yet `Open` fails with `UnsupportedFormat` for **every** device,
+  pixel format (BGRA8/RGBA8) and frame size. The cause is in the framework's own
+  `jalium.native.media.windows/src/win_mf_camera_source.cpp:272`, which asks the source
+  reader for `MFVideoFormat_RGB32`; UVC cameras natively produce **NV12/MJPG**, so the
+  conversion needs the Media Foundation **video processor MFTs**, and on this machine
+  `MFT_CATEGORY_VIDEO_PROCESSOR` is not registered at all (nor is the colour converter
+  CLSID `{6A2745A6-86E6-11D2-9A0D-00A0C90349F0}`), while `MFPlat.DLL`/`mf.dll` are
+  present — which is exactly why enumeration, activation and reader creation all succeed
+  and only the render fails.
+
+So the group substitutes a `SyntheticCameraFrames` frame source through
+`DocumentCameraWindow.FrameSourceOverride`, and asserts **what this repository is actually
+responsible for** — what the app does once it has pixels:
+
+- the live image lands at **host index 0**, i.e. *under* the ink surface. Getting this
+  wrong is silent: the ink still draws, you just cannot see the video;
+- before the first frame arrives, **no image and no status banner** — a blank-but-present
+  image would be indistinguishable from a camera that never opened;
+- the image is sized to the **fixed logical page (1122×793 DIP)**, not to the camera's
+  pixel size. That is the assertion protecting ink from jumping when a device
+  renegotiates to another resolution;
+- freeze **copies** the frame rather than holding the reference, keeps showing it while
+  new frames arrive, and returns to live on unfreeze;
+- the mirror changes the image's transform (x scale `-1` plus a translate of one page
+  width — both visible in the printed signature) and returns exactly to the previous one;
+- "save as page" hands out a real copy at the frame's true size;
+- the three degradation states each produce a **comprehensible** sentence, and an empty
+  device list yields the "no camera found" wording rather than a fake device.
+
+**What this group cannot verify, and is therefore claimed nowhere:** that a real camera
+delivers frames, that hot-plugging a second camera mid-session is picked up, that
+reconnecting after a drop recovers, and the real exposure/white-balance behaviour. Those
+are in the manual list below. `tools/CameraProbe --capability` is the diagnostic for the
+"is this machine able to capture at all" question, and it distinguishes *no device* from
+*device present but the chain cannot open it* — two situations that need completely
+different advice from the user.
+
+The group is placed **before** the PDF groups on purpose. `Check` throws and aborts the
+rest of the queue, and `CheckPdfViewerFilmstrip`'s last assertion ("clicking a filmstrip
+card jumps the viewport") is a **pre-existing timing flake** on this machine — verified by
+running the pre-camera build (`bin/Verify3`), which fails identically, while that same exe
+was 493/0/1 earlier. A group queued behind a flaky group is a group that silently does
+not run.
+
 ### Whiteboard (second canvas)
 
 `CheckWhiteboardCanvas`, `CheckWhiteboardUndoLands`, `CheckWhiteboardPages`, `CheckWhiteboardSelect` and
@@ -167,6 +220,13 @@ self-heal pass is ever visibly noticeable when it fires. For 白板, what still 
 of similar colour are told apart at a glance on the real bar (the colour chip is only
 22×3 px) and whether four buttons per row still fit at the narrowest supported window width.
 
+
+For the document camera it is the whole camera-facing half: that a real device delivers a
+live image at a usable frame rate, that drawing on it tracks the paper, that freeze/unfreeze
+and the mirror feel right with a real sheet in view, that "save as page" produces a page you can
+keep working on, and that plugging a second camera in (or pulling the first one out) while
+the canvas is up is handled rather than ignored. Everything **after** "a frame arrived" is
+
 For visual acceptance, also inspect the toolbar, all four settings pages (the 墨迹 page
 now carries 18 generated sliders, so check it in Light/Dark at the narrowest supported
 window width) and the pen menu in Light/Dark at the target machine's DPI. Physically test
@@ -191,7 +251,7 @@ This starts the real application windows with a fresh `preview-state/preferences
 next to the test executable. It neither edits the normal profile nor closes an already
 running annotation session. Close the preview toolbar to end the preview.
 
-The suite is 377 checks on the current tree (the count grows with every wiring surface
+The suite is 403 checks on the current tree (the count grows with every wiring surface
 that gets a guard, and the number printed on a run is only the part that ran before the
 first failure), including responsive settings-row reflow without control replacement,
 independent navigation selection/focus, native system-color hydration, initial framework

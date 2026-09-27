@@ -62,6 +62,14 @@ internal static class ToolbarToolVisuals
         // PDF 用 E8C5：它与 Picture 同一族（一张"纸"），而 E8B9 在 40×40 的小格里
         // 与白板那颗 Slideshow 靠得太近，两个"打开文件"入口分不开。
         ToolbarToolKind.Pdf => 0xE8C5,
+        // 视频展台用 E8A2（AttachCamera，实测 ink=439）。
+        // 选它而不选 E95D（Projector，ink=318）或 E8B8（Webcam，ink=202）的理由有两条：
+        //  (1) **ink 落在已有那七颗的带里**（389~433）。这一族里越浓的越容易在 40×40
+        //      那格里读成一团黑 —— 而 439 与 Picture 的 433 同档，形状仍是"相机"而不是"方块"。
+        //  (2) E8B8 是"字面上的 Webcam"，但 ink=202 明显偏淡，16px 下会先输给同格的其它按钮。
+        // 代价记在这里：**它没有"投影"那么强的语义**（实物展台严格说是投影器不是摄像头），
+        // 但投影仪那颗的墨量偏低，而"工具栏上认得出"比"语义精确"更要紧。
+        ToolbarToolKind.DocumentCamera => 0xE8A2,
         _ => 0xE76D,
     };
 

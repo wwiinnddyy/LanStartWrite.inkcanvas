@@ -42,8 +42,10 @@ internal static class CanvasSceneState
     /// <summary>
     /// 是不是<b>"有页面内容、而且鼠标那一档已经是选择"那种</b>场景。
     /// <para>
-    /// 白板与图片批注都是：底下有一页固定尺寸的东西，于是"鼠标"从"把桌面还给别的应用"
+    /// 白板、图片批注、视频展台都是：底下有一页固定尺寸的东西，于是"鼠标"从"把桌面还给别的应用"
     /// 变成"选择这一页上的墨迹"；屏幕批注没有这一层，它盖的是整个桌面，没有"页"。
+    /// PDF 也在名单里：它是一整份文档一个世界，但每页各有各的尺寸与档位，
+    /// 所以"鼠标"在 PDF 里同样是页内选择而不是"退出画布"。
     /// </para>
     /// <para>
     /// 为什么名单要收在一处而不是到处写 <c>scene != ScreenAnnotation</c>：
@@ -52,5 +54,6 @@ internal static class CanvasSceneState
     /// </para>
     /// </summary>
     internal static bool IsPageScene(CanvasScene scene) =>
-        scene is CanvasScene.Whiteboard or CanvasScene.ImageCanvas or CanvasScene.PdfCanvas;
+        scene is CanvasScene.Whiteboard or CanvasScene.ImageCanvas
+            or CanvasScene.PdfCanvas or CanvasScene.DocumentCamera;
 }

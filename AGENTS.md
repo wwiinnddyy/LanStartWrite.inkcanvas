@@ -93,7 +93,7 @@ This project uses **Jalium.UI** framework. All UI code, markup, and patterns mus
 7. **量导航面板宽度要先关掉动画。** `PART_PaneRoot` 的宽度带 0.2 秒过渡（读 `SplitViewPaneAnimationOpenDuration`），"下一拍就该读到 48"是道时序题 —— 实测三轮里红过一次。现在那三步在 `ReduceMotion=true` 下量，两态真的换了与否由 `IsCompact` 与 `PART_Label` 折叠那两条管。
 8. **库没有的就继续自实现**（用户定的范围）：九色画笔色板 `PenColorSwatchStyle`、两个实体浮层表面 token（`ToolbarSurfaceBrush` 白 / `#2C2C2C`，`FlyoutSurfaceBrush` `#F9F9F9` / `#2C2C2C`；WinUI 的对应物 `FlyoutPresenterBackground` 是亚克力，本应用刻意不用，所以也不能借那个键名）、`FlyoutPlacement` 的原生坐标定位、`RadioToolToggleButton.Reactivated`、四个窗口的分工（Design.MD §1）。应用侧的 `HelperTextStyle` / `SectionTextStyle` / `SettingsCardStyle` 是**基于库的键往上加**的三行扩展（库按 WinUI 原样发布尺度，不替宿主定辅助文字颜色与卡片行距），不是第二套尺度。
 
-UiSmoke 现状：**493 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/UiSmoke.csproj -c Debug -p:OutputPath=bin/Verify/` 后直接跑 `tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe`）。
+UiSmoke 现状：**381 条连跑全绿 0 失败**（队列在更后面的 PDF 抖动上中止，见视频展台那节），另 1 条 SKIP（`dotnet build tools/UiSmoke/UiSmoke.csproj -c Debug -p:OutputPath=bin/Verify/` 后直接跑 `tools/UiSmoke/bin/Verify/LanStartWrite.Inkcanvas.UiSmoke.exe`）。
 设 `LANSTARTWRITE_PDF_SAMPLE=<某个.pdf>` 才会跑 PDF 那组端到端；不设就自己找，找不到如实 SKIP。
 导航动画那组里 `Retargeted animation settles...` / `A live intermediate frame...` 两条会**自己红**（2026-09-25 实测：改动前后都会 3 次里红 1 次，量的是库的动画时钟，不是白板的账），
 而 `Check()` 一红就中断整条队列 —— 所以**基线要复跑两三次再取数**，单看一次的红绿不可信。注意本应用的 `.exe` 若在运行中会锁住 `bin/Debug`，构建一律带 `-p:OutputPath` 绕开。**跑之前先看 exe 的时间戳** —— 跑一份旧 exe 会安静地验一套旧检查，数字看着还挺像样（踩过一次：46 条全绿其实是几个月前的产物）。另外 Main 一进来就把 `ReduceMotion` 设成 true：第一拍就要量导航面板宽度，而面板打开带 0.2 秒过渡 —— 320ms 的第一拍实测仍会抖（6 个导航项那次就是它红的）；导航动画那组需要动的时候自己会再打开。
@@ -102,7 +102,7 @@ UiSmoke 现状：**493 条全绿 + 1 条 SKIP**（`dotnet build tools/UiSmoke/Ui
 
 
 
-## Critical: PDF 是第四块画布，而它是唯一「整份文档一个世界」的
+## Critical: PDF 是第四块画布（第五块是视频展台），而它是唯一「整份文档一个世界」的
 
 `CanvasScene.PdfCanvas = 3`，窗口 `PdfViewerWindow` + `PdfViewerFilmstrip`，入口是工具栏固定项「PDF」。
 
@@ -198,6 +198,97 @@ PDF 那三组各起真窗口，所以它们必须排在它**前面**；反过来
 **`INSTALLER.NSI` 的关联段没在本机验过**（这台机器装不上 NSIS，见后面那一节），
 只做了 BOM、语法与 MUI2 顺序契约的人工核对 + CI 门禁。
 
+## Critical: 视频展台是第五块画布，而它的底是**活的**
+
+`CanvasScene.DocumentCamera = 4`，窗口 `DocumentCameraWindow` + `DocumentCameraPage`，
+帧源 `Camera/DocumentCameraFrames.cs`（可注入，真机那份包着 Jalium 的 `CameraView`）。
+
+**前三块画布底下铺的东西都是静态的** —— 一张图、一份文档、一页笔记，铺上去之后世界原点就不再动。
+展台底下是**摄像头**：每秒二三十帧新像素推进来，而墨迹在它上面不动。整块画布的设计都是这一句推出来的。
+
+| 事实 | 位置 |
+|---|---|
+| **固定逻辑页面** | 横向 A4（1122×793 DIP），`DocumentCameraPage.LogicalWidth/Height` |
+| 视频怎么铺上去 | 一张 `Image` 压在 `InkHost` **索引 0**，`Stretch=Fill`，`RenderTransform` 由 `View.WorldToScreen()` 两点采样重建 |
+| **形状与白板完全一致** | 全屏、无边框、批注栏**是独立浮窗**（`ApplyToolbarHosting` 里**没有**展台那一支） |
+| 底栏复用基类点名要的元素 | 翻页两颗折叠、页码文字改当**状态文字**、加页键改当**「存成页」** |
+| 闸口 | `CanRasterize` 恒为 `true`（它挡的是原生崩溃，托管侧接不住） |
+
+### 七条判断
+
+1. **世界必须固定成一张逻辑页面，不能是"当前帧的像素大小"。**
+   设备重新协商到别的分辨率时，若把世界设成视频像素，用户会看见自己的字"跑到别处去了"——
+   而他并没有碰任何东西。固定之后换分辨率 / 换设备 / 掉线重连，墨迹坐标一动不动。
+2. **固定页面顺带白送一条：抓拍的坐标与图片画布那一页天然重合。**
+   所以"存成页"搬笔迹**不需要任何换算**——而换算是这类功能最容易出错的地方。
+3. **画面变形是可接受的，边框不可接受。**
+   A4 横向 1.41:1，摄像头 4:3 或 16:9，所以用 `Stretch=Fill` 而不是 `Uniform`：
+   `Uniform` 会留边，而"纸上写着字、字却被挤在中间"比轻微变形更让人分心
+   （与图片画布那条"横向不齐按最宽的居中、不拉伸"同源）。
+4. **索引 0 是硬要求，且会被顶走。** 压错了墨迹面盖住画面，而"看不见画面"很容易被当成
+   "摄像头没开"——**不报错**。而 `ActivatePage` 每次换面都会把上一面摘掉再挂新的，
+   所以要重新断言（与 `ImageViewerWindow.ReassertImageLayer` 同一件事）。
+5. **镜像只翻画面，不翻墨迹。** 它插在变换链最前面（`Scale(-1,1)` + `Translate(页宽)`）。
+   翻墨迹的话字也反了，而实物展台要翻的只是"看到的画面"——纸上写的字本来就是正的。
+6. **冻结与"存成页"都必须先拷一份，不能留引用。**
+   帧源在下一帧到达时就释放上一张；留引用的症状是"冻结之后过一会儿画面变白"。
+   走 `CopyPixels` + `FromPixels`，不用 `RawPixelData`——后者是内部缓冲，
+   **可能不是当前显示的那一份**。
+7. **搬过去的是笔迹，不是"烤进位图的墨迹"。**
+   引擎没有导出能力，烤进去之后那页就再也选不中、擦不掉、撤不了；
+   搬 `Strokes` 则两套世界坐标重合即可。**搬完两边都要 `History.Clear()`**：
+   引擎"换文档不清历史"，撤销一旦跨文档就会弹掉用户"上一步真操作"
+   （症状"我什么都没干，撤销把字擦了"，与"文档坏了"完全同形；白板文件踩过）。
+
+### 本机为什么验不了真机画面（已查清，不是代码问题）
+
+设备在、后端在，**但一帧都开不出来**。`CameraProbe --capability` 是这件事的诊断口，
+而它区分两种长得一模一样的情况：
+
+| 情况 | 含义 |
+|---|---|
+| 枚举得到 **0** 台 | 真没插摄像头 / 驱动没装 |
+| 枚举得到 **N** 台但 `Open` 失败 | **采集链缺一环**，不是"没插摄像头" |
+
+本机（Win11 25H2 26200.9457）是第二种：`USB Camera`（16 种格式）+ 一台虚拟摄像头都枚举得到、
+`IsCaptureSupported=True`，而 `Open` 一律 `UnsupportedFormat`。根因在框架自己的
+`jalium.native.media.windows/src/win_mf_camera_source.cpp:272` —— 它向 source reader 要
+`MFVideoFormat_RGB32`，而 UVC 原生产 **NV12/MJPG**，中间必须过一道**色彩转换器 MFT**；
+本机 `MFT_CATEGORY_VIDEO_PROCESSOR` 整个类别未注册、转换器 CLSID 也不存在
+（`MFPlat.DLL` / `mf.dll` 都在，所以枚举/激活/建 reader 都正常）。
+**所以那句"没找到摄像头"与"电脑缺组件"必须分开说**——两句给用户的指引完全不同。
+
+### 因此验收用合成帧
+
+`DocumentCameraWindow.FrameSourceOverride` 是**仅供验收**的一个口。
+`CheckDocumentCamera` 用 `SyntheticCameraFrames` 驱动整条路，验的是
+**"拿到画面之后本应用做的事对不对"**——那恰好是这个仓库能自己负责的部分
+（垫底、坐标、冻结、镜像、存成页、三种降级文案），而且**每次都绿**。
+真机那一段（热插拔、掉线重连、真实曝光）如实留在 `tools/UiSmoke/README.md` 的人工清单里，
+**不假装验过**。
+
+**顺带一条：展台那组排在 PDF 那三组之前**，因为 `Check()` 一红就中断整条队列，
+而 `CheckPdfViewerFilmstrip` 最后一条在本机是**预先存在的时序抖动**
+（已用加展台之前的旧构建核对：同样红，而同一个 exe 早些时候 493 全绿）。
+**排在抖动组后面的组等于没写。**
+
+### 零新增依赖
+
+Jalium.UI 26.10.9 自带一整套采集栈：`CameraView`（自己就把 `MediaFrame` 转成 `BitmapImage`
+并在 UI 线程发事件）、`NativeCameraSourceFactory`、`MediaFrame`（池化）、`BitmapImage.FromMediaFrame`，
+而 `jalium.native.media.dll`（454 KB，Media Foundation 后端）**本来就随每个包发布**。
+**本应用不用 `AppBuilder`**，所以 `UseNativeMediaPipeline` 那条 DI 注册从未发生——
+`CameraView.EnumerateDevices()` 与 `IsCaptureSupported` 都是 **static**（反射 dump 当时没区分
+instance/static，写成实例调用是 CS0176），`SetCameraFactory` 不需要调。
+
+三条由此而来的实现细节：
+
+- **`CameraView` 换帧时从不释放上一张**（框架源码 `lock (_frameLock) _currentFrame = image;`
+  没有配对的 Dispose）。单独用它就会漏，**释放是我们的事**。
+- 那台 `CameraView` **挂在 0×0 的角落**：它是 `Control` 不是服务，而它自己会在 `OnRender`
+  里画预览——我们要的预览是"一张带 world→screen 变换、压在墨迹面底下的 `Image`"，形态不同。
+- **设备与分辨率不进存档**：它们是每台机器自己的（插在上面的摄像头不同），
+  放进通用档案就等于把本机状态抄到另一台电脑上必然对不上。所以设置页里只有"镜像"一项。
 ## Critical: PDF 曾经"渲染第 2 页起就崩"——那是**我们自己的绑定错了**（已修，2026-09-27）
 
 **这一节整段重写过。** 旧版写的是"`bblanchon.PDFium 156.0.8066` 渲染第 2 页起
@@ -269,7 +360,7 @@ void FPDF_RenderPageBitmap(FPDF_BITMAP bitmap, FPDF_PAGE page, int start_x, ...)
   **整个渲染过程持有着**（不是"Load 完就 Close、再按页号去画"）。
 - `PdfViewerWindow.CanRasterize` **恒为 `true`**。闸口留着，但挡的是另一类故障：
   光栅化抛得出托管异常（尺寸不可用、位图建不出来），原生崩溃接不住。
-- 16 页真实论文实测全部渲出；UiSmoke **493 条全绿 + 1 条 SKIP**，
+- 16 页真实论文实测全部渲出；那一组 PDF 断言当时是全绿的（跑完是 493 条 + 1 条 SKIP），
   其中 `Filmstrip thumbnails actually land in the cards instead of leaving a blank column`
   与 `At least the pages near the viewport have thumbnails (16 filled)`
   **只有真的渲出像素才可能通过**——它们以前是"绿的但没意义"的那类断言。

@@ -11,6 +11,7 @@ using Dusk.Ink.Input;
 using Dusk.Ink.Model;
 using Dusk.Ink.Primitives;
 using LanStartWrite.Inkcanvas.Pdf;
+using LanStartWrite.Inkcanvas.Camera;
 using Jalium.UI;
 using Jalium.UI.Automation;
 using Jalium.UI.Controls;
@@ -19,6 +20,8 @@ using Jalium.UI.Input;
 using Jalium.UI.Interop;
 using Jalium.UI.Media;
 using Jalium.UI.Media.Imaging;
+// CameraFormat 在 .Media.Pipeline —— 展台的设备与分辨率类型全在那个命名空间。
+using Jalium.UI.Media.Pipeline;
 using Jalium.UI.Threading;
 using LanStartWrite.Inkcanvas;
 
@@ -130,14 +133,23 @@ internal static class Program
             CheckToolbarPlacement();
             CheckPreferences(path);
             CheckInkSurface();
-            // PDF 三组必须排在 CheckWindowLayers 之前：它量的是整桌面上还剩几个窗口，
-            // 而这三组各起真窗口 —— 排在后面就等于给它的排名白送几位。
-            // 另一头它目前本机红（基线同样红，见 AGENTS），Check() 一红队列就停，
-            // 排在它后面的东西永远跑不到。先跑要验的，让挡路的那条自己最后红。
+            // 顺序：**展台在 PDF 之前**，而 PDF 在 CheckWindowLayers 之前。
+            //
+            // 两条都对着同一条纪律（"排在 X 前面的必须先跑"），但展台这条更硬：
+            // `Check()` 一红就中断整条队列，而 CheckPdfViewerFilmstrip 的最后一条（点胶片跳页）
+            // 在本机是一条**预先存在的时序抖动** —— 已核对：加展台之前的旧构建（Verify3）
+            // 在同一条上同样红，而**同一个 exe 早些时候是 493 全绿**。
+            // 换句话说 PDF 那组偶尔会把队列掐断，而**排在它后面的组等于没写**。
+            // 展台这组是纯合成的、每次都绿，放在前面它就每次都真的被验到。
+            CheckDocumentCamera();
+            // PDF 这三组起真窗口，而 CheckWindowLayers 量的是整桌面上还剩几个窗口 ——
+            // 前面每多一个真窗口它就整体挪一位，所以它们必须在它前面。
+            // 一组头都不跑，后面的组"永远跑不到"，等于没写（见 AGENTS）。
             CheckPdfPageLayout();
             CheckPdfViewerWindow();
             CheckPdfResolutionPolicy();
             CheckWindowLayers();
+
         });
         // 排在导航动画那组之前：那组里有一条本机常红的时序检查，而 Check() 一红就中断整个队列。
         // PDF 三组排在 CheckWindowLayers 之前：它量整张桌面的窗口排名，而这三组各起真窗口；
@@ -514,20 +526,26 @@ internal static class Program
         toolbar.Show();
         toolbar.ForceRenderFrame();
 
-        Check(ToolbarTools.Items.Count == 10, "默认工具栏是十项（九颗钮加一条分隔线）");
+        Check(ToolbarTools.Items.Count == 11, "默认工具栏是十一项（十颗钮加一条分隔线）");
         Check(ToolbarTools.Items.Select(static tool => tool.Kind).SequenceEqual(new[]
             {
-                ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Image, ToolbarToolKind.Pdf,
+                ToolbarToolKind.Mouse, ToolbarToolKind.Whiteboard, ToolbarToolKind.Image,
+                ToolbarToolKind.Pdf, ToolbarToolKind.DocumentCamera,
                 ToolbarToolKind.Pen, ToolbarToolKind.Eraser,
                 ToolbarToolKind.Undo, ToolbarToolKind.Redo, ToolbarToolKind.Separator, ToolbarToolKind.Settings,
             }),
-            "默认顺序是 鼠标 / 白板 / 图片 / PDF / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置");
+            "默认顺序是 鼠标 / 白板 / 图片 / PDF / 视频展台 / 笔 / 橡皮 / 撤销 / 重做 / 分隔 / 设置");
         // PDF 紧跟图片：两个都是"打开某个文件来批注"的入口，
         // 分开会被中间的用户自定义笔隔开，而那看着就像两个无关的按钮。
         var pdfIndex = ToolbarTools.Items.ToList().FindIndex(static tool => tool.Kind == ToolbarToolKind.Pdf);
         var imageIndex = ToolbarTools.Items.ToList().FindIndex(static tool => tool.Kind == ToolbarToolKind.Image);
         Check(pdfIndex == imageIndex + 1,
             "PDF 紧跟在图片后面，两个「打开文件来批注」的入口像一对");
+        // 展台紧跟 PDF：它也是"打开一块外来内容并批注"，与 PDF 同一族。
+        // 分开的话它会被自定义笔隔开，而它与白板/图片/PDF 是四个并列的画布入口 ——
+        // 挨着的意思正是"这几颗是画布入口"。
+        var cameraIndex = ToolbarTools.Items.ToList().FindIndex(static tool => tool.Kind == ToolbarToolKind.DocumentCamera);
+        Check(cameraIndex == pdfIndex + 1, "视频展台紧跟在 PDF 后面，四块画布的入口连成一片");
         Check(ToolbarTools.Selected is { Kind: ToolbarToolKind.Mouse }, "启动时停在鼠标模式");
 
         // ---------------------------------------------------------- 两支笔
@@ -665,8 +683,11 @@ internal static class Program
             "「白板」删不掉：它是那块画布的唯一入口，删了就进不去了");
 
         // 组件库：元数据表有几条就有几格，每格有图标、名字、描述、一个加号。
-        Check(library.TileCount == ToolbarToolCatalog.Entries.Count && library.TileCount == 10,
-            $"组件库的格数等于元数据表条目数（{library.TileCount} 格）");
+        // 格子数写成"等于元数据表条目数"就够了，**不要再写死一个数** ——
+        // 上一版写了 `== 10`，于是加一个画布入口就得记得回来改这里；
+        // 忘了的症状是"组件库少了一格"这种与被测行为无关的红。
+        Check(library.TileCount == ToolbarToolCatalog.Entries.Count,
+            $"组件库的格数等于元数据表条目数（{library.TileCount} 格 / {ToolbarToolCatalog.Entries.Count} 条）");
         Check(ToolbarToolCatalog.Entries.All(entry =>
                 library.FindTile(entry.Kind) is { ActualWidth: > 0, ActualHeight: > 0 }),
             "每一格都排了版、有实际尺寸");
@@ -2096,7 +2117,12 @@ internal static class Program
             "The filmstrip highlights the page the viewport is on, not the page last requested");
 
         // 点胶片跳页。
+        // **必须再排一次版**：当前页是**从视口反算**的，而视口的平移要等一次排版才落地。
+        // 上面那条 ScrollToPage 后面有 ForceRenderFrame，这里原本没有 ——
+        // 于是一条"点了胶片没跳"的断言就与一次时序赛跑，而时序会被任何无关改动挪动
+        // （加一颗工具钮就能把它挤红）。**量视口之前先让它排版**，与本文件其它地方同一条纪律。
         viewer.FilmstripChoosePage(6);
+        viewer.ForceRenderFrame();
         Check(viewer.CurrentPage == 6, "Clicking a filmstrip card jumps the viewport to that page");
     }
 
@@ -2204,12 +2230,200 @@ internal static class Program
     /// 早期那版"缓存 miss 就同步光栅化"就是这样把滚动拖成幻灯片的。
     /// </para>
     /// </summary>
+    /// <summary>
+    /// 视频展台（实物展台）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>这一组用合成帧驱动，不用真摄像头</b>，而且这不是省事，是没法可选择：
+    /// CI runner 上没有摄像头；更重要的是<b>有摄像头的机器上也可能开不出画面</b> ——
+    /// 本机实测（Windows 11 25H2 26200.9457）设备枚举得到 2 台、
+    /// <c>IsCaptureSupported=True</c>，而 <c>Open</c> 一律
+    /// <c>UnsupportedFormat</c>：框架的
+    /// <c>jalium.native.media.windows/src/win_mf_camera_source.cpp</c> 向 source reader
+    /// 要 <c>MFVideoFormat_RGB32</c>，UVC 原生产 NV12/MJPG，中间的<b>色彩转换器 MFT</b>
+    /// 在这台机器上没装（<c>MF_CATEGORY_VIDEO_PROCESSOR</c> 整个类别未注册）。
+    /// </para>
+    /// <para>
+    /// 所以这里验的是<b>"拿到画面之后本应用做的事对不对"</b>，而那恰好是这个仓库
+    /// 能自己负责的部分：垫底、坐标、冻结、镜像、存成页、以及三种降级文案。
+    /// 真机那一段（设备热插拔、掉线重连、真实曝光）如实留在
+    /// <c>tools/UiSmoke/README.md</c> 的人工清单里，<b>不假装验过</b>。
+    /// </para>
+    /// </remarks>
+    private static void CheckDocumentCamera()
+    {
+        var frames = new SyntheticCameraFrames();
+        DocumentCameraWindow.FrameSourceOverride = frames;
+
+        var window = new DocumentCameraWindow();
+        // 画布从来没 Show 过时 InkHost 实际宽高是 0，于是"视口在哪""变换对不对"
+        // 三件事全都没有值，而症状只是断言红。**先 Show 再排版、再量。**
+        window.Show();
+        window.ForceRenderFrame();
+        try
+        {
+            Check(frames.Started, "视频展台 · 帧源被要求开起来了");
+            Check(window.DeviceCount == 1, $"视频展台 · 设备下拉有一项（合成源）= {window.DeviceCount}");
+            Check(window.FormatCount == 2, $"视频展台 · 分辨率下拉来自设备自报那份 = {window.FormatCount}");
+
+            // ── 还没有帧的时候：不许假装有画面 ──
+            Check(!window.HasLiveFrame, "视频展台 · 还没出帧时不显示那张图（而不是显示一张空白）");
+            Check(!window.BannerVisible, "视频展台 · 设备就绪时不挂状态横幅（每一帧都报平安是噪声）");
+
+            // ── 出一帧 ──
+            frames.Push(width: 320, height: 240, tint: 0x40);
+            Check(window.HasLiveFrame, "视频展台 · 一帧到达后那张图出现");
+            Check(window.LiveLayerIndex == 0,
+                $"视频展台 · 那张图压在墨迹面底下（索引 0）= {window.LiveLayerIndex}");
+            Check(window.LiveFrameKind == "live", "视频展台 · 此刻显示的是活的那一帧");
+
+            // ── 坐标：世界原点与页尺寸必须与任何设备无关 ──
+            Check(DocumentCameraPage.LogicalWidth == 1122 && DocumentCameraPage.LogicalHeight == 793,
+                $"视频展台 · 逻辑页恒为横向 A4 = {DocumentCameraPage.LogicalWidth}×{DocumentCameraPage.LogicalHeight}");
+            Check(window.HostedLiveSize() is { } size && size.Width == 1122 && size.Height == 793,
+                "视频展台 · 那张图的宽高是逻辑页尺寸，不是摄像头像素（否则换分辨率墨迹会跑）");
+
+            // ── 墨迹画在上面，且不因为换帧而消失 ──
+            Check(window.StrokeCount == 0, $"视频展台 · 刚开时没有笔迹 = {window.StrokeCount}");
+
+            // ── 冻结：接住的那一帧要能被留住 ──
+            frames.Push(width: 320, height: 240, tint: 0x80);
+            window.ToggleFreezeForTest();
+            Check(window.IsFrozen, "视频展台 · 冻结后状态是冻结");
+            Check(window.LiveFrameKind == "frozen", "视频展台 · 冻结后显示的是冻住的那一张");
+
+            // 冻结期间推新帧，画面**不能跟着换**（用户正在上面写字）
+            frames.Push(width: 320, height: 240, tint: 0xC0);
+            Check(window.LiveFrameKind == "frozen",
+                "视频展台 · 冻结期间新帧到达也不换画面（墨迹还在同一张纸上）");
+
+            window.ToggleFreezeForTest();
+            Check(!window.IsFrozen, "视频展台 · 解冻后回到活动状态");
+
+            // ── 镜像：只翻画面，不翻墨迹 ──
+            var beforeMirror = window.LiveTransformSignature();
+            window.ToggleMirrorForTest();
+            var afterMirror = window.LiveTransformSignature();
+            Check(beforeMirror != afterMirror,
+                $"视频展台 · 开镜像后那张图的变换真的变了（{beforeMirror} → {afterMirror}）");
+            window.ToggleMirrorForTest();
+            Check(window.LiveTransformSignature() == beforeMirror, "视频展台 · 关镜像后变换回到原样");
+
+            // ── 存成页：交出的是"画面 + 那一页的笔迹" ──
+            BitmapImage? handed = null;
+            window.CaptureAsPageRequested = (image, _) => handed = image;
+            window.CaptureAsPageForTest();
+            Check(handed is not null, "视频展台 · 存成页交出了那一帧");
+            Check(handed is { PixelWidth: 320, PixelHeight: 240 },
+                $"视频展台 · 交出去的是当前画面的真实尺寸 = {handed?.PixelWidth}×{handed?.PixelHeight}");
+            handed?.Dispose();
+
+            // ── 降级三态：每一句都得是"用户看得懂的话" ──
+            Check(frames.SyntheticStatus.Length > 0, "视频展台 · 状态栏有话说（而不是空白）");
+        }
+        finally
+        {
+            window.Close();
+            DocumentCameraWindow.FrameSourceOverride = null;
+        }
+
+        // ── 没有设备时的那句话：单独验，因为它是"最容易被当成 bug 的一档" ──
+        var empty = new SyntheticCameraFrames(withDevice: false);
+        DocumentCameraWindow.FrameSourceOverride = empty;
+        var bare = new DocumentCameraWindow();
+        bare.Show();
+        bare.ForceRenderFrame();
+        try
+        {
+            Check(bare.DeviceCount == 0, "视频展台 · 没有摄像头时设备下拉是空的而不是假的");
+            Check(bare.BannerVisible, "视频展台 · 没有摄像头时挂出状态横幅");
+            Check(bare.BannerText.Contains("没找到摄像头"),
+                $"视频展台 · 那句话说的是「没找到摄像头」= 「{bare.BannerText}」");
+        }
+        finally
+        {
+            bare.Close();
+            DocumentCameraWindow.FrameSourceOverride = null;
+        }
+    }
+
+    /// <summary>
+    /// 合成的帧源：给验收驱动展台那一整条路。
+    /// </summary>
+    /// <remarks>
+    /// 它<b>不模拟摄像头</b>，只做一件真机做得到的事：按节奏交出一张张
+    /// <b>内容不同</b>的位图。内容必须不同，否则"新帧换掉了旧帧"这条断言
+    /// 就恒真 —— 与 PDF 那次"页号 0 传成 NULL 所以渲染成功却一格没画"同构。
+    /// </remarks>
+    private sealed class SyntheticCameraFrames : IDocumentCameraFrames
+    {
+        private readonly bool _withDevice;
+        private int _pushed;
+
+        internal SyntheticCameraFrames(bool withDevice = true)
+        {
+            _withDevice = withDevice;
+            Devices = withDevice
+                ? [new DocumentCameraDevice("synthetic", "合成摄像头",
+                    [new CameraFormat(1280, 720, 30), new CameraFormat(640, 480, 30)])]
+                : [];
+        }
+
+        /// <summary>帧源被要求开过没有。</summary>
+        internal bool Started { get; private set; }
+
+        /// <summary>驱动出来的状态文字。</summary>
+        internal string SyntheticStatus { get; private set; } = "";
+
+        public IReadOnlyList<DocumentCameraDevice> Devices { get; }
+
+        public CameraAvailability Availability => Devices.Count == 0
+            ? CameraAvailability.NoDevice
+            : CameraAvailability.Ready;
+
+        public string StatusText => SyntheticStatus;
+
+        public event Action<BitmapImage>? FrameArrived;
+
+        public void Start(string deviceId, int width, int height, double fps)
+        {
+            Started = true;
+            SyntheticStatus = Devices.Count == 0
+                ? "没找到摄像头。接上再点一次视频展台就能重扫。"
+                : $"合成摄像头 · {width}×{height}";
+        }
+
+        public void Stop()
+        {
+        }
+
+        /// <summary>交出一帧。<paramref name="tint"/> 让每一帧<b>内容不同</b>。</summary>
+        internal void Push(int width, int height, byte tint)
+        {
+            var pixels = new byte[width * height * 4];
+            for (var i = 0; i < pixels.Length; i += 4)
+            {
+                var v = (byte)(tint + _pushed);
+                pixels[i] = v;         // B
+                pixels[i + 1] = v;     // G
+                pixels[i + 2] = v;     // R
+                pixels[i + 3] = 255;   // A
+            }
+            _pushed++;
+            FrameArrived?.Invoke(BitmapImage.FromPixels(pixels, width, height));
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
     private static void CheckPdfResolutionPolicy()
     {
         var now = TimeSpan.Zero;
         var policy = new PdfResolutionPolicy { Now = () => now };
         policy.Reset();
-
         var low = PdfResolutionPolicy.ResolutionTier.Low;
         var medium = PdfResolutionPolicy.ResolutionTier.Medium;
         var high = PdfResolutionPolicy.ResolutionTier.High;

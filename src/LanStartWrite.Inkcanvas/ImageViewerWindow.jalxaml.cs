@@ -1,6 +1,10 @@
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+// InkingStroke 在 Dusk.Ink.Model，InkHistory 在 Dusk.Ink.Document ——
+// 两者分属不同命名空间，凭印象写 using 一定要错一次，反射出来的全名才靠谱。
+using Dusk.Ink.Document;
+using Dusk.Ink.Model;
 using Dusk.Ink.Primitives;
 using FluentJalium.Controls;
 using Jalium.UI;
@@ -289,6 +293,57 @@ public partial class ImageViewerWindow : PagedCanvasWindow
         AddPage(new ImagePage(new CanvasSurface(Dispatcher, assertLoadedSize: false), path, image));
         return true;
     }
+
+    /// <summary>
+    /// 打开一张已经建好的图、<b>并把它设成当前页</b>（视频展台"存成页"的落点）。
+    /// </summary>
+    /// <remarks>
+    /// 与 <see cref="OpenImage"/> 只差"设为当前页"这一步，而那一步<b>不能省</b>：
+    /// 存完之后用户还停在展台上，除非把他送到那一页前面，
+    /// 否则他的观感是"点了没反应"—— 那一页此刻在另一个窗口的最后一页。
+    /// </remarks>
+    /// <summary>打开一张已建好的图并加成一页（视频展台"存成页"的落点）。</summary>
+    /// <remarks>
+    /// <b>新页一加上去就已经是当前页</b>（<c>AddPage</c> 内部会 <c>ActivatePage</c>），
+    /// 所以这里<b>不需要</b>再写一句"设成当前页"—— 而那正是展台那条路要的效果：
+    /// 存完之后用户已经被送到新页前面，停在展台上会以为没存。
+    /// </remarks>
+    internal bool OpenImageAndActivate(BitmapImage image, string path) => OpenImage(image, path);
+
+
+    /// <summary>
+    /// 把一批笔迹收进<b>当前这一页</b>，用来接视频展台"存成页"交过来的墨迹。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>为什么是"搬笔迹"而不是"把墨迹烤进位图"</b>：展台的页恒为横向 A4，
+    /// 抓拍也按那个尺寸来，所以<b>两套世界坐标本来就重合</b>，不需要任何换算。
+    /// 而烤进位图需要引擎的导出能力（没有），并且之后那页上的墨迹就再也
+    /// 选不中、擦不掉、撤不了 —— 那是把一份活的文档变成一张死图。
+    /// </para>
+    /// <para>
+    /// <b>搬完必须 <c>History.Clear()</c></b>：引擎"换文档不清历史"，
+    /// 于是撤销一旦跨到另一份文档上，就会把用户"上一步真操作"弹掉。
+    /// 症状是"我什么都没干，撤销把上一页的字擦了" ——
+    /// 与"文档坏了"完全同形，而那个坑白板文件已经踩过一次。
+    /// </para>
+    /// </remarks>
+    internal void AdoptStrokesFrom(IReadOnlyList<InkingStroke> strokes)
+    {
+        if (ActivePageIndex < 0 || ActivePageIndex >= Pages.Count) return;
+        var page = Pages[ActivePageIndex];
+        page.Surface.Document.Replace(strokes);
+        // 走 Surface.History 而不是 Document.History：后者是可空的，
+        // 而 Surface 那一层持有的才是这一页真正在用的那份历史。
+        page.Surface.History.Clear();
+        RefreshPageBackdrops();
+    }
+
+    /// <summary>当前那一页上有几笔（验收用来对"存成页有没有把墨迹带过去"）。</summary>
+    internal int ActivePageStrokeCount =>
+        ActivePageIndex >= 0 && ActivePageIndex < Pages.Count
+            ? Pages[ActivePageIndex].Surface.Document.Strokes.Count
+            : 0;
 
     /// <summary>
     /// 把图铺到位：<b>宿主里那一张 + 每一页缩略图那一张</b>。
