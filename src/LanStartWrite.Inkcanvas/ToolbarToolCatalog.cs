@@ -46,7 +46,7 @@ internal static class ToolbarToolCatalog
             "落笔写字、画画。每一支各带一套颜色、粗细、笔型与笔锋，互不影响。", true),
         new(ToolbarToolKind.Eraser, "橡皮", 0xE75C,
             "擦掉墨迹。可以多把，各带一套擦法（面积擦 / 笔迹擦）与半径。", true),
-        new(ToolbarToolKind.Separator, "分隔线", 0xE76E,
+        new(ToolbarToolKind.Separator, "分隔线", 0xE784,
             "纯视觉的一条竖线，把长工具栏切成几段。", true),
 
         new(ToolbarToolKind.Mouse, "鼠标模式", 0xE7C9,
@@ -55,7 +55,7 @@ internal static class ToolbarToolCatalog
             "进 / 出白板这块画布。那块画布的唯一入口，固定有一枚，不可再加也不可删。", false),
         new(ToolbarToolKind.Image, "图片", 0xE8B9,
             "打开一张图并在它上面批注。看图批注的唯一入口，固定有一枚，不可再加也不可删。", false),
-        new(ToolbarToolKind.Pdf, "PDF", 0xE8C5,
+        new(ToolbarToolKind.Pdf, "PDF", 0xEA90,
             "打开一份 PDF 并在上面批注。一份 PDF 开一个窗口，页与页之间连续滚动；固定项，只有一枚", false),
         new(ToolbarToolKind.DocumentCamera, "视频展台", 0xE8A2,
             "把摄像头那幅活画面当纸，在上面批注。可冻结、可镜像，冻结后能把那一页存进图片批注；固定项，只有一枚", false),

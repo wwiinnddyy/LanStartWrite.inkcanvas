@@ -19,7 +19,7 @@ namespace LanStartWrite.Inkcanvas;
 /// 它是从 <see cref="PagedCanvasWindow"/> 里<b>抽出来</b>的那一块。原来那份是
 /// <c>private</c> 的，而 PDF 需要同一套交互却<b>不能继承那个基类</b>
 /// （那边一页挂一块面，翻页是换挂；PDF 是一整份文档一个世界）。所以这里重写成一份
-/// 可被任��窗口持有的控制器，而不是让 PDF 去继承。
+/// 可被任何窗口持有的控制器，而不是让 PDF 去继承。
 /// </para>
 /// <para>
 /// <b><see cref="PagedCanvasWindow"/> 还没有改用这一份</b> —— 它那份 private 副本仍在原地，

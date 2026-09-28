@@ -1,0 +1,120 @@
+<Window xmlns="http://schemas.jalium.ui/2024"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LanStartWrite.Inkcanvas.SlideShowWindow"
+        Title="演示批注"
+        WindowState="Maximized"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        IsShowTitleBar="False"
+        IsShowMinimizeButton="False"
+        IsShowMaximizeButton="False"
+        IsShowCloseButton="False"
+        HasSystemMenu="False"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        AllowsTransparency="True"
+        SystemBackdrop="None"
+        ResizeMode="NoResize">
+    <!--
+      **左下角这个页面控件照抄白板**（`WhiteboardWindow.jalxaml`）—— 不是"参考它的思路"，
+      是同一段结构：
+
+        ┌─ 上一页 · 页码 · 下一页 ─┐┌─ 那一颗 ─┐
+         └────────── 一块 ────────┘ └ 一块 ─┘
+
+      上一版我做成了"翻页条 + 底下再来一条缩略图条"两个控件叠在一起，
+      底下那条还占了 900 宽 —— 那是**基类本来就有的东西**（点页码弹出的缩略图菜单）
+      被我多造了一份。两份都在屏幕上，于是成了一个"叠叠乐"。
+      所以现在：底下那条**整个删掉**，缩略图走基类那个弹层，和白板一模一样。
+
+      那一颗在白板上是「新增页面」，在放映里改成**退出**：
+      幻灯片由宿主给，放映里没有"新建一张幻灯片"这回事，而退出需要一个就地能按的入口。
+
+      两处与白板**故意不一样**：
+      1) 透明（白板是 False）—— 底下是别人正在全屏播放的幻灯片，铺不透明底就是挡住放映。
+      2) 批注栏不搬进来 —— 它是独立浮窗，放映时贴屏底摆位。
+    -->
+    <Grid>
+        <Grid x:Name="InkHost" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+
+        <Grid x:Name="PageControlHost"
+              Height="56"
+              Margin="12"
+              HorizontalAlignment="Left"
+              VerticalAlignment="Bottom">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 上一页 · 页码 · 下一页：与白板一字不差 -->
+            <Border Grid.Column="0"
+                    Height="56"
+                    Background="{StaticResource ToolbarSurfaceBrush}"
+                    CornerRadius="{StaticResource OverlayCornerRadius}"
+                    ClipToBounds="True"
+                    Padding="4,7">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="40" />
+                        <ColumnDefinition Width="56" />
+                        <ColumnDefinition Width="40" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button x:Name="PreviousPageButton"
+                            Grid.Column="0"
+                            Style="{StaticResource ToolActionButtonStyle}">
+                        <FontIcon Glyph="&#xE76B;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                    </Button>
+                    <TextBlock x:Name="PageNumberText"
+                               Grid.Column="1"
+                               Text="1 / 1"
+                               TextAlignment="Center"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <Button x:Name="NextPageButton"
+                            Grid.Column="2"
+                            Style="{StaticResource ToolActionButtonStyle}">
+                        <FontIcon Glyph="&#xE76C;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                    </Button>
+
+                    <!--
+                      没接上时给一句人话。**只在有问题时出现** ——
+                      常驻一行"已连接"没有价值，而它在放映画面上很显眼
+                      （用户看的是 PPT，不是我们的状态）。它写的是
+                      「没有正在进行的放映」而不是「未连接」：前者告诉用户
+                      该去做什么，后者只是一个他没法自己解决的报错。
+                    -->
+                    <TextBlock x:Name="DeckStatusText"
+                               Grid.Column="3"
+                               Margin="10,0,0,0"
+                               MaxWidth="300"
+                               TextWrapping="Wrap"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource HelperTextStyle}"
+                               Visibility="Collapsed" />
+                </Grid>
+            </Border>
+
+            <!--
+              退出放映。**它就是基类点名要的 AddPageButton**（白板那边是"新增页面"），
+              位置、形状、那一小格 6 DIP 的缝，全部照白板 —— 上一版把它塞进上一页/页码/下一页
+              那一格里还隔开，看上去就像工具栏上那个拖动把手，而"看着像另一个控件"
+              就是这一类错的全部症状。
+            -->
+            <Border Grid.Column="1"
+                    Width="40"
+                    Height="56"
+                    Margin="6,0,0,0"
+                    Background="{StaticResource ToolbarSurfaceBrush}"
+                    CornerRadius="{StaticResource OverlayCornerRadius}"
+                    ClipToBounds="True"
+                    Padding="0,7">
+                <Button x:Name="AddPageButton" Style="{StaticResource ToolActionButtonStyle}">
+                    <FontIcon Glyph="&#xE711;" FontFamily="Segoe Fluent Icons" FontSize="16" />
+                </Button>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

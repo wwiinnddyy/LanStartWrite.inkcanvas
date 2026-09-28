@@ -6,6 +6,7 @@ using Jalium.UI.Automation;
 using Jalium.UI.Controls;
 using Jalium.UI.Input;
 using Jalium.UI.Media;
+using LanStartWrite.Inkcanvas.Diagnostics;
 
 namespace LanStartWrite.Inkcanvas;
 
@@ -36,6 +37,11 @@ public partial class AnnotationToolbarWindow : Window
     private bool _pdfViewerPresented;
     private DocumentCameraWindow? _documentCamera;
     private bool _documentCameraPresented;
+
+    /// <summary>放映批注那一个窗口。<b>与展台同理：永远只有一个</b>，
+    /// 而"当前第几张"是它内部的事，工具栏不记。</summary>
+    private SlideShowWindow? _slideShow;
+    private bool _slideShowPresented;
     private SettingsWindow? _settingsWindow;
     private PenSecondaryMenuWindow? _penMenuWindow;
     private bool _penMenuVisible;
@@ -242,6 +248,9 @@ public partial class AnnotationToolbarWindow : Window
         // 展台没有"驻留某份文件"这回事 —— 它永远就是那一个面，
         // 所以这里不需要 PDF 那条注释里的额外分支。
         CanvasScene.DocumentCamera => _documentCamera?.Surface,
+        // 放映同理：它永远就是那一个窗口，而"当前第几张"是那个窗口内部的事。
+        // 少了这一支，按撤销会撤掉屏幕批注那块面的历史 —— 症状是"放映上写字，撤销把批注擦了"。
+        CanvasScene.Slideshow => _slideShow?.Surface,
         _ => _annotationOverlay?.Surface,
     };
 
@@ -959,6 +968,9 @@ public partial class AnnotationToolbarWindow : Window
         // 展台的窗口**不搬批注栏**（它跟白板一样，批注栏是独立浮窗），
         // 所以离开时只要收起来 —— 与图片/PDF 那两处要走 RestoreFromHost 不同。
         if (CanvasSceneState.Active != CanvasScene.DocumentCamera) ConcealDocumentCamera();
+        // 放映同理：切去别的那几块时收起它，否则两块全屏画布会同时在屏 ——
+        // 而它们都是"盖住整个桌面"的顶层窗口，重叠起来用户只看得见最后 Show 的那个。
+        if (CanvasSceneState.Active != CanvasScene.Slideshow) ConcealSlideShow();
 
         RefreshToolVisuals();
         SyncCanvasOverlay();
@@ -1006,6 +1018,9 @@ public partial class AnnotationToolbarWindow : Window
                 break;
             case CanvasScene.DocumentCamera:
                 SyncDocumentCameraOverlay();
+                break;
+            case CanvasScene.Slideshow:
+                SyncSlideShowOverlay();
                 break;
             default:
                 SyncAnnotationOverlay();
@@ -1123,6 +1138,249 @@ public partial class AnnotationToolbarWindow : Window
         _documentCameraPresented = false;
     }
 
+    // ────────────────────────────────────────────── 放映批注（PPT）
+
+    /// <summary>
+    /// 进 / 出放映批注。<b>设置页「放映管理 › 预览」调的就是它。</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>点第二下是"我要回去"</b>，与展台同一条语义：放映这一块是全屏的，
+    /// 而"看放映"与"退出这块画布"是同一个动作的两面。
+    /// </para>
+    /// <para>
+    /// <b>这一阶段的来源是合成占位图</b>（<c>SyntheticSlideThumbnails</c>）——
+    /// 它验的是与真放映**完全同一条路**，只有缩略图与页数是假的。
+    /// 真 PPT 来源从 <c>ISlideThumbnailSource</c> 那个口接进来，
+    /// 而这个方法、窗口、以及左下角控制器一行都不用改。
+    /// </para>
+    /// </remarks>
+    internal void ToggleSlideShowPreview()
+    {
+        if (_slideShow is not null && _slideShowPresented)
+        {
+            ToggleCanvasScene(CanvasScene.ScreenAnnotation);
+            return;
+        }
+
+        EnsureSlideShow();
+        CanvasSceneState.Active = CanvasScene.Slideshow;
+    }
+
+    private void EnsureSlideShow()
+    {
+        if (_slideShow is not null) return;
+        _slideShow = new SlideShowWindow();
+        // 联动方式按偏好接上（内置那档是 COM，别的档占位）——
+        // 换档要重建这个窗口，因为**换一档就是换一套联动实现**，
+        // 而旧那套持有的 COM 引用必须先放掉（否则就是每换一次漏一份）。
+        _slideShow.UseLink(AppPreferences.Current.SlideShowLinkMode);
+        _slideShow.HistoryStateChanged += OnHistoryStateChanged;
+        // 左下角那颗「退出」回到批注栏切场景 —— 窗口自己不去改 CanvasSceneState，
+        // 因为"进/出放映"这件事只有批注栏这一个决策点（ApplyToolbarHosting 也在那儿）。
+        // 两处各切一次的后果是场景跳两跳，而中间那一跳用户看得见。
+        _slideShow.ExitRequested += (_, _) => ToggleCanvasScene(CanvasScene.ScreenAnnotation);
+
+        // 关掉之后**必须把引用忘掉**。这不是洁癖：WindowLayerManager 每 1.5 秒回读一次
+        // 真实桌面 Z 序并遍历登记过的窗口，而一个已关但仍被握着的窗口会在下一次
+        // SyncCanvasOverlay 里被当成"还在"来处理 —— 症状是间歇性地卡住或抛，
+        // 两次跑出来一次绿一次挂，而"时好时坏"是最难查的一类。
+        // 白板与 PDF 那边也是这么收的（Closed 里把自己那份状态清掉）。
+        _slideShow.Closed += (_, _) =>
+        {
+            _slideShow = null;
+            _slideShowPresented = false;
+        };
+
+        RefreshToolVisuals();
+    }
+
+    private void SyncSlideShowOverlay()
+    {
+        if (_settingsWindow is not null)
+        {
+            HidePenSecondaryMenu();
+            HideEraserSecondaryMenu();
+            SyncUndoRedoState();
+            return;
+        }
+
+        if (_slideShow is null)
+        {
+            if (_annotationOverlay is not null) _annotationOverlay.Hide();
+            _slideShowPresented = false;
+            SyncUndoRedoState();
+            return;
+        }
+
+        if (!_slideShowPresented)
+        {
+            _slideShowPresented = true;
+            _slideShow.Show();
+        }
+
+        // 放映那一块是**沉浸式**：批注栏贴整块屏的下缘，不留任务栏那道缝。
+        ToolbarPlacement.ApplyImmersiveBottom(this);
+
+        // 两态，规矩与屏幕批注同源：**鼠标/选择 = 不铺墨迹面**，
+        // 只有选到笔或橡皮才把那块能写的面挂上来。
+        // 而左下角那个页面控制器**两态都在** —— 它不在墨迹面里，关掉面不会带走它。
+        var tool = ToolbarTools.Selected;
+        var writing = tool is not null && tool.Kind is ToolbarToolKind.Pen or ToolbarToolKind.Eraser;
+        _slideShow.SetWriting(writing);
+        var surface = _slideShow.ActiveSurfaceForHost;
+
+        switch (tool?.Kind)
+        {
+            case ToolbarToolKind.Pen when surface is not null:
+                HideEraserSecondaryMenu();
+                surface.SetInkMode();
+                ApplyPenTool(surface, tool);
+                break;
+
+            case ToolbarToolKind.Eraser when surface is not null:
+                HidePenSecondaryMenu();
+                surface.SetEraseMode();
+                ApplyEraserTool(surface, tool);
+                break;
+
+            default:
+                HidePenSecondaryMenu();
+                HideEraserSecondaryMenu();
+                break;
+        }
+
+        // **刻意不 Activate**：放映时键盘控制属于 PowerPoint，
+        // 抢焦点会让用户按一下键就把放映顶掉 —— 症状是"放映自己退出了"，
+        // 看起来像崩了。批注栏自己也不需要焦点就能显示。
+        SyncUndoRedoState();
+    }
+
+    private void ConcealSlideShow()
+    {
+        if (_slideShow is null) return;
+        _slideShow.Hide();
+        _slideShowPresented = false;
+    }
+
+    /// <summary>探针用：放映那个窗口（没有时 null）。</summary>
+    internal SlideShowWindow? SlideShowForProbe => _slideShow;
+
+    /// <summary>
+    /// <b>自动</b>进放映：检测到宿主那边开始放映了。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 这一条是"用户在 PowerPoint 里按 F5，批注就自己跟上来"这件事的<b>全部</b>实现。
+    /// 在它之前，联动是<b>纯拉取</b>的、而且只在窗口已经被手动建起来之后才开始 ——
+    /// 于是宿主那边放了半天，这边什么也不会发生。症状是<b>三样同时没有</b>
+    /// （不进场景、墨迹不跟、页面控件不出现），而那三样其实是<b>同一个原因</b>：
+    /// 没人告诉应用"放映开始了"。
+    /// </para>
+    /// <para>
+    /// <b>只在"刚进入放映"这一刻动</b>（上升沿），不每拍都进：用户中途自己切去白板，
+    /// 下一拍不该把他拽回来。而放映结束时也只"退"，同样不主动抢。
+    /// </para>
+    /// <para>
+    /// <b>不抢焦点</b>：放映时用户正在演示，键盘控制属于 PowerPoint。
+    /// 那个放映窗口本来就 <c>ShowActivated = false</c>，而这里刻意<b>不调
+    /// <c>Activate</c></c> —— 调了会把 PowerPoint 的全屏放映顶掉，而那表现为
+    /// "按一下键放映就退出了"，看起来像崩了。
+    /// </para>
+    /// </remarks>
+    internal void EnterSlideShowOnShowStarted()
+    {
+        if (_isClosing) return;
+        if (_slideShowPresented) return;
+
+        EnsureSlideShow();
+        CanvasSceneState.Active = CanvasScene.Slideshow;
+        LogSlideShowVisibility("进放映批注");
+    }
+
+    /// <summary>
+    /// 放映那一块此刻<b>到底在不在屏上、压在谁上面</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 这一段是<b>被"检测到了但看不见"逼出来的</b>。宿主那边确实开始放映了
+    /// （<c>SlideShowWatcher</c> 的日志写着"宿主开始放映 → 进放映批注"），
+    /// 而用户屏幕上<b>什么都没有</b> —— 两件事同时为真。
+    /// </para>
+    /// <para>
+    /// <b>"进了放映模式"和"盖在 PowerPoint 上面"是两件事</b>：
+    /// 场景切了只说明逻辑到位，而 PowerPoint 的放映是<b>全屏置顶</b>的，
+    /// 我们的透明层要压过它就得真的置顶。压不过去时症状是
+    /// 「什么都没发生」——<b>和"联动压根没写"完全同形</b>，
+    /// 而这两种错的修法一个在业务层一个在层级层。
+    /// </para>
+    /// <para>
+    /// 所以这里量三样：<b>窗口可不可见</b>、<b>有没有置顶样式</b>、
+    /// 以及 <b>屏幕中心那个点命中的是谁</b>。最后那一条是决定性的 ——
+    /// 它问的是外壳"用户此刻点到的是谁"，而不是"我们希望是谁"。
+    /// </para>
+    /// </remarks>
+    private void LogSlideShowVisibility(string moment)
+    {
+        if (_slideShow is null)
+        {
+            AppLog.Write("放映", $"[{moment}] 放映窗口根本没建起来");
+            return;
+        }
+
+        var handle = _slideShow.Handle;
+        var rect = NativeWindowZOrder.WindowRect(handle);
+        var screen = Jalium.UI.SystemParameters.PrimaryScreenWidth;
+        var centerX = (int)(screen / 2);
+        var centerY = (int)(Jalium.UI.SystemParameters.PrimaryScreenHeight / 2);
+        var hit = NativeWindowZOrder.WindowHitTest(centerX, centerY);
+
+        // **左下角那个页面控件本身也要量。**
+        // 上面那三条量的是"窗口"，而用户抱怨的是"控件没出现"——
+        // 窗口在屏上、置顶、命中的是我们，**这三条全绿也可能是控件压根没排版**：
+        // 没排版时 ActualWidth 是 0，而"0 宽"在界面上就是"什么都没有"，
+        // 与"控件压根不存在"完全同形。所以这里直接问它自己的三个数。
+        var page = _slideShow.FindName("PageControlHost") as FrameworkElement;
+        var pageText = _slideShow.FindName("PageNumberText") as TextBlock;
+        var origin = page?.TransformToVisual(_slideShow);
+        var spot = origin is null ? new Point(double.NaN, double.NaN) : origin.Transform(new Point(0, 0));
+
+        AppLog.Write("放映",
+            $"[{moment}] 可见={_slideShow.IsVisible} 置顶={NativeWindowZOrder.HasTopmostStyle(handle)} " +
+            $"句柄=0x{handle.ToInt64():X} 矩形={(rect is null ? "无" : $"{rect.Value.Left},{rect.Value.Top} {rect.Value.Right - rect.Value.Left}x{rect.Value.Bottom - rect.Value.Top}")} " +
+            $"屏心命中={(hit == handle ? "我们" : "别的窗口")} | " +
+            $"页面控件 可见={page?.IsVisible} 宽={page?.ActualWidth:0} 高={page?.ActualHeight:0} 位置={spot.X:0},{spot.Y:0} " +
+            $"页码文字=「{pageText?.Text}」");
+    }
+
+    /// <summary>放映结束了，把那一块收起来。**不替用户决定回到哪一块** ——
+    /// 回到屏幕批注是最可能的去向，而那本来就是 <c>ToggleCanvasScene</c> 的默认落点。</summary>
+    internal void LeaveSlideShowOnShowEnded()
+    {
+        if (_isClosing) return;
+        if (!_slideShowPresented) return;
+        if (CanvasSceneState.Active != CanvasScene.Slideshow) return;
+
+        ToggleCanvasScene(CanvasScene.ScreenAnnotation);
+    }
+
+    /// <summary>
+    /// 放映批注的<b>公开入口</b>，由设置页「放映管理 › 预览」调用。
+    /// </summary>
+    /// <remarks>
+    /// <b>先把设置窗口关掉再进</b>：放映是全屏画布，而设置窗口是对话框层。
+    /// 两者同时在屏时 <see cref="SyncSlideShowOverlay"/> 会先收菜单就返回 ——
+    /// 于是点了"预览"什么也没发生，而按钮看上去是有效的。
+    /// 那一段判据存在的理由是别处（设置开着时不该突然弹出全屏画布），
+    /// 所以顺序必须由这个入口摆平，而不是把那条判据删掉。
+    /// </remarks>
+    internal void EnterSlideShowPreview()
+    {
+        var settings = _settingsWindow;
+        if (settings is not null) settings.Close();
+        ToggleSlideShowPreview();
+    }
+
     /// <summary>
     /// 展台上"存成页"：把冻结那一刻的画面 + 那一页上的笔迹，交给图片画布变成一页。
     /// </summary>
@@ -1135,7 +1393,7 @@ public partial class AnnotationToolbarWindow : Window
     /// </para>
     /// <para>
     /// <b>搬完两边都要 <c>History.Clear()</c></b>：引擎"换文档不清历史"，
-    /// 而撤��一旦跨到另一份文档上，就会把用户"上一步真操作"弹掉 ——
+    /// 而撤销一旦跨到另一份文档上，就会把用户"上一步真操作"弹掉 ——
     /// 症状是"我什么都没干，撤销把字擦了"，与"文档坏了"完全同形。
     /// </para>
     /// </remarks>
@@ -1219,9 +1477,7 @@ public partial class AnnotationToolbarWindow : Window
         }
 
         RememberPdfOpened(dialog.FileName);
-        _pdfViewerPresented = true;
-        CanvasSceneState.Active = CanvasScene.PdfCanvas;
-        SyncCanvasOverlay();
+        PresentOpenedPdf();
     }
 
     /// <summary>
@@ -1257,7 +1513,39 @@ public partial class AnnotationToolbarWindow : Window
         AppPreferences.Update(AppPreferences.Current with
         {
             LastPdfDirectory = string.IsNullOrEmpty(directory) ? AppPreferences.Current.LastPdfDirectory : directory,
+            // 目录回答"文件框从哪儿开始"，路径回答"上次看的是哪一份"——两个问题，两个字段。
+            LastPdfPath = path,
         });
+    }
+
+    /// <summary>
+    /// 重新打开上次那份 PDF（设置页「上次打开的 PDF」那颗钮送来的）。
+    /// </summary>
+    /// <remarks>
+    /// <b>与走文件框那条路共用后面这一段</b>：成功之后的那几步（记路径、呈现、认场景）
+    /// 必须是同一段代码，否则"从文件框打开"和"从设置页重新打开"会长出两份状态来 ——
+    /// 而那种分叉的典型症状是"从设置页打开的 PDF 不出现在工具栏那一项里"。
+    /// </remarks>
+    internal void ReopenLastPdf()
+    {
+        EnsurePdfViewer();
+        if (_pdfViewer is null) return;
+
+        if (!_pdfViewer.TryReopenLastPdf(out var error))
+        {
+            MessageBox.Show(this, error ?? "打不开上次的 PDF", "PDF 批注", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        PresentOpenedPdf();
+    }
+
+    /// <summary>一份 PDF 已经装好了：记下它、把它摆到眼前。</summary>
+    private void PresentOpenedPdf()
+    {
+        _pdfViewerPresented = true;
+        CanvasSceneState.Active = CanvasScene.PdfCanvas;
+        SyncCanvasOverlay();
     }
 
     private void EnsurePdfViewer()
@@ -1300,11 +1588,18 @@ public partial class AnnotationToolbarWindow : Window
         // 那是比"没有这个功能"更糟的一种半成品。
         if (_pdfViewerPresented && _pdfViewer is { HasDocument: true } pdf) RehostInto(pdf.ToolbarHost, pdf);
         else if (wantsImageWindow && _imageViewer is { } viewer) RehostInto(viewer.ToolbarHost, viewer);
-        // 展台<b>没有这一支</b>，而那不是漏了：它跟白板一样是全屏画布，
+        // 展台那支**不接批注栏**，而那不是漏了：它跟白板一样是全屏画布，
         // 批注栏理应作为独立浮窗浮在画面之上。给它硬塞一个 ToolbarHost 的话，
         // 批注栏就变成了展台窗口的一个控件 —— 展台一旦隐藏，批注栏跟着一起消失
         // （那正是图片画布当初出的那个严重缺陷：没人负责搬回来，整条工具栏没了）。
         else RestoreFromHost();
+
+        // 摆位：放映那一块要贴屏底（沉浸式），其余情况一律回工作区居中。
+        // **离开放映时必须摆回去** —— 只在进放映时摆的话，用户从放映切到白板，
+        // 批注栏会留在屏底，而白板那一档该有的是工作区居中；那个错位很显眼，
+        // 而且不会有任何报错（坐标都是合法数字）。
+        if (CanvasSceneState.Active == CanvasScene.Slideshow) ToolbarPlacement.ApplyImmersiveBottom(this);
+        else ToolbarPlacement.Apply(this);
     }
 
     /// <summary>
@@ -1718,10 +2013,10 @@ public partial class AnnotationToolbarWindow : Window
         EnsurePenSecondaryMenuWindow();
         SyncPenSecondaryMenu();
         PositionPenSecondaryMenu();
-        _penMenuWindow!.Show();
+        WindowPresent.Show(_penMenuWindow!, "笔菜单");
         PositionPenSecondaryMenu();
         _penMenuVisible = true;
-        FluentThemeManager.Enter(_penMenuWindow.Content as UIElement ?? _penMenuWindow);
+        FluentThemeManager.Enter(_penMenuWindow!.Content as UIElement ?? _penMenuWindow);
         if (focus)
             Dispatcher.BeginInvoke(() =>
             {
@@ -1795,10 +2090,10 @@ public partial class AnnotationToolbarWindow : Window
         EnsureEraserSecondaryMenuWindow();
         SyncEraserSecondaryMenu();
         PositionEraserSecondaryMenu();
-        _eraserMenuWindow!.Show();
+        WindowPresent.Show(_eraserMenuWindow!, "橡皮菜单");
         PositionEraserSecondaryMenu();
         _eraserMenuVisible = true;
-        FluentThemeManager.Enter(_eraserMenuWindow.Content as UIElement ?? _eraserMenuWindow);
+        FluentThemeManager.Enter(_eraserMenuWindow!.Content as UIElement ?? _eraserMenuWindow);
         if (focus)
             Dispatcher.BeginInvoke(() =>
             {
@@ -1962,7 +2257,7 @@ public partial class AnnotationToolbarWindow : Window
             return;
         }
 
-        var w = new SettingsWindow { Owner = this };
+        var w = new SettingsWindow { Owner = this, HostToolbar = this };
         _settingsWindow = w;
 
         HidePenSecondaryMenu();
@@ -1982,7 +2277,7 @@ public partial class AnnotationToolbarWindow : Window
             SyncCanvasOverlay();
         };
 
-        w.Show();
+        WindowPresent.Show(w, "设置");
         w.Activate();
     }
 

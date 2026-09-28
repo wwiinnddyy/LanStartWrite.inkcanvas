@@ -19,6 +19,7 @@ using Jalium.UI.Controls.Primitives;
 using Jalium.UI.Input;
 using Jalium.UI.Interop;
 using Jalium.UI.Media;
+using LanStartWrite.Inkcanvas.Diagnostics;
 using Jalium.UI.Media.Imaging;
 // CameraFormat 在 .Media.Pipeline —— 展台的设备与分辨率类型全在那个命名空间。
 using Jalium.UI.Media.Pipeline;
@@ -42,6 +43,9 @@ internal static class Program
         if (File.Exists(path)) File.Delete(path);
         var renderContext = RenderContext.GetOrCreateCurrent(RenderBackend.Auto);
         renderContext.DefaultRenderingEngine = RenderingEngine.Impeller;
+        // 记下"这次真的用的是哪个"，与 Program.Main 同一步 —— 设置页的"要重启"提示
+        // 拿它当基准，不记的话那一组在探针里永远看不到提示条（基准是"不知道"）。
+        RenderInfo.RecordApplied(RenderBackend.Auto, renderContext.Backend, renderContext.DefaultRenderingEngine);
         var adapter = renderContext.GetAdapterInfo();
         Console.WriteLine($"[render] backend={renderContext.Backend} engine={renderContext.DefaultRenderingEngine} adapter={adapter?.Name ?? "unavailable"} type={adapter?.AdapterType.ToString() ?? "unavailable"}");
         Jalium.UI.Markup.ThemeLoader.Initialize();
@@ -65,6 +69,38 @@ internal static class Program
             try { return app.Run(); }
             finally { AppPreferences.Flush(); }
         }
+        if (args.Contains("--image-input-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunImageInputProbe();
+            return 0;
+        }
+
+        if (args.Contains("--log-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunLogProbe();
+            return 0;
+        }
+
+        if (args.Contains("--show-probe", StringComparer.OrdinalIgnoreCase))
+        {
+            RunShowTimingProbe();
+            return 0;
+        }
+
+        if (args.Contains("--tfm-check", StringComparer.OrdinalIgnoreCase))
+        {
+            RunTransformOrderCheck();
+            return 0;
+        }
+
+        if (args.Contains("--ink-perf-two", StringComparer.OrdinalIgnoreCase))
+
+        {
+            RunInkPerfTwoCanvas();
+            AppPreferences.Flush();
+            return 0;
+        }
+
         if (args.Contains("--ink-perf", StringComparer.OrdinalIgnoreCase))
         {
             RunInkPerf();
@@ -116,6 +152,10 @@ internal static class Program
             CheckSwitch(settings);
             CheckResponsiveRows(settings);
             CheckNavigation(settings);
+            CheckFilePageSections(settings);
+        CheckRenderSection(settings);
+        CheckToolbarGlyphs();
+        CheckSlideShowStyles();
             CheckToolbarTouch();
             CheckToolbarTools(settings);
             CheckImageCanvas();
@@ -283,6 +323,385 @@ internal static class Program
             "Wide settings row puts the action right-aligned beside the description");
         window.InvalidateMeasure();
         window.ForceRenderFrame();
+    }
+
+    /// <summary>
+    /// 钉死「文件」这一页的分区：**PDF 自带一节**，不塞在图片那一节里。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 用户报的是这条：PDF 的开关原本夹在「打开图片」那两张卡之间，
+    /// 读的人会以为它管的是图片；而下面「上次打开的目录」那张卡是
+    /// <c>LastImageDirectory</c>，与 <c>LastPdfDirectory</c> 是**两份**存档，
+    /// 同一节里出现两张都叫「上次打开的目录」的卡就只能靠位置分辨。
+    /// </para>
+    /// <para>
+    /// <b>为什么钉顺序而不只钉"存在"</b>：卡片本身一直在，缺的是"它在第几节"。
+    /// 只问"PDF 开关存在"的话，它挪回图片节里照样绿 —— 与那条
+    /// "视口缩放之后图跟着重定位"只问变换对象换没换，是同一个形状的错误。
+    /// </para>
+    /// <para>
+    /// <b>顺带钉住两份目录是真的两份</b>：给两个不同的偏好值，看两行文字各自跟着自己那份走。
+    /// 只钉控件存在的话，把 <c>LastPdfDirectory</c> 错接到图片那份上也是绿的。
+    /// </para>
+    /// </remarks>
+    private static void CheckFilePageSections(SettingsWindow window)
+    {
+        window.GoToPageForProbe(SettingsNavPage.File);
+        window.ForceRenderFrame();
+
+        var panel = (FrameworkElement)window.FindName("FileSectionPanel")!;
+
+        // 找不到就返回 NaN 而不是抛：NaN 参与的比较一律为 false，
+        // 于是"缺一个分节标题"会变成**一条红断言**，而不是把整条队列带走。
+        double Y(string name) => window.FindName(name) is FrameworkElement e
+            ? e.TransformToVisual(panel)!.Transform(new Point(0, 0)).Y
+            : double.NaN;
+
+        Check(window.FindName("PdfSectionHeader") is not null
+            && window.FindName("ImageSectionHeader") is not null,
+            "「文件」这一页里 PDF 自带一节标题，不在图片那一节里");
+
+        // 顺序用**排出来的位置**判，不是标记里的先后 —— 换布局时它才是真的。
+        var imageHeaderY = Y("ImageSectionHeader");
+        var viewerHeaderY = Y("ViewerSectionHeader");
+        var pdfHeaderY = Y("PdfSectionHeader");
+        var pdfViewerHeaderY = Y("PdfViewerSectionHeader");
+        Check(imageHeaderY < viewerHeaderY && viewerHeaderY < pdfHeaderY && pdfHeaderY < pdfViewerHeaderY,
+            "四节顺序是 图片 → 默认图片查看器 → PDF → 默认 PDF 阅读器，每一类的卡片各自连成一块");
+
+        Check(Y("PdfContinuousBrowseSwitch") > pdfHeaderY && Y("OpenPdfDirectoryButton") > pdfHeaderY
+            && Y("ReopenLastPdfButton") > pdfHeaderY,
+            "PDF 的开关、目录、文件三张卡都在 PDF 那节标题之下");
+        Check(Y("OpenImageDirectoryButton") < pdfHeaderY,
+            "图片那份目录卡留在图片那一节里，没有被 PDF 那一节吞掉");
+        Check(Y("SetDefaultPdfViewerButton") > pdfViewerHeaderY,
+            "「设为默认 PDF 阅读程序」在它自己那一节之下，不混在浏览方式的卡里");
+
+        // 两份目录是真的两份：给两个不同的值，各跟各的走。
+        var imageText = (TextBlock)window.FindName("LastImageDirectoryText")!;
+        var pdfText = (TextBlock)window.FindName("LastPdfDirectoryText")!;
+        AppPreferences.Update(AppPreferences.Current with
+        {
+            LastImageDirectory = @"C:\验\图片目录",
+            LastPdfDirectory = @"C:\验\PDF目录",
+        });
+        window.ForceRenderFrame();
+        Check(imageText.Text.Contains("图片目录") && pdfText.Text.Contains("PDF目录")
+            && imageText.Text != pdfText.Text,
+            $"两份目录各跟各的存档走（图片「{imageText.Text}」/ PDF「{pdfText.Text}」）");
+        AppPreferences.Update(AppPreferences.Current with
+        {
+            LastImageDirectory = "",
+            LastPdfDirectory = "",
+        });
+        window.ForceRenderFrame();
+        var imageButton = (Button)window.FindName("OpenImageDirectoryButton")!;
+        var pdfButton = (Button)window.FindName("OpenPdfDirectoryButton")!;
+        Check(imageText.Text == "还没打开过图片" && pdfText.Text == "还没打开过 PDF"
+            && !imageButton.IsEnabled && !pdfButton.IsEnabled,
+            "两份都没打开过时，两行给出各自的人话，两个按钮都禁用（不是点了没反应）");
+
+        // 「上次打开的 PDF」是**文件**不是目录：给文件名而不是整条路径，
+        // 而按钮的可用态跟着"文件还在不在"走 —— 挪走过的文件点下去只会报"打不开"，
+        // 那种错会被用户理解成"PDF 坏了"，而问题在路径。
+        var pdfFileText = (TextBlock)window.FindName("LastPdfFileText")!;
+        var reopen = (Button)window.FindName("ReopenLastPdfButton")!;
+        var real = Path.Combine(Path.GetTempPath(), "uismoke-last.pdf");
+        File.WriteAllText(real, "%PDF-1.4");
+        try
+        {
+            AppPreferences.Update(AppPreferences.Current with { LastPdfPath = real });
+            window.ForceRenderFrame();
+            Check(pdfFileText.Text == "uismoke-last.pdf" && reopen.IsEnabled,
+                $"「上次打开的 PDF」给的是文件名而不是整条路径（{pdfFileText.Text}），按钮可用");
+
+            AppPreferences.Update(AppPreferences.Current with { LastPdfPath = real + ".没了" });
+            window.ForceRenderFrame();
+            Check(!reopen.IsEnabled && pdfFileText.Text.Contains("已不在原来的位置"),
+                $"文件不在时按钮禁用并说清是路径的问题（{pdfFileText.Text}）");
+        }
+        finally
+        {
+            AppPreferences.Update(AppPreferences.Current with { LastPdfPath = "" });
+            File.Delete(real);
+        }
+    }
+
+    /// <summary>
+    /// 「关于 › 渲染与设备」：实时读数、后端/引擎两个下拉、复制诊断、重启提示。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>为什么这一组要单独写</b>：这一块的全部价值在于"出问题的时候它说的是真话"。
+    /// 而"显示了一个非空的文本框"是最容易蒙混过关的一种实现 —— 它可以在驱动完全读不到
+    /// 的机器上也照样显示点什么。所以这里钉的不是"有个读数"，而是
+    /// <b>读数里必须有当前后端/引擎/图形适配器三行，且没有一个是空的</b>。
+    /// </para>
+    /// <para>
+    /// <b>重启提示钉的是"改了会被告知"，不是"提示存在"</b>：后端在 <c>RenderContext</c> 里只读，
+    /// 改它只能重建上下文，所以这一块是"落盘 + 提示"而不是"当场换"。
+    /// 一条只问"有那个控件"的断言，会在有人把 <c>NeedsRestart</c> 写反时照样绿。
+    /// </para>
+    /// <para>
+    /// <b>「自动」判成不需要重启是单独一条</b>：它落成 Impeller，所以拿偏好里存的
+    /// <c>Auto</c> 去和跑着的 <c>Impeller</c> 直接比的话，这条提示会永远亮着 ——
+    /// 而它没有一次是真的。写规则时"自动"的含义必须一起定，否则界面会一直催一个不需要的重启。
+    /// </para>
+    /// </remarks>
+    private static void CheckRenderSection(SettingsWindow window)
+    {
+        window.GoToPageForProbe(SettingsNavPage.About);
+        window.ForceRenderFrame();
+
+        var infoText = (TextBlock)window.FindName("RenderInfoText")!;
+        var backendChoice = (ComboBox)window.FindName("RenderBackendChoice")!;
+        var engineChoice = (ComboBox)window.FindName("RenderingEngineChoice")!;
+        var restartBar = (FluentInfoBar)window.FindName("RenderRestartBar")!;
+        var copyButton = window.FindName("CopyRenderDiagnosticsButton") as Button;
+        var refreshButton = window.FindName("RefreshRenderInfoButton") as Button;
+
+        Check(copyButton is not null && refreshButton is not null,
+            "「关于」这一页里「复制诊断信息」与「重新读取」两个按钮都在");
+
+        // 读数是"此刻真的在跑什么"：三行都要有，且不许是空的。
+        // 不许含 "null" —— 适配器那一格读不到时该说的是"读不到"，不是把 null 印出来。
+        // 同一时刻连读两次必须给同一个值。诊断面板的全部价值是"照着它复现"，
+        // 而一个两次读不一样的读数没法照着复现 —— 所以这条不是测细节，是测这块面板可用。
+        var twice1 = RenderContext.Current?.DefaultRenderingEngine ?? RenderingEngine.Auto;
+        var twice2 = RenderContext.Current?.DefaultRenderingEngine ?? RenderingEngine.Auto;
+        Check(twice1 == twice2,
+            $"同一个渲染上下文同一时刻连读两次引擎是同一个值（第一次{RenderInfo.Describe(twice1)}，第二次{RenderInfo.Describe(twice2)}）");
+        Check(infoText.Text.Contains("渲染后端：") && infoText.Text.Contains("渲染引擎：")
+            && infoText.Text.Contains("图形适配器：")
+            && !infoText.Text.Contains("null")
+            && infoText.Text.Split('\n').All(line => !line.EndsWith("：")),
+            $"渲染读数有内容且没有一行是空的（{infoText.Text.Replace("\n", " / ")}）");
+
+        // 下拉项必须与 Choices() 一份不多一份不少，且都含「自动」——
+        // 少一个「自动」的话用户没法回到框架默认，少一个平台项的话界面上会出现跑不了的选项。
+        Check(backendChoice.Items.Count == RenderInfo.BackendChoices().Count
+            && engineChoice.Items.Count == RenderInfo.EngineChoices().Count
+            && backendChoice.Items.Cast<string>().Any(item => item.Contains("自动"))
+            && engineChoice.Items.Cast<string>().Any(item => item.Contains("自动")),
+            "两个下拉的项与可选项表一致，且都有「自动」");
+
+        // 挑一个**与启动时用的不同**的后端/引擎：与它相同的话，提示本来就不该亮，
+        // 那样这条断言什么也没验到。基准取"启动时真应用下去的那个"而不是上下文自报值 ——
+        // 后者在帧与帧之间会变，拿它挑"不同的那个"会挑得没有依据。
+        var appliedBackend = RenderInfo.AppliedBackend ?? RenderBackend.D3D12;
+        var appliedEngine = RenderInfo.AppliedEngine ?? RenderingEngine.Impeller;
+        var otherBackend = appliedBackend == RenderBackend.Software
+            ? RenderBackend.D3D12
+            : RenderBackend.Software;
+        var otherEngine = appliedEngine == RenderingEngine.Vello
+            ? RenderingEngine.Impeller
+            : RenderingEngine.Vello;
+
+        // 走真实路径：改下拉（= 用户点选），而不是直接改偏好 ——
+        // 直接改偏好绕过了 SelectionChanged，于是"界面改了设置有没有真的落盘"这条就没被验到。
+        backendChoice.SelectedIndex = IndexOfBackend(otherBackend);
+        window.ForceRenderFrame();
+        Check(AppPreferences.Current.RenderBackend == otherBackend,
+            $"在下拉里选了{RenderInfo.Describe(otherBackend)}，偏好真的落盘了（存的是{RenderInfo.Describe(AppPreferences.Current.RenderBackend)}）");
+        Check(restartBar.IsOpen && restartBar.ActionButton is not null,
+            $"选了与当前不同的后端之后提示条打开，并带一个能按的按钮（{restartBar.Title}）");
+
+        engineChoice.SelectedIndex = IndexOfEngine(otherEngine);
+        window.ForceRenderFrame();
+        Check(AppPreferences.Current.RenderingEngine == otherEngine && restartBar.IsOpen,
+            $"引擎也接上了（存的是{RenderInfo.Describe(AppPreferences.Current.RenderingEngine)}）");
+
+        // 换回「自动」：它落成 Impeller / 由框架挑，所以不该再催重启。
+        backendChoice.SelectedIndex = IndexOfBackend(RenderBackend.Auto);
+        engineChoice.SelectedIndex = IndexOfEngine(RenderingEngine.Auto);
+        window.ForceRenderFrame();
+        var contextNow = RenderContext.Current;
+        Check(!restartBar.IsOpen,
+            $"换回「自动」之后提示条收起来（启动时 后端={RenderInfo.Describe(appliedBackend)} 引擎={RenderInfo.Describe(appliedEngine)}，偏好 后端={RenderInfo.Describe(AppPreferences.Current.RenderBackend)} 引擎={RenderInfo.Describe(AppPreferences.Current.RenderingEngine)}，自报 引擎={RenderInfo.Describe(RenderInfo.CurrentEngine)} 代次={contextNow?.Generation.ToString() ?? "-"}，条 IsOpen={restartBar.IsOpen}）");
+
+        // 复制的那一段：不碰剪贴板（不该在验收里改用户的东西），直接查它该有的行。
+        var diagnostics = RenderInfo.DiagnosticsText();
+        Check(diagnostics.Contains("揽星书写 诊断信息")
+            && diagnostics.Contains("图形适配器：")
+            && diagnostics.Contains("日志文件：")
+            && diagnostics.Contains("用户选择："),
+            "诊断信息里含读数、用户选择与日志文件位置（拿到这三样就够别人复现了）");
+    }
+
+    private static int IndexOfBackend(RenderBackend value)
+    {
+        var choices = RenderInfo.BackendChoices();
+        for (var i = 0; i < choices.Count; i++)
+        {
+            if (choices[i].Value == value) return i;
+        }
+
+        return -1;
+    }
+
+    private static int IndexOfEngine(RenderingEngine value)
+    {
+        var choices = RenderInfo.EngineChoices();
+        for (var i = 0; i < choices.Count; i++)
+        {
+            if (choices[i].Value == value) return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// 放映批注（PPT）这一块的<b>样式</b>：左下角常驻控制器、页数跟着来源走、
+    /// 点缩略图能翻页、以及批注栏的沉浸式贴屏底摆位。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>这一组只验样式，不验真 PPT 联动</b>：真的来源还没接，缩略图与页数是合成的。
+    /// 而它验的每一条都是<b>与来源无关</b>的那部分 —— 控制器摆在哪、有几格、
+    /// 点一下会不会翻、页码写不写得对、批注栏贴不贴边。
+    /// 真来源接进来之后这一组应当<b>照样全绿</b>，那就是缝没白留的证据。
+    /// </para>
+    /// <para>
+    /// <b>为什么控制器要单独量位置</b>：它是这一块新增的唯一一个"自己会算位置"的元素
+    /// （钉在左下角、缩略图条在页码下面）。而"钉在左下角"这件事一旦被挪成居中，
+    /// 界面上仍然完全能用 —— 只有量得出来。
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// 工具栏的码点：<b>catalog 与 visuals 两份来源必须一致</b>。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 码点有<b>两份</b>：<see cref="ToolbarToolCatalog"/> 的条目上带一个，
+    /// <c>ToolbarToolVisuals.GlyphFor</c> 又按 kind 算一个 ——
+    /// 而 AGENTS 说后者是"唯一来源"，代码里却是两份。
+    /// </para>
+    /// <para>
+    /// 这一条钉的是"两份不许漂"：漂了的症状是<b>设置页那一列表画一颗、工具栏上画另一颗</b>，
+    /// 两边都是合法码点、都不报错，而用户看到的是"同一个按钮两个样"。
+    /// </para>
+    /// <para>
+    /// <b>它钉不到"码点本身对不对"</b>：PDF 那一颗曾经两份一致地写着
+    /// <c>0xE8C5</c>，而实测表里那个码点是 <c>HideBcc</c>（ink=90，邮件簇）——
+    /// 一致地错。这一条只能挡住漂；"码点在不在实测表里"靠
+    /// <c>FluentJalium/spike/GlyphInkProbe/glyph-ink-symbol.csv</c> 与人工核对。
+    /// </para>
+    /// </remarks>
+    private static void CheckToolbarGlyphs()
+    {
+        foreach (var entry in ToolbarToolCatalog.Entries)
+        {
+            var fromVisuals = ToolbarToolVisuals.GlyphFor(new ToolbarTool { Kind = entry.Kind });
+            Check(entry.Glyph == fromVisuals,
+                $"「{entry.Name}」这颗钮两处码点一致（catalog 0x{entry.Glyph:X} / visuals 0x{fromVisuals:X}）");
+        }
+    }
+
+    private static void CheckSlideShowStyles()
+    {
+        // 每组自己起一个离屏的批注栏（全套都是这个路子）：摆位是**绝对坐标**，
+        // 共用一个栏会让"上一组把它挪到哪"决定这一组量到什么，而那不是被测的东西。
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+
+        // 走**真实入口**：设置页那个「预览」按钮点的那条路，而不是直接 new 一个窗口。
+        // 直接 new 的话，"设置窗口挡着放映导致点了没反应"那条缺陷就验不到 ——
+        // 而它正是入口那一步最容易写错的地方（顺序：先关设置，再进放映）。
+        toolbar.EnterSlideShowPreview();
+        var show = toolbar.SlideShowForProbe;
+        Check(show is not null, "预览把放映批注那块窗口建起来了");
+        if (show is null) return;
+
+        show.ForceRenderFrame();
+        Check(CanvasSceneState.Active == CanvasScene.Slideshow,
+            $"预览之后眼前那块画布是放映（当前是{CanvasSceneState.Active}）");
+
+        // 左下角就是**一个**页面控件，形状与白板一致。
+        // 钉"只有一个"是这一组最重要的一条：上一版是"翻页条 + 底下再来一条常驻缩略图条"
+        // 两个控件叠在一起，而底下那条还占了 900 宽 —— 那多出来的一条是基类本来就有的
+        // （点页码弹出的缩略图）被我多造了一份。
+        var host = (Grid)show.FindName("InkHost")!;
+        var pageControlHost = (Grid?)show.FindName("PageControlHost");
+        Check(host is not null && pageControlHost is not null,
+            "放映窗口有墨迹宿主与左下角页面控件");
+        Check(show.FindName("SlideStrip") is null,
+            "左下角没有第二条常驻缩略图控件（缩略图走基类那个弹层，与白板同一条路）");
+        if (pageControlHost is null) return;
+
+        var pageText = (TextBlock)show.FindName("PageNumberText")!;
+        Check(pageText.Text.Contains('/'), $"页面控件有页码（页码「{pageText.Text}」）");
+
+        // 页面控件真的钉在左下角。
+        var anchor = pageControlHost.TransformToVisual(show);
+        var point = anchor is null ? new Point(double.NaN, double.NaN) : anchor.Transform(new Point(0, 0));
+        Check(point.X < show.ActualWidth / 2 && point.Y > show.ActualHeight / 2,
+            $"页面控件钉在左下角（起点 {point.X:0}, {point.Y:0}，窗口 {show.ActualWidth:0}×{show.ActualHeight:0}）");
+
+        // 那颗钮是**退出**而不是"新增页面"：它可按、名字是退出、按了会切走场景并收起窗口。
+        // 三条分别钉三件事 —— 只钉"可按"的话，把它换回"新增页面"也是绿的。
+        var exitButton = (Button)show.FindName("AddPageButton")!;
+        Check(exitButton.IsVisible && exitButton.IsEnabled,
+            "左下角那颗钮是可见可按的（它是退出，不是折叠掉的装饰）");
+        Check(Jalium.UI.Automation.AutomationProperties.GetName(exitButton) == "退出放映批注",
+            $"那颗钮的无障碍名字是「退出放映批注」（实际「{Jalium.UI.Automation.AutomationProperties.GetName(exitButton)}」）");
+
+        // 它要**长在页面控件那一块的右端**（白板那颗「新增页面」就是那个位置），
+        // 而不是飘在旁边 —— 上一版塞进同一排又隔开，看上去就像工具栏上那个拖动把手。
+        var exitAnchor = exitButton.TransformToVisual(show);
+        var exitPoint = exitAnchor is null ? new Point(double.NaN, double.NaN) : exitAnchor.Transform(new Point(0, 0));
+        Check(exitPoint.X + exitButton.ActualWidth <= pageControlHost.ActualWidth + 1
+            && exitPoint.X >= pageControlHost.ActualWidth - 40,
+            $"退出钮长在页面控件右端之内，不是飘在旁边的另一个控件（钮右缘 {exitPoint.X + exitButton.ActualWidth:0}，控件宽 {pageControlHost.ActualWidth:0}）");
+
+        // 页数跟着来源走 —— 这是那道缝的正面钉子：换一份来源，页数就变。
+        show.ApplySourceForProbe(new LanStartWrite.Inkcanvas.Slideshow.SyntheticSlideThumbnails(5));
+        show.ForceRenderFrame();
+        Check(pageText.Text == "5 / 5",
+            $"换成 5 页的来源之后页码跟着变（页码「{pageText.Text}」）");
+
+        exitButton.RaiseEvent(new RoutedEventArgs(Jalium.UI.Controls.Primitives.ButtonBase.ClickEvent, exitButton));
+        show.ForceRenderFrame();
+        // **场景变了不等于窗口没了** —— 只钉场景的话，"点了没反应"是绿的，
+        // 而那正是用户报的"退出不了"。两条都要钉。
+        Check(CanvasSceneState.Active != CanvasScene.Slideshow,
+            $"按下那颗钮之后场景离开放映（眼前那块现在是{CanvasSceneState.Active}）");
+        Check(!show.IsVisible,
+            $"而且那块全屏窗口真的收起来了（IsVisible={show.IsVisible}）");
+
+        // 批注栏的沉浸式摆位：**贴整块屏的下缘**，而不是工作区（工作区扣掉了任务栏）。
+        // 这一组必须拿**屏上那个**批注栏量，而上面那个是离屏的（Left=-16000）——
+        // 所以这里只验纯函数，不去动真窗口的位置。
+        var barSize = new Size(toolbar.Width, toolbar.Height);
+        var immersive = ToolbarPlacement.ComputeImmersiveBottom(barSize);
+        var workArea = SystemParameters.WorkArea;
+        var normal = ToolbarPlacement.Compute(workArea, barSize);
+        Check(immersive.Y + barSize.Height >= SystemParameters.PrimaryScreenHeight - 1,
+            $"沉浸式把批注栏算到屏幕最下缘（栏底 {immersive.Y + barSize.Height:0}，屏高 {SystemParameters.PrimaryScreenHeight:0}）");
+        Check(normal.Y + barSize.Height <= workArea.Bottom + 1 && immersive.Y > normal.Y,
+            $"而常规那一档留在工作区内、且比沉浸式高（常规栏底 {normal.Y + barSize.Height:0} ≤ 工作区 {workArea.Bottom:0}）");
+
+        // 换来源后 deck 变了 → 墨迹页要重建而不是接着用（墨迹按 deck 关联）。
+        Check(show.DeckIdForProbe.Length > 0,
+            $"放映那一块记得自己接的是哪一份（{show.DeckIdForProbe}）");
+
+        // 缩略图弹层走基类那套：点页码能弹出来，格数等于页数。
+        toolbar.EnterSlideShowPreview();
+        show.ForceRenderFrame();
+        Check(CanvasSceneState.Active == CanvasScene.Slideshow, "重新进了一次放映");
+        Check(show.ThumbnailPopupCardCount == 5,
+            $"点页码弹出的缩略图与页数一致（{show.ThumbnailPopupCardCount} 格）");
+
+        // **收尾：把这个全屏窗口关掉，而且必须关。**
+        // 两个理由，都不是"洁癖"：
+        // 1) 它不在 `Windows` 里，所以验收结束时的清理循环不会关它，而 `app.Run()`
+        //    还等着它 —— 症状是整套验收**跑到最后不结束**，前面全绿也看不出问题在哪；
+        // 2) `CheckWindowLayers` 量的是"整桌面上还剩几个窗口"，多一个全屏窗口
+        //    会把四层的排名整体挪一位，于是**排在它后面的组全被它带红**。
+        CanvasSceneState.Active = CanvasScene.ScreenAnnotation;
+        toolbar.ForceRenderFrame();
+        show.Close();
     }
 
     private static void CheckNavigation(SettingsWindow window)
@@ -1098,8 +1517,20 @@ internal static class Program
 
         // 一张 400×300 的图。宽高不等，才测得出"转 90° 之后宽高真的对调"。
         var bitmap = MakeTestBitmap(400, 300);
-        Check(viewer.OpenImage(bitmap, @"C:\fake\one.png"), "一张图能开成页");
+        Check(viewer.OpenImage(bitmap, @"C:\fake\one.png"), "一张图片能变成一页");
         toolbar.ForceRenderFrame();
+
+        // **墨迹面必须真的被排版量过。**图片窗口是"先显示窗口、后打开第一张图"，
+        // 而 ActivatePage 挂载之后不触发排版，于是墨迹面一直是 0×0：
+        // 屏幕→世界没有尺寸可用，落笔与墨迹出现的位置就对不上。
+        // 修法在 CanvasSurface.AttachTo（挂上去就补一趟 Measure/Arrange）。
+        // 这条在修之前是红的（0.0x0.0），而白板同一处是 1462.9x914.3 ——
+        // 差别只在"挂上去时宿主演没排过版"。
+        var inkFace = viewer.Surface.Canvas;
+        Check(inkFace.ActualWidth > 0 && inkFace.ActualHeight > 0,
+            $"打开图片后墨迹面被排版量到了，不是 0 尺寸（{inkFace.ActualWidth:F1}x{inkFace.ActualHeight:F1}）"
+            + "（0 尺寸时引擎拿不到可用的屏幕尺寸，落笔与墨迹位置必然对不上）");
+
 
         Check(viewer.PageCount == 2 && viewer.ActivePageIndex == 1,
             "多文件每文件一页：开一张就多一页并激活它");
@@ -1126,6 +1557,11 @@ internal static class Program
         Check(transformAfter is not null && transformBefore is not null
             && transformAfter != transformBefore,
             "视口缩放之后图跟着重定位（不会钉在屏幕上不动）");
+
+        // **真正的不变量**：同一个世界点，图走到哪儿，墨迹就得走到哪儿。
+        // 上面那条只问"变换对象换了没有"——把缩放乘成两倍它照样绿，
+        // 而用户看到的是"笔尖落在图上，墨迹却偏到别处"。这一条问的是两者**对不对得上**。
+        CheckImageAgreesWithInk(viewer, "刚放大 2 倍之后");
 
         // 转 90°：图与笔迹一起。先落一笔，这样"笔迹跟着转"才有东西可查。
         viewer.Surface.Document.Clear();
@@ -1426,6 +1862,558 @@ internal static class Program
 
         ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         CloseWindow(toolbar);
+    }
+
+    /// <summary>
+    /// **两块画布**同时存在时的墨迹读数 —— 用户报的那条（"先用了屏幕批注，又打开白板
+    /// 进行书写，墨迹体验非常糟糕"）。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 为什么要单独量而不是看 <c>--ink-perf</c>：那份只开一块画布，而症状是
+    /// <b>"有两块就卡"</b>。差别只可能在<b>另一块还活着这件事本身</b> ——
+    /// 隐藏的窗口理应停止渲染，如果它没有停，那么两块画布共用一条渲染线程时
+    /// 就要分摊，而分摊的代价落在**用户正在写的那一块**上。
+    /// </para>
+    /// <para>
+    /// 三个状态依次量，同一套笔数、同一个 pointer 序列，所以数字之间可直接比：
+    /// <b>A</b> 只有白板（基线）→ <b>B</b> 只有屏幕批注 → <b>C</b> 先用过屏幕批注再开白板
+    /// （用户那条）。<b>C 明显差于 A 就是复现。</b>
+    /// </para>
+    /// </remarks>
+    private static void RunInkPerfTwoCanvas()
+    {
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        var pen = ToolbarTools.Items.First(static tool => tool.Kind == ToolbarToolKind.Pen);
+        ToolbarTools.Select(pen.Id);
+
+        // ── A：只有白板（基线）──
+        ClickTool(toolbar, "whiteboard");
+        var board = toolbar.Whiteboard!;
+        MeasureOne(board, "A 只有白板");
+
+        // ── B：只有屏幕批注 ──
+        ClickTool(toolbar, "mouse");                     // 退出白板 → 屏幕批注回到眼前
+        toolbar.ForceRenderFrame();
+        var overlay = toolbar.Canvas!;
+        MeasureOne(overlay, "B 只有屏幕批注");
+
+        // ── C：先用过屏幕批注，再开白板（用户那条）──
+        ClickTool(toolbar, "mouse");
+        ClickTool(toolbar, "pen");                       // 真在屏幕批注上写两笔
+        CommitStroke(overlay.Surface, 200, 200);
+        CommitStroke(overlay.Surface, 260, 240);
+        overlay.ForceRenderFrame();
+        ClickTool(toolbar, "whiteboard");
+        MeasureOne(board, "C 先屏幕批注再白板");
+
+        Console.WriteLine($"[ink-perf2] overlay 此刻可见={toolbar.CanvasPresented} 白板可见={toolbar.WhiteboardPresented}");
+
+        // ── D：与 C 同一步，但**先把冻结底图清掉** ──
+        // 屏幕批注进书写时会把当前屏截一张铺在墨迹面底下（`ScreenCapture`），
+        // 而那是**一张全屏的 ImageBrush**，窗口隐藏了它也还在。
+        // 若 D 明显快于 C，代价就在"合成器每帧要叠一整块全屏不透明面"，
+        // 而不在引擎。D 与 C 只差这一句。
+        overlay.SetFrozenBackground(null);
+        toolbar.ForceRenderFrame();
+        MeasureOne(board, "D 同 C 但清了冻结底图");
+
+        // ── E：显示过屏幕批注但**没写过**，再开白板 ──
+        // E 与 C 的差别是"上面有没有笔迹"，于是"窗口活着"与"窗口有内容"被分开。
+        overlay.Surface.Document.Clear();
+        toolbar.ForceRenderFrame();
+        MeasureOne(board, "E 显示过但没写过");
+
+        // ── F：把屏批注窗口**真正关掉**（`Closed` → `_surface.Dispose()`）再开白板 ──
+        // 这是最硬的一刀。F 与 C 的差别只剩"那块引擎画布还活着没有"：
+        //   F ≈ A  → 代价在**隐藏但仍活着的引擎画布**（它在偷渲染线程 / 仍在被喂事件）
+        //   F ≈ C  → 代价在别处（工具栏留下的订阅、冻结底图、InkHistory 账……）
+        overlay.Close();
+        toolbar.ForceRenderFrame();
+        MeasureOne(board, "F 屏批注已关闭");
+
+        ClickTool(toolbar, "whiteboard");
+        CloseWindow(toolbar);
+    }
+
+    /// <summary>
+    /// **落笔位置 → 墨迹出现位置**的闭环 —— 用户报的那条原话：
+    /// "一旦缩放平移了之后，我再落笔，那么这个墨迹出现的位置和我落笔的位置不在同一位置"。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>为什么前面那些断言抓不到</b>：<c>CheckImageAgreesWithInk</c> 验的是
+    /// <b>两条"输出"路径</b>（图的那份 <c>RenderTransform</c> 与引擎的 <c>WorldToScreen</c>）
+    /// 一致。而"落笔位置对不上"是<b>输入</b>路径的事 ——
+    /// 指针进来的那一步把屏幕点换成世界点时出了错，两条输出路径照样一致。
+    /// <b>指针从外面进来，只有这一条断言覆盖得到。</b>
+    /// </para>
+    /// <para>
+    /// <b>怎么量</b>：在 InkHost 坐标里选一点 S 当落笔位置，发一串指针事件，
+    /// 读回引擎记下的<b>世界</b>首点 W，再用 <c>WorldToScreen</c> 把 W 映回屏幕得 S′。
+    /// <b>S′ 必须等于 S</b> —— 这一步把"指针换算"和"视口输出"接成了一圈，
+    /// 中间任何一处单位、锚点、时序错了都会在这圈上露出来。
+    /// </para>
+    /// <para>
+    /// <b>为什么缩放平移之后才犯</b>：单位错（DPI / 物理像素 vs DIP）会让误差
+    /// <b>正比于离原点的距离</b>，而平移与放大恰好就是把这个距离撑大的那两件事。
+    /// 所以量的时候要覆盖 100% / 放大 / 平移三个状态，只量 100% 会全绿。
+    /// </para>
+    /// </remarks>
+    /// <summary>把"窗口 → InkHostGrid → InkHost → 墨迹面"这条链逐级量出来。</summary>
+    private static void Chain(string label, Window window, CanvasSurface surface)
+    {
+        var inkHost = window.FindName("InkHost") as FrameworkElement;
+        var grid = window.FindName("InkHostGrid") as FrameworkElement;
+        var canvas = surface.Canvas;
+        var parentName = (canvas.Parent as FrameworkElement)?.GetType().Name ?? "(无父)";
+        var insideInkHost = inkHost is Panel panel && panel.Children.Contains(canvas);
+
+        // 墨迹面在**窗口里**的偏移 —— 这就是引擎输入通路减掉的那个数。
+        var canvasOnScreen = canvas.PointToScreen(new Point(0, 0));
+        var windowOnScreen = window.PointToScreen(new Point(0, 0));
+        Console.WriteLine($"[chain] {label,-8} InkHostGrid={grid?.ActualWidth:F1}x{grid?.ActualHeight:F1} "
+                        + $"InkHost={inkHost?.ActualWidth:F1}x{inkHost?.ActualHeight:F1} "
+                        + $"墨迹面父={parentName} 墨迹面={canvas.ActualWidth:F1}x{canvas.ActualHeight:F1} "
+                        + $"挂在InkHost下={insideInkHost} 引擎编辑模式={surface.Canvas.EditingMode}");
+        Console.WriteLine($"[chain] {label,-8} 窗口(0,0)在屏幕({windowOnScreen.X:F1},{windowOnScreen.Y:F1}) "
+                        + $"墨迹面(0,0)在屏幕({canvasOnScreen.X:F1},{canvasOnScreen.Y:F1}) "
+                        + $"→ 墨迹面在窗口里的偏移({canvasOnScreen.X - windowOnScreen.X:F1},{canvasOnScreen.Y - windowOnScreen.Y:F1})");
+    }
+
+
+    private static void RunImageInputProbe()
+    {
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+
+        (toolbar.FindToolControl("image") as Button)?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        toolbar.ForceRenderFrame();
+        var viewer = toolbar.ImageViewer;
+        if (viewer is null)
+        {
+            Console.WriteLine("[input] 图片窗口没开起来");
+            return;
+        }
+
+        // 必须选中一支笔：停在选择态时引擎是 EditingMode.None，本来就不收墨迹，
+        // 那时"收不下笔"是我探针的问题而不是产品的问题。
+        ToolbarTools.Select(ToolbarTools.Items.First(static t => t.Kind == ToolbarToolKind.Pen).Id);
+        toolbar.ForceRenderFrame();
+
+        viewer.OpenImage(MakeTestBitmap(400, 300), @"C:\fake\one.png");
+        toolbar.ForceRenderFrame();
+
+        var host = viewer.FindName("InkHost") as FrameworkElement;
+        if (host is null)
+        {
+            Console.WriteLine("[input] 找不到 InkHost");
+            return;
+        }
+
+        var surface = viewer.Surface;
+        var view = surface.View;
+        Console.WriteLine($"[input] 宿主尺寸 {host.ActualWidth:F1}x{host.ActualHeight:F1}  "
+                        + $"墨迹面 {surface.Canvas.ActualWidth:F1}x{surface.Canvas.ActualHeight:F1}  "
+                        + $"缩放 {view.Viewport.Scale:F3}");
+
+        // 整条链量一遍，并与白板对照：白板能收笔、图片窗口不能，差别一定在这条链上。
+        Chain("图片窗口", viewer, surface);
+        {
+            // 白板也要走一遍工具栏那条路，否则拿不到"能工作"的那一份数据。
+            (toolbar.FindToolControl("whiteboard") as Button)?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            toolbar.ForceRenderFrame();
+            var chainBoard = toolbar.Whiteboard;
+            if (chainBoard is not null) Chain("白板对照", chainBoard, chainBoard.Surface);
+            else Console.WriteLine("[chain] 白板没开起来");
+        }
+
+        // 三个状态：原样 / 放大之后 / 再平移之后。用户说的是"缩放平移了之后"。
+        RoundTrip("100% 原样", surface, viewer, view);
+        surface.ZoomAt(new Point(300, 200), 2.0, 0.2, 8);
+        toolbar.ForceRenderFrame();
+        RoundTrip("放大 2 倍", surface, viewer, view);
+        surface.PanByScreen(-140, -90);
+        toolbar.ForceRenderFrame();
+        RoundTrip("再平移 (-140,-90)", surface, viewer, view);
+        surface.PanByScreen(260, 310);
+        toolbar.ForceRenderFrame();
+        RoundTrip("再平移 (+260,+310)", surface, viewer, view);
+
+        // 阳性对照：**同一串事件、同一个投递方式**发给白板。
+        // 白板要是也不收笔，那"收不下"就是我探针的投递错了（事件挂在宿主上、
+        // 而引擎控件是宿主的子元素），不是产品的问题 —— 这一条不问清楚，
+        // 后面所有的结论都建在一个错的量法上。
+        var board = toolbar.Whiteboard;
+        if (board is not null)
+        {
+            RoundTrip("白板对照 100%", board.Surface, board, board.Surface.View);
+        }
+    }
+
+    /// <summary>落一笔，把"落笔处"与"墨迹出现处"对一遍。</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>投递的坐标必须是根空间。</b>Jalium 的 <c>PointerPoint.Position</c> 是窗口/根空间
+    /// 坐标，<c>GetIntermediatePoints(this)</c> 内部用 <c>this</c> 的逆渲染矩阵把它转到墨迹面本地
+    /// （<c>Jalium.UI/src/managed/Jalium.UI.Input/Pointer.cs</c>）。所以要落在墨迹面本地
+    /// <c>(300,200)</c>，投递时得给 <c>(300,200) + 墨迹面在窗口里的偏移</c>。
+    /// </para>
+    /// <para>
+    /// <b>我先前量到的"恒定偏 32 DIP"是这么来的</b>：把本地坐标当成根空间投进去，
+    /// 框架忠实地减掉墨迹面的窗口偏移，于是笔迹"偏了 32"。白板看起来是对的，
+    /// 只因为它窗口在 (0,0) 且墨迹面也在 (0,0)——根空间恰好等于本地空间。
+    /// <b>每一步都是对的，是造事件时用错了坐标系。</b>
+    /// </para>
+    /// </remarks>
+    private static void RoundTrip(string label, CanvasSurface surface, Window host, Dusk.Ink.Canvas.InkCanvasView view)
+    {
+        var aim = new Point(300, 200);
+        surface.Document.Clear();
+
+        var target = surface.Canvas;
+
+        // 墨迹面在窗口里的偏移（DIP）。框架按根空间收点，所以要加上它。
+        // TranslatePoint 的第二个参数要是 UIElement，宿主是 Grid，拿它当"根"正好。
+        var offset = (target as FrameworkElement)?.TranslatePoint(new Point(0, 0), host) ?? Point.Zero;
+        var rootSpace = new Point(aim.X + offset.X, aim.Y + offset.Y);
+
+        // 投递到**墨迹面**而不是宿主：冒泡事件挂在宿主上只会往上走，不会下发给子元素。
+        // 这一点是阳性对照量出来的 —— 同一串事件发到白板宿主时引擎一笔都不收，
+        // 发到墨迹面时闭环偏差 0.00 DIP。
+
+        // 引擎那一路走的是 `e.GetIntermediatePoints(this)` 然后直接取 `Position`。
+        // 三个事件都听，并带 handledEventsToo —— 引擎的 down 处理器会设 e.Handled = true，
+        // 不带这个标志我挂的处理器就被它挡掉，看到的是"引擎没收到"，而其实收到了。
+        var bag = new List<string>();
+        var onDown = new PointerDownEventHandler((_, e) => bag.Add($"down{e.GetIntermediatePoints(target).Count}点"));
+        var onMove = new PointerMoveEventHandler((_, e) =>
+        {
+            var ps = e.GetIntermediatePoints(target);
+            bag.Add(ps.Count == 0 ? "move0点" : $"move{ps.Count}点({ps[0].Position.X:F0},{ps[0].Position.Y:F0})");
+        });
+        var onUp = new PointerUpEventHandler((_, e) => bag.Add($"up{e.GetIntermediatePoints(target).Count}点"));
+        target.AddHandler(UIElement.PointerDownEvent, onDown, true);
+        target.AddHandler(UIElement.PointerMoveEvent, onMove, true);
+        target.AddHandler(UIElement.PointerUpEvent, onUp, true);
+
+        SendPointer(target, UIElement.PointerDownEvent, 610u, aim, PointerDeviceType.Pen);
+        for (var i = 1; i <= 6; i++)
+        {
+            SendPointer(target, UIElement.PointerMoveEvent, 610u,
+                new Point(aim.X + i * 5, aim.Y + i * 3), PointerDeviceType.Pen);
+        }
+        SendPointer(target, UIElement.PointerUpEvent, 610u, new Point(aim.X + 30, aim.Y + 18), PointerDeviceType.Pen);
+
+        target.RemoveHandler(UIElement.PointerDownEvent, onDown);
+        target.RemoveHandler(UIElement.PointerMoveEvent, onMove);
+        target.RemoveHandler(UIElement.PointerUpEvent, onUp);
+
+        Console.WriteLine($"[space] {label,-22} 墨迹面偏移({offset.X:F0},{offset.Y:F0}) 投递根空间({rootSpace.X:F0},{rootSpace.Y:F0}) 引擎收到: {string.Join(" ", bag)}");
+
+        for (var i = 1; i <= 6; i++)
+        {
+            SendPointer(target, UIElement.PointerMoveEvent, 610u,
+                new Point(aim.X + i * 5, aim.Y + i * 3), PointerDeviceType.Pen);
+        }
+        SendPointer(target, UIElement.PointerUpEvent, 610u, new Point(aim.X + 30, aim.Y + 18), PointerDeviceType.Pen);
+
+        if (surface.Document.Strokes.Count == 0)
+        {
+            Console.WriteLine($"[input] {label,-22} 引擎一笔都没收下");
+            return;
+        }
+
+        var world = FirstPointOf(surface, 0);
+        var back = view.WorldToScreen(world);
+        var dx = back.X - aim.X;
+        var dy = back.Y - aim.Y;
+        var off = Math.Sqrt(dx * dx + dy * dy);
+
+        // 视口到底动没动，要和"映回屏幕"分开看：
+        // 世界点随缩放平移变了而 back 不变，就说明**视口动了、而 WorldToScreen 没跟着动**，
+        // 那是两回事（映射陈旧），不是"偏移固定"（映射错了一个常数）。
+        var origin = view.WorldToScreen(new Point2D(0, 0));
+        var unit = view.WorldToScreen(new Point2D(100, 0));
+
+        // 引擎自己那两条换算，与它实际记下的点放在一起对。
+        // 三者不一致时，"是谁错了"就是确定的：记下的点是引擎处理输入的结果，
+        // 另两条是它对外声明的换算 —— 对不上就是引擎内部走了另一套原点。
+        var declared = view.ScreenToWorld(new Point2D(aim.X, aim.Y));
+        var canvasOriginOnScreen = target.PointToScreen(new Point(0, 0));
+        Console.WriteLine($"[input] {label,-22} 落笔({aim.X:F0},{aim.Y:F0}) "
+                        + $"引擎记下世界点({world.X:F2},{world.Y:F2}) "
+                        + $"墨迹出现在({back.X:F2},{back.Y:F2}) "
+                        + $"偏移 dx={dx,8:F2} dy={dy,8:F2} 距离={off,8:F2} DIP"
+                        + $" | 视口 缩放={view.Viewport.Scale:F3} 世界原点→屏幕({origin.X:F2},{origin.Y:F2})"
+                        + $" | ScreenToWorld({aim.X:F0},{aim.Y:F0})=({declared.X:F2},{declared.Y:F2})"
+                        + $" 墨迹面(0,0)在屏幕上({canvasOriginOnScreen.X:F2},{canvasOriginOnScreen.Y:F2})"
+                        + (off < 0.5 ? "" : "  ★ 对不上 ★"));
+    }
+
+    private static void RunLogProbe()
+    {
+        AppLog.Write("探针", "这一条是直接写的");
+        Console.WriteLine($"[log] 启用={AppLog.Enabled} 路径={AppLog.FilePath}");
+
+        var toolbar = new AnnotationToolbarWindow { Left = -16000, Top = 0, ShowActivated = false, ShowInTaskbar = false };
+        Windows.Add(toolbar);
+        toolbar.Show();
+        toolbar.ForceRenderFrame();
+        ToolbarTools.Select(ToolbarTools.Items.First(static t => t.Kind == ToolbarToolKind.Pen).Id);
+        ((Button)toolbar.FindToolControl("whiteboard")!).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var board = toolbar.Whiteboard!;
+        var canvas = board.Surface.Canvas;
+
+        SendPointer(canvas, UIElement.PointerDownEvent, 777u, new Point(100, 100), PointerDeviceType.Pen);
+        for (var i = 0; i < 12; i++)
+        {
+            SendPointer(canvas, UIElement.PointerMoveEvent, 777u, new Point(120 + i * 4, 110 + i * 2), PointerDeviceType.Pen);
+        }
+        SendPointer(canvas, UIElement.PointerUpEvent, 777u, new Point(170, 134), PointerDeviceType.Pen);
+        board.ForceRenderFrame();
+
+        Console.WriteLine($"[log] 落完一笔 → 启用={AppLog.Enabled} 路径={AppLog.FilePath} 存在={File.Exists(AppLog.FilePath)}");
+        if (File.Exists(AppLog.FilePath))
+        {
+            Console.WriteLine($"[log] 文件尾部：{File.ReadAllLines(AppLog.FilePath)[^1]}");
+        }
+        CloseWindow(toolbar);
+    }
+
+    private static void ClickTool(AnnotationToolbarWindow toolbar, string id)
+    {
+        if (toolbar.FindToolControl(id) is Button button)
+        {
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        }
+    }
+
+    /// <summary>
+    /// 量"二级窗口先出一个空边框、随后才有内容"这件事 —— 用户报的那条。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>判据是 <c>IsMeasureValid</c> / <c>IsArrangeValid</c>，不是肉眼看首帧。</b>
+    /// 肉眼看要真显示器、真 DWM 合成、真人手点，而这两条是框架自己给的只读事实：
+    /// <c>Show()</c> 返回那一刻若 <c>IsMeasureValid == false</c>，
+    /// 那么<b>第一帧呈现的内容就是没排过版的</b>——空边框不是错觉，是时序。
+    /// </para>
+    /// <para>
+    /// <b>为什么 UiSmoke 从来没抓到过</b>：验收代码到处调 <c>ForceRenderFrame()</c>，
+    /// 它把那一拍强行同步掉了。<b>测试里"从不空帧"是探针给的，不是产品给的</b> ——
+    /// 与"变换对象换了没有"那条断言同一个形状的错误。
+    /// </para>
+    /// </remarks>
+    private static void RunShowTimingProbe()
+    {
+        Probe("白板", static () => new WhiteboardWindow());
+        Probe("设置", static () => new SettingsWindow());
+
+        // 能不能**在 Show 之前**把排版跑掉？跑不掉的话这条修法就不成立，
+        // 而"先 Show 再 UpdateLayout"救不了已经呈现出去的那一帧。
+        Console.WriteLine("[show] ── 试 Show 之前先 UpdateLayout ──");
+        var early = new SettingsWindow();
+        Windows.Add(early);
+        early.UpdateLayout();
+        Console.WriteLine($"[show] 设置   Show 之前        measure有效={early.IsMeasureValid,-5} arrange有效={early.IsArrangeValid,-5}");
+        early.Show();
+        Console.WriteLine($"[show] 设置   之后 Show() 立刻  measure有效={early.IsMeasureValid,-5} arrange有效={early.IsArrangeValid,-5} 尺寸={early.ActualWidth:F0}x{early.ActualHeight:F0}");
+        early.Close();
+    }
+
+    private static void Probe(string label, Func<Window> create)
+    {
+        var window = create();
+        Windows.Add(window);
+        window.Show();
+
+        void Report(string stage)
+        {
+            Console.WriteLine($"[show] {label,-4} {stage,-14} measure有效={window.IsMeasureValid,-5} " +
+                              $"arrange有效={window.IsArrangeValid,-5} " +
+                              $"尺寸={window.ActualWidth:F0}x{window.ActualHeight:F0}");
+        }
+
+        Report("Show() 立刻");
+        window.UpdateLayout();
+        Report("UpdateLayout 后");
+        window.Close();
+    }
+
+    /// <summary>
+    /// 钉死"图与墨迹对得上"这条不变量 —— 用户报的那条
+    /// <b>"笔尖位置与墨迹出现位置不一致，缩放、漫游后尤为明显"</b>就是它不成立时的样子。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>为什么两条路径可以互相换算</b>：图像元素的本地坐标 (0,0)–(PageSize)
+    /// 就是这一页的世界坐标（<c>_image.Width/Height = PageSize</c>，而一页一世界、页的原点是 (0,0)），
+    /// 而它挂在 <c>InkHost</c> 的 (0,0) 上。于是
+    /// <b>同一个世界点 w，图落在屏幕哪儿 = <c>RenderTransform.Value.Transform(w)</c>，
+    /// 墨迹落在屏幕哪儿 = <c>View.WorldToScreen(w)</c></b>，两者必须相等。
+    /// </para>
+    /// <para>
+    /// <b>为什么原来看不见</b>：先前那条断言只问"变换对象换了没有"。
+    /// 而两条路径是<b>各自独立</b>算出来的（图走两个探针点重建矩阵，墨迹走引擎视口），
+    /// 一致纯属巧合没被破坏过 —— 一旦其中一边算错（比如漏了页原点、忘了 DPI、
+    /// 旋转后忘了换偏移），"图还在动"照样成立，症状就已经是用户看到的那一条了。
+    /// </para>
+    /// </remarks>
+    private static void CheckImageAgreesWithInk(ImageViewerWindow viewer, string when)
+    {
+        var transform = viewer.HostedImageTransform;
+        Check(transform is not null, $"{when}宿主那张图有一份变换可比");
+        if (transform is null) return;
+
+        var view = viewer.Surface.View;
+        var size = viewer.HostedImageSize;
+        var probes = new[]
+        {
+            new Point2D(0, 0),
+            new Point2D(size.Width / 2, size.Height / 2),
+            new Point2D(size.Width, size.Height),
+            new Point2D(size.Width * 0.0925, size.Height * 0.7033),
+        };
+
+        foreach (var world in probes)
+        {
+            var byImage = transform.Value.Transform(new Point(world.X, world.Y));
+            var byInk = view.WorldToScreen(world);
+            var dx = byImage.X - byInk.X;
+            var dy = byImage.Y - byInk.Y;
+            var off = Math.Sqrt(dx * dx + dy * dy);
+            Check(off < 0.5,
+                $"{when}世界点({world.X:F1},{world.Y:F1}) 图落在({byImage.X:F2},{byImage.Y:F2}) "
+                + $"墨迹落在({byInk.X:F2},{byInk.Y:F2}) 偏差{off:F2} DIP"
+                + (off < 0.5 ? "" : "  ★ 图与墨迹对不上 ★"));
+        }
+    }
+
+    /// <summary>
+    /// 钉死 <c>TransformGroup</c> 里的求值顺序 —— 图片那张 <c>RenderTransform</c> 就是这么拼的，
+    /// 而**顺序错了只有转过 90°/180°/270° 或缩放漫游之后才看得见**。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 意图是 <c>屏幕 = 原点 + 缩放 × (旋转(p) + 平移t1)</c>，即
+    /// <c>T(origin) · S(s) · T(t1) · R</c>：<b>原点在最后加，不参与缩放与旋转</b>。
+    /// 生产代码把子变换按 <c>[R, T(t1), S, T(origin)]</c> 加进去。
+    /// </para>
+    /// <para>
+    /// <b>这个探针问的是"这个运行时按哪种顺序求值"</b>，而不是"WPF 是哪一种"——
+    /// 文档里的顺序约定正是这类 bug 的来源（<c>Children</c> 的读法与矩阵乘法的读法相反），
+    /// 而 Jalium 是 GPU 渲染器，它完全可以按另一套来。以实测为准。
+    /// </para>
+    /// <para>
+    /// <b>为什么单独隔离出来验</b>：把引擎的 <c>View.WorldToScreen</c> 掺进来，
+    /// 顺序错与引擎视口错会互相抵消，量出来"差不多"，而真实症状仍然存在。
+    /// </para>
+    /// </remarks>
+    private static void RunTransformOrderCheck()
+    {
+        const double scale = 2.0;
+        var origin = new Point(100, 50);
+        var quarterShift = new Point(30, 70);
+        var probe = new Point(10, 20);
+
+        for (var turns = 0; turns < 4; turns++)
+        {
+            var rotate = new RotateTransform { Angle = turns * 90 };
+            var group = new TransformGroup();
+            group.Children.Add(rotate);
+            group.Children.Add(new TranslateTransform(quarterShift.X, quarterShift.Y));
+            group.Children.Add(new ScaleTransform(scale, scale));
+            group.Children.Add(new TranslateTransform(origin.X, origin.Y));
+
+            // 意图：先绕原点转到朝向来，再平到当前页尺寸，最后按视口缩放并落到屏幕原点上。
+            var rotated = turns switch
+            {
+                1 => new Point(-probe.Y, probe.X),
+                2 => new Point(-probe.X, -probe.Y),
+                3 => new Point(probe.Y, -probe.X),
+                _ => probe,
+            };
+            var expected = new Point(
+                origin.X + scale * (rotated.X + quarterShift.X),
+                origin.Y + scale * (rotated.Y + quarterShift.Y));
+
+            var actual = group.Value;
+            var point = actual.Transform(new Point(probe.X, probe.Y));
+            var ok = Math.Abs(point.X - expected.X) < 0.01 && Math.Abs(point.Y - expected.Y) < 0.01;
+
+            Console.WriteLine($"[tfm] 转{turns * 90,3}° 期望({expected.X,7:F2},{expected.Y,7:F2}) " +
+                              $"实际({point.X,7:F2},{point.Y,7:F2}) {(ok ? "一致" : "★ 不一致 ★")}");
+        }
+    }
+
+    /// <summary>
+    /// 在给定画布上量一次「120 次移动 + 一帧」。
+    /// </summary>
+    /// <remarks>
+    /// <b>重复若干次报中位数，不是单次读数。</b>同一台机同一份构建，input120 在
+    /// 49–75 ms 之间摆动（±40%），而我们要分辨的差异只有 2 倍量级 ——
+    /// 单次读数会把噪声读成结论。中位数之后 A/C 之间的差距才站得住。
+    /// </remarks>
+    private static void MeasureOne(Window window, string label, int reps = 5)
+    {
+        var surface = window is WhiteboardWindow wb
+            ? wb.Surface
+            : ((AnnotationOverlayWindow)window).Surface;
+        var canvas = surface.Canvas;
+        var inputSamples = new List<double>(reps);
+        var frameSamples = new List<double>(reps);
+        var latencySamples = new List<double>(reps);
+
+        for (var rep = 0; rep < reps; rep++)
+        {
+            surface.Document.Clear();
+            for (var i = 0; i < 500; i++)
+            {
+                CommitStroke(surface, 40 + (i % 50) * 18, 40 + (i / 50) * 18);
+            }
+
+            window.ForceRenderFrame();
+            canvas.Metrics.Reset();
+
+            var pointerId = (uint)(901 + rep);
+            SendPointer(canvas, UIElement.PointerDownEvent, pointerId, new Point(100, 100), PointerDeviceType.Pen);
+            var input = Stopwatch.StartNew();
+            for (var i = 0; i < 120; i++)
+            {
+                SendPointer(canvas, UIElement.PointerMoveEvent, pointerId,
+                    new Point(700 + i % 30, 500 + i * 0.25), PointerDeviceType.Pen);
+            }
+            input.Stop();
+            var frame = Stopwatch.StartNew();
+            window.ForceRenderFrame();
+            frame.Stop();
+            var metrics = canvas.Metrics;
+            SendPointer(canvas, UIElement.PointerUpEvent, pointerId, new Point(730, 530), PointerDeviceType.Pen);
+
+            inputSamples.Add(input.Elapsed.TotalMilliseconds);
+            frameSamples.Add(frame.Elapsed.TotalMilliseconds);
+            latencySamples.Add(metrics.LastInputToRenderMs);
+        }
+
+        static double Median(List<double> values)
+        {
+            var sorted = values.OrderBy(static v => v).ToList();
+            return sorted.Count % 2 == 1
+                ? sorted[sorted.Count / 2]
+                : (sorted[sorted.Count / 2 - 1] + sorted[sorted.Count / 2]) / 2;
+        }
+
+        Console.WriteLine($"[ink-perf2] {label,-20} input120中位={Median(inputSamples),7:F2}ms " +
+                          $"(min {inputSamples.Min():F1} max {inputSamples.Max():F1}) " +
+                          $"frame中位={Median(frameSamples),6:F2}ms " +
+                          $"input→render中位={Median(latencySamples),6:F2}ms");
     }
 
     /// <summary>
@@ -2321,6 +3309,24 @@ internal static class Program
 
             // ── 降级三态：每一句都得是"用户看得懂的话" ──
             Check(frames.SyntheticStatus.Length > 0, "视频展台 · 状态栏有话说（而不是空白）");
+
+            // ── 中途掉线 ──
+            // 这是**唯一会自己发生**的一种坏：设备开着的时候被拔掉 / 被别的程序抢走。
+            // 修之前的症状是"画面冻在最后一帧、状态栏还在念「合成摄像头 · 320×240」" ——
+            // 一句与事实相反的话，而用户没有任何办法从它判断出出了事。
+            // 所以这里钉的是**那句话必须变**，不是"画面有没有变"。
+            var statusBefore = window.BannerText;
+            frames.Push(width: 320, height: 240, tint: 0x50);
+            window.ForceRenderFrame();
+            var statusWhileLive = window.BannerText;
+            frames.Fail("设备已被拔出");
+            window.ForceRenderFrame();
+            Check(window.BannerText.Contains("中途断了") && window.BannerText != statusWhileLive,
+                $"视频展台 · 设备中途掉了，状态栏改口（{statusWhileLive} → {window.BannerText}）");
+            Check(window.BannerText.Contains("设备已被拔出"),
+                $"视频展台 · 那句话带着原因，用户能判断是自己拔的还是设备自己掉的（{window.BannerText}）");
+            Check(statusBefore.Length > 0 && statusBefore != window.BannerText,
+                "视频展台 · 掉线前后的状态不是同一句（否则等于什么都没报）");
         }
         finally
         {
@@ -2378,13 +3384,31 @@ internal static class Program
 
         public IReadOnlyList<DocumentCameraDevice> Devices { get; }
 
-        public CameraAvailability Availability => Devices.Count == 0
-            ? CameraAvailability.NoDevice
-            : CameraAvailability.Ready;
+        /// <summary>可写：<see cref="Fail"/> 要把它从 Ready 推到 OpenFailed。</summary>
+        public CameraAvailability Availability { get; private set; } = CameraAvailability.Unknown;
 
         public string StatusText => SyntheticStatus;
 
+
         public event Action<BitmapImage>? FrameArrived;
+
+        /// <summary>
+        /// 模拟"开得好好的，中途断了"（拔线 / 被抢占）。
+        /// <para>
+        /// <b>这条路径此前完全没有被验过</b>，而它恰好是唯一会自己发生的：
+        /// 设备开着的时候被拔掉，症状是画面冻在最后一帧、状态栏还在念"设备名 · 尺寸" ——
+        /// 一句与事实相反的话，而用户没有任何办法从它判断出出了事。
+        /// </para>
+        /// </summary>
+        public event Action<string>? Failed;
+
+        /// <summary>驱动"中途断了"。</summary>
+        internal void Fail(string reason)
+        {
+            Availability = CameraAvailability.OpenFailed;
+            SyntheticStatus = $"摄像头中途断了：{reason}";
+            Failed?.Invoke(SyntheticStatus);
+        }
 
         public void Start(string deviceId, int width, int height, double fps)
         {

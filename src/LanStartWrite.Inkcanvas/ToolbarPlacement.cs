@@ -41,13 +41,50 @@ internal static class ToolbarPlacement
     }
 
     /// <summary>
+    /// 放映模式那种<b>沉浸式</b>摆位：贴<b>整块屏幕</b>的下缘，而不是工作区。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 与 <see cref="Compute"/> 的区别只有一处，但那一处就是这个模式的意义：
+    /// 基准从<b>工作区</b>（扣掉任务栏）换成<b>整块屏幕</b>。放映时投影幕布铺满整块屏，
+    /// 批注栏要跟着一起铺到最底边去，而不是在任务栏上方留出一道缝 ——
+    /// 那一道缝在演示时非常显眼，而它对用户没有任何用处。
+    /// </para>
+    /// <para>
+    /// <b>只换基准，不改居中</b>：栏还是水平居中。理由与"工作区居中"那条一样 ——
+    /// 位置是"屏有多宽、栏有多宽"两个运行时的量，标记里的魔数只能猜。
+    /// </para>
+    /// <para>
+    /// <b>为什么不用 <c>VirtualScreen*</c></b>：那套是<b>所有显示器</b>拼起来的桌面，
+    /// 副屏在左边时它比主屏大得多，于是"居中"会居到两块屏中间那道缝上。
+    /// 这里要的是"本块屏"，所以用 <c>PrimaryScreenWidth/Height</c>，与
+    /// <c>WorkArea</c> 同一条已知边界（都只说主屏）。
+    /// </para>
+    /// </remarks>
+    internal static Point ComputeImmersiveBottom(Size size)
+    {
+        var width = Jalium.UI.SystemParameters.PrimaryScreenWidth;
+        var height = Jalium.UI.SystemParameters.PrimaryScreenHeight;
+        return Compute(new Rect(0, 0, width, height), size, bottomGap: 0);
+    }
+
+    /// <summary>把批注栏按沉浸式贴到屏底。<paramref name="bar"/> 的尺寸必须已经量好。</summary>
+    internal static void ApplyImmersiveBottom(Window bar)
+    {
+        var spot = ComputeImmersiveBottom(new Size(bar.Width, bar.Height));
+        bar.Left = spot.X;
+        bar.Top = spot.Y;
+    }
+
+    /// <summary>
     /// 同一个 <paramref name="work"/> 里，一块 <paramref name="size"/> 大的栏该摆的左上角。
     /// <para>纯函数：验收拿一张合成工作区就能算，不必真的把窗口搬到屏幕上。</para>
     /// </summary>
-    internal static Point Compute(Rect work, Size size)
+    /// <param name="bottomGap">底边到 <paramref name="work"/> 下缘的距离。沉浸式传 0（贴边）。</param>
+    internal static Point Compute(Rect work, Size size, double bottomGap = BottomGap)
     {
         var x = work.X + Math.Max(0, (work.Width - size.Width) / 2);
-        var y = work.Bottom - size.Height + TransparentInset - BottomGap;
+        var y = work.Bottom - size.Height + TransparentInset - bottomGap;
 
         // 栏比工作区还宽还高时（超小屏、负 DPI 读数）宁可贴着上缘，也不要跑到工作区外面去。
         x = Math.Clamp(x, work.X, Math.Max(work.X, work.Right - size.Width));

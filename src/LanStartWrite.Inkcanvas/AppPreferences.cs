@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Dusk.Ink.Input;
+using Jalium.UI.Interop;
 using Jalium.UI.Threading;
+using LanStartWrite.Inkcanvas.Slideshow;
 
 namespace LanStartWrite.Inkcanvas;
 
@@ -168,6 +170,50 @@ internal sealed record PreferenceSnapshot
     public bool Pressure { get; init; }
 
     /// <summary>
+    /// 要用的**渲染后端**。默认 <see cref="RenderBackend.Auto"/> = 让框架挑。
+    /// <para>
+    /// <b>直接用框架的枚举，不另立一张映射表</b>：那份枚举就是唯一真相，
+    /// 抄一份到自己命名空间下就多出一个会漂移的第二真相（而"设置里选的那个"与
+    /// "实际跑的那个"对不上，正是这类重复定义的典型症状）。
+    /// </para>
+    /// <para>
+    /// <b>改它必须重启</b>，而这不是保守取舍：<c>RenderContext.Backend</c> 是<b>只读</b>的，
+    /// 换后端只能 <c>GetOrCreateCurrent(..., forceReplace: true)</c> 重建整个渲染上下文，
+    /// 而那个上下文造出来的每一个 <c>RenderTarget</c> / 画刷 / 位图 / 文字格式都会失效。
+    /// </para>
+    /// </summary>
+    public RenderBackend RenderBackend { get; init; } = RenderBackend.Auto;
+
+    /// <summary>
+    /// 要用的**渲染引擎**。默认 <see cref="RenderingEngine.Auto"/>。
+    /// <para>
+    /// 「自动」在 <c>Program.Main</c> 里落成 <see cref="RenderingEngine.Impeller"/> ——
+    /// 那是一直以来的硬编码值，所以「自动」= **保持现状**，而不是"交给框架挑"。
+    /// 这两者不一样，而把它俩混为一谈就会让"我没动过设置"的用户在一次升级后换了引擎。
+    /// </para>
+    /// <para>
+    /// 引擎在运行期<b>可写</b>，但同样要重启才生效：它决定的是每一个渲染目标建起来时的管线，
+    /// 已经建好的那些不会因为改了这个属性而重来一遍。
+    /// </para>
+    /// </summary>
+    public RenderingEngine RenderingEngine { get; init; } = RenderingEngine.Auto;
+
+    /// <summary>
+    /// 放映批注<b>用哪一套方式</b>跟正在放映的幻灯片联动。默认 <see cref="SlideShowLinkMode.BuiltIn"/>。
+    /// </summary>
+    /// <remarks>
+    /// <b>它是"在哪一侧说话"而不是"用哪个库"</b>：内置那档是本进程自己用 COM 连宿主，
+    /// 另两档是外置插件先把消息收好、本应用只取结果。
+    /// 所以换这一项可能意味着**要装别的东西**，而不是换个设置就完事 ——
+    /// 这一点由设置页各自给那一档配自己的设置项来说明。
+    /// <para>
+    /// 默认<b>内置</b>：那一档什么都不用装，所以首启就能用；
+    /// 而默认去选一个需要额外安装的插件，症状是"装完第一次用就什么都不发生"。
+    /// </para>
+    /// </remarks>
+    public SlideShowLinkMode SlideShowLinkMode { get; init; } = SlideShowLinkMode.BuiltIn;
+
+    /// <summary>
     /// 工具栏上有哪些按钮、按什么顺序、各自带什么数据。
     /// <para>
     /// <b>画笔粗细 / 橡皮擦法 / 橡皮半径 / 笔锋取值都在这里面</b> —— 它们曾经是这份快照上的全局字段，
@@ -237,6 +283,20 @@ internal sealed record PreferenceSnapshot
     /// </para>
     /// </summary>
     public string LastPdfDirectory { get; init; } = "";
+
+    /// <summary>
+    /// 启动时打开上次那份 PDF 的完整路径，<b>空</b> = 没打开过。
+    /// <para>
+    /// 与图片那侧不同：图片记的是一份<b>最近列表</b>（<see cref="RecentImages"/>，可以一次复原好几张），
+    /// 而 PDF 这里只记<b>一份</b>。理由是 PDF 天然是"一份一份看"的 ——
+    /// 同时摊开五份 PDF 没有意义，而把它们同时铺进一份世界会让"当前第几页"立刻失去意义。
+    /// </para>
+    /// <para>
+    /// 目录归 <see cref="LastPdfDirectory"/> 管、文件路径归这里管：两者回答的是不同的问题
+    /// （"文件框从哪儿开始"与"上次看的是哪一份"），合成一个字段会让其中一个答不出来。
+    /// </para>
+    /// </summary>
+    public string LastPdfPath { get; init; } = "";
 
     /// <summary>
     /// 最近打开过的图片文件（新的在前，最多 <see cref="MaxRecentImages"/> 个）。
@@ -349,7 +409,16 @@ internal static class AppPreferences
     {
         Theme = Enum.IsDefined(value.Theme) ? value.Theme : AppTheme.Light,
         ImageOpenMode = Enum.IsDefined(value.ImageOpenMode) ? value.ImageOpenMode : ImageOpenMode.Window,
+        // 存档可能被手改、也可能来自更老的版本（那时这两个属性根本不存在），
+        // 所以落盘的值一律先夹回合法范围再往下用 —— 下面 ValidateRecentImages 那几行同理。
+        RenderBackend = Enum.IsDefined(value.RenderBackend) ? value.RenderBackend : RenderBackend.Auto,
+        RenderingEngine = Enum.IsDefined(value.RenderingEngine) ? value.RenderingEngine : RenderingEngine.Auto,
+        // 联动方式同理：存档里多出一个新种类（用户从别的版本拷来的、或手改的）
+        // 时要能洗回默认，而不是让设置页整页打不开。
+        SlideShowLinkMode = Enum.IsDefined(value.SlideShowLinkMode) ? value.SlideShowLinkMode : SlideShowLinkMode.BuiltIn,
         LastImageDirectory = value.LastImageDirectory ?? string.Empty,
+        LastPdfDirectory = value.LastPdfDirectory ?? string.Empty,
+        LastPdfPath = value.LastPdfPath ?? string.Empty,
         RecentImages = new RecentImageCollection { Items = ValidateRecentImages(value.RecentImages.Items) },
         ToolbarItems = ValidateTools(value.ToolbarItems),
         ToolbarSelectedId = ValidateSelectedTool(value.ToolbarItems, value.ToolbarSelectedId),

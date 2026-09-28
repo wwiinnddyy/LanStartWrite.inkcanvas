@@ -54,14 +54,32 @@ internal static class ToolbarToolVisuals
             : (ushort)0xE7C9,       // TouchPointer，ink=338
         ToolbarToolKind.Pen => 0xE76D,         // InkingTool
         ToolbarToolKind.Eraser => 0xE75C,      // EraseTool
+        // 分隔线用 **E784**（GripperBarVertical，实测 ink=192）。
+        // 它的 `sig` 位图解出来是 2×8 的一根**竖**条 —— 名字里的 "Vertical" 说的就是它自己竖着，
+        // 而 E76F（GripperBarHorizontal）解出来是 8×4 的横条，那个才是"横着的"。
+        // 这一条原先写的是 0xE76D，而那是**笔**（InkingTool）的码点 ——
+        // 也就是说分隔线画出来是一支笔，而"两处来源不一致"是另一半症状
+        // （catalog 写 E76E = Emoji2，第二张笑脸）。两个码点都是凭记忆写的，
+        // 而实测表里它们各有所属：E76E = Emoji2。
+        ToolbarToolKind.Separator => 0xE784,
         ToolbarToolKind.Undo => 0xE7A7,        // Undo
         ToolbarToolKind.Redo => 0xE7A6,        // Redo
         ToolbarToolKind.Settings => 0xE713,    // Setting
         ToolbarToolKind.Whiteboard => 0xE786,  // Slideshow，ink=389
         ToolbarToolKind.Image => 0xE8B9,       // Picture，ink=433
-        // PDF 用 E8C5：它与 Picture 同一族（一张"纸"），而 E8B9 在 40×40 的小格里
-        // 与白板那颗 Slideshow 靠得太近，两个"打开文件"入口分不开。
-        ToolbarToolKind.Pdf => 0xE8C5,
+        // PDF 用 **EA90** —— 实测表里它的名字就叫 `PDF`，ink=487。
+        //
+        // **原先这里写的是 E8C5，理由是"它与 Picture 同一族（一张纸）"，而那个理由是假的。**
+        // 实测表里 U+E8C5 = `HideBcc`（隐藏密送），ink=90：E8BB–E8C7 整段是
+        // ChromeClose / ShowResults / Message / CalendarDay / MailReplyAll / Read /
+        // ShowBcc / **HideBcc** / Cut / PaymentCard —— **整段是邮件簇，没有一个是文档**。
+        // 所以界面上那颗钮画出来是一枚"隐藏密送"，与"打开 PDF"毫无关系，
+        // 而且 ink=90 在 40×40 那格里淡得几乎看不见。
+        //
+        // 而 E8B9(Picture) 那个"和 PDF 分不开"的顾虑也不成立：EA90 是 PDF 字面，
+        // 形状与墨量都与 Picture 明显不同（487 vs 433，但一个是"文件"一个是"照片"），
+        // 而真正分不开的是**两个都没用对码点**的时候。
+        ToolbarToolKind.Pdf => 0xEA90,
         // 视频展台用 E8A2（AttachCamera，实测 ink=439）。
         // 选它而不选 E95D（Projector，ink=318）或 E8B8（Webcam，ink=202）的理由有两条：
         //  (1) **ink 落在已有那七颗的带里**（389~433）。这一族里越浓的越容易在 40×40

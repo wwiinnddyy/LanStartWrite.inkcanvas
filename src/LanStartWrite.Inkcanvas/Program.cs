@@ -1,4 +1,5 @@
 using Jalium.UI;
+using LanStartWrite.Inkcanvas.Diagnostics;
 using Jalium.UI.Controls;
 using Jalium.UI.Interop;
 using Jalium.UI.Markup;
@@ -22,9 +23,34 @@ internal static class Program
     private static void Main(string[] args)
     {
         _pendingPdfPath = FirstPdfArgument(args);
+
+        // ★ 偏好必须**先于**渲染上下文加载。
+        // 渲染后端与引擎是存在偏好里的两个字段，而 RenderContext 的后端是**只读**的 ——
+        // 它在建出来的那一刻就定死了，之后只能 forceReplace 整个重建。
+        // 所以先加载偏好，后端选择才可能真的生效；反过来写，这一整节设置就是摆设。
+        // 提前它是安全的：AppPreferences.Initialize 只碰模型层与静态对象（读档、校验、
+        // 下发墨迹/笔锋/工具栏的静态状态、订阅那几处静态事件），不构造任何控件。
+        AppPreferences.Initialize();
+
         // 与 Jalium.UI.Gallery.Desktop 一致：先初始化 GPU 上下文，避免部分显卡/驱动组合下窗口已创建但不呈现。
-        var renderContext = RenderContext.GetOrCreateCurrent(RenderBackend.Auto);
-        renderContext.DefaultRenderingEngine = RenderingEngine.Impeller;
+        var preferences = AppPreferences.Current;
+        var renderContext = RenderContext.GetOrCreateCurrent(preferences.RenderBackend);
+        // 「自动」落成 Impeller —— 那是这一行一直以来的硬编码值。
+        // 别把它改成"交给框架挑"：那会让从没动过设置的用户在某次升级后换掉引擎。
+        // 解析规则交给 RenderInfo 一处：设置页判断"要不要提示重启"用的是同一个函数，
+        // 各写一份的话两份会漂，而漂了的后果是重启提示一直亮着却没有一次是真的。
+        renderContext.DefaultRenderingEngine = RenderInfo.ResolveEngine(preferences.RenderingEngine);
+        // 记下"这次要的是哪一档、真的落到哪一档、引擎是哪个"：
+        // 设置页判断"要不要提示重启"拿落点当基准（不用上下文自报的值 —— 那个读数在帧与帧之间会变），
+        // 而"要的"与"落的"不一致时只有这里能说出来，因为框架换失败是不抛异常的。
+        RenderInfo.RecordApplied(
+            preferences.RenderBackend,
+            renderContext.Backend,
+            renderContext.DefaultRenderingEngine);
+
+        // 渲染环境写进日志开头。用户报问题时把日志发来，第一行就是环境，
+        // 不用先去设置页截图——而"截图"这一步经常就断了。
+        RenderInfo.LogOnce();
 
         // FluentJalium 装的 dictionaries 是运行时用 XamlReader 解析的，
         // 所以这一步必须排在任何 JALXAML 解析之前 —— 应用自己的页面也是。
@@ -36,7 +62,6 @@ internal static class Program
         var app = new Application();
 
         // FluentJalium（Astra）主题字典 + 应用自有 token。必须在任何控件构造之前。
-        AppPreferences.Initialize();
         FluentTheme.Initialize(app);
 
         var window = new AnnotationToolbarWindow();
@@ -50,6 +75,13 @@ internal static class Program
 
         window.Show();
         window.Activate();
+
+        // 放映联动：**盯着宿主那边有没有在放映**。不接这一句的话，
+        // 用户在 PowerPoint 里按 F5 之后本应用什么也不做 ——
+        // 不切场景、墨迹不跟、左下角那个页面控件也不出现（三样是同一个原因）。
+        // 它必须在批注栏 Show 之后起来：那一刻才有窗口可切。
+        using var slideShowWatcher = new SlideShowWatcher(window);
+        slideShowWatcher.Start();
 
         // 排到队列尾：上面那三步（Show / Activate / Apply）都做完之后才开 PDF 窗口，
         // 而它一开就要把批注栏搬进自己身上。

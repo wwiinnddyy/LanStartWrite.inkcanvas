@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    探针：**内置联动那一整段，用真 PowerPoint、真放映、真翻页跑一遍。**
+
+    为什么不用别的办法验：这一段是本仓库里唯一"只有真宿主在场才走得通"的代码。
+    挂在 UI 底下时，连不上与写错了在界面上**完全同形**（都是左下角一句人话），
+    而真正要验的四件事没有一件能从界面上看出来：
+
+      1) 真的连上了跑着的 PowerPoint（不是连上了自己那个空壳）；
+      2) 读到的**页数**对；
+      3) **翻页之后读数跟着变** —— 而这条是"联动"的意义所在；
+      4) 放映结束之后**读数收干净**、以及**反复探测不漏 COM**。
+
+    它链进主工程的**那一份源文件**（`ComSlideShowLink.cs` 等，与 PdfProbe 链
+    `Pdf/PdfiumNative.cs` 同一个做法），不是抄一份 —— 抄一份的话验的就不是
+    明天发布的那份代码了。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LanStartWrite.Inkcanvas.Tools</RootNamespace>
+    <AssemblyName>LanStartWrite.Inkcanvas.SlideShowLinkProbe</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <!-- 链进来的是本程序集的源；它们内部的可见性照 internal 算，所以要放进同一个程序集。 -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\src\LanStartWrite.Inkcanvas\Slideshow\ComSlideShowLink.cs" Link="ComSlideShowLink.cs" />
+    <Compile Include="..\..\src\LanStartWrite.Inkcanvas\Slideshow\ComSlideShowLink.Other.cs" Link="ComSlideShowLink.Other.cs" />
+    <Compile Include="..\..\src\LanStartWrite.Inkcanvas\Slideshow\SlideShowLinkMode.cs" Link="SlideShowLinkMode.cs" />
+    <Compile Include="..\..\src\LanStartWrite.Inkcanvas\Slideshow\ISlideShowLink.cs" Link="ISlideShowLink.cs" />
+    <!-- AppLog：ComSlideShowLink 每次读到放映状态都会往那儿写一行，
+         而那份日志正是"生产行为"的一部分（出错时能看它写到哪一步）。 -->
+    <Compile Include="..\..\src\LanStartWrite.Inkcanvas\Diagnostics\AppLog.cs" Link="AppLog.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jalium.UI" Version="26.10.9" />
+    <PackageReference Include="FluentJalium" Version="0.2.0-astra.1" />
+    <PackageReference Include="MudTools.OfficeInterop.PowerPoint" Version="2.0.9" />
+    <!-- 只为了那个截屏参数：截屏。放在 .NET 工程里而不是 PowerShell 的 Add-Type，
+         因为 pwsh 7 上那份 Add-Type 传 System.Drawing 的程序集引用过不去
+         （CS0012 一串，而错误信息与真正原因毫无关系）。 -->
+    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\Jalium\FluentJalium\src\FluentJalium\FluentJalium.csproj" />
+  </ItemGroup>
+
+</Project>

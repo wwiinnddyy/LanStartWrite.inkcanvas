@@ -55,5 +55,6 @@ internal static class CanvasSceneState
     /// </summary>
     internal static bool IsPageScene(CanvasScene scene) =>
         scene is CanvasScene.Whiteboard or CanvasScene.ImageCanvas
-            or CanvasScene.PdfCanvas or CanvasScene.DocumentCamera;
+            or CanvasScene.PdfCanvas or CanvasScene.DocumentCamera
+            or CanvasScene.Slideshow;
 }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Dusk.Adapter.Jalium;
 using Dusk.Ink.Canvas;
 using Dusk.Ink.Controls;
@@ -10,6 +11,7 @@ using Jalium.UI.Controls;
 using Jalium.UI.Input;
 using Jalium.UI.Media;
 using Jalium.UI.Threading;
+using LanStartWrite.Inkcanvas.Diagnostics;
 
 namespace LanStartWrite.Inkcanvas;
 
@@ -112,6 +114,24 @@ internal sealed class CanvasSurface
         host.Children.Insert(insertIndex + 1, _eraserPreview);
         _attachedHost = host;
 
+        // 挂上去之后**必须让它被量一遍**。
+        //
+        // 宿主可能早就排好版了（图片窗口是"先显示窗口、后打开第一张图"），
+        // 而新插进去的子元素没人 Measure 过，它的 DesiredSize 就一直是 0×0、
+        // ActualSize 也就跟着是 0×0。症状是"引擎收不下笔"，或者更隐蔽的
+        // "落笔位置与墨迹出现位置对不上"——屏幕→世界的换算需要一个真实尺寸，
+        // 没有尺寸时它拿到的就是一个不与屏幕对应的值。
+        //
+        // 触发的是宿主而不是子元素：宿主那一趟量会把两个新子元素都量到。
+        // 不做事后兜底（"发现是 0 就手动补一次 Measure"）——那要读 ActualSize，
+        // 而"还没量"与"量出来是 0"在那一刻读起来一模一样。
+        _canvas.InvalidateMeasure();
+        _eraserPreview.InvalidateMeasure();
+        host.InvalidateMeasure();
+        // 上面三句是"排下去第一帧补上"；而用户是在图片**刚出现**的那一瞬落笔的，
+        // 那一帧不能等。所以这里同步补一趟。
+        host.UpdateLayout();
+
         host.AddHandler(UIElement.PointerDownEvent, new PointerDownEventHandler(OnPointerDown), true);
         host.AddHandler(UIElement.PointerMoveEvent, new PointerMoveEventHandler(OnPointerMove), true);
         host.AddHandler(UIElement.PointerUpEvent, new PointerUpEventHandler(OnPointerUp), true);
@@ -137,8 +157,17 @@ internal sealed class CanvasSurface
 
     private bool CanShowEraserPreview => !IsSelectMode && _wasErasing;
 
+    // ---- 诊断：每一笔落一条，不是每个事件一条 ----
+
+    private long _gestureStartTicks;
+    private int _gestureMoves;
+    private uint? _gesturePointerId;
+    private double _gesturePeak;
+    private double _gestureLast;
+
     private void OnPointerDown(object sender, PointerDownEventArgs e)
     {
+        BeginGestureLog(e.Pointer.PointerId);
         if (!CanShowEraserPreview) return;
         _previewPointerId = e.Pointer.PointerId;
         ShowEraserPreview(e.Pointer);
@@ -146,6 +175,7 @@ internal sealed class CanvasSurface
 
     private void OnPointerMove(object sender, PointerMoveEventArgs e)
     {
+        if (_gesturePointerId == e.Pointer.PointerId) AccumulateGestureLog();
         if (!CanShowEraserPreview) return;
         if (_previewPointerId is { } pointerId && e.Pointer.PointerId != pointerId) return;
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Mouse || e.Pointer.IsInContact)
@@ -154,6 +184,7 @@ internal sealed class CanvasSurface
 
     private void OnPointerUp(object sender, PointerUpEventArgs e)
     {
+        EndGestureLog();
         if (_previewPointerId != e.Pointer.PointerId) return;
         _previewPointerId = null;
         if (e.Pointer.PointerDeviceType != PointerDeviceType.Mouse) _eraserPreview.Hide();
@@ -162,9 +193,76 @@ internal sealed class CanvasSurface
 
     private void OnPointerCancel(object sender, PointerCancelEventArgs e)
     {
+        EndGestureLog();
         if (_previewPointerId != e.Pointer.PointerId) return;
         _previewPointerId = null;
         _eraserPreview.Hide();
+    }
+
+    /// <summary>
+    /// 记一笔的**总账**，而不是逐事件记。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 为什么一行要带四个数：用户报"两块画布时墨迹很卡"，而"卡"可能落在
+    /// 任何一段上，四个数把它拆开 ——
+    /// <c>每事件</c>（宿主到引擎这段有多贵）、
+    /// <c>input→render</c>（引擎自己认的落点到出画）、
+    /// 以及这一笔**总共**多久。
+    /// </para>
+    /// <para>
+    /// <b>逐事件写日志会把要测的东西改掉</b>：一次书写几百个事件，
+    /// 每事件一次文件 I/O 加进去之后，量出来的是"日志有多慢"。
+    /// 所以热路径上一个字节都不写，只在抬手时结算一次。
+    /// </para>
+    /// </remarks>
+    private void BeginGestureLog(uint pointerId)
+    {
+        _gesturePointerId = pointerId;
+        _gestureMoves = 0;
+        _gestureStartTicks = Stopwatch.GetTimestamp();
+        _gesturePeak = 0;
+        _gestureLast = 0;
+    }
+
+    private void AccumulateGestureLog()
+    {
+        _gestureMoves++;
+        var metrics = _canvas.Metrics;
+        _gestureLast = metrics.LastInputToRenderMs;
+        if (metrics.PeakInputToRenderMs > _gesturePeak) _gesturePeak = metrics.PeakInputToRenderMs;
+    }
+
+    private void EndGestureLog()
+    {
+        if (_gesturePointerId is not { } pointerId) return;
+        _gesturePointerId = null;
+        var moves = _gestureMoves;
+        var total = (Stopwatch.GetTimestamp() - _gestureStartTicks) * 1000.0 / Stopwatch.Frequency;
+        if (moves == 0) return;
+        var metrics = _canvas.Metrics;
+        var peak = Math.Max(_gesturePeak, metrics.PeakInputToRenderMs);
+
+        // 把这一笔的**闭环**也记下来：引擎记下的世界点，映回屏幕是多少。
+        // 用户看到"落笔处与墨迹出现处不在同一位置"时，这两行就能分开两种可能：
+        // 这两个数**对不上** → 输入/坐标换算的问题；
+        // 这两个数**对得上**而用户仍看到错位 → 呈现慢（湿墨落后于笔尖），不是算错。
+        var roundTrip = "闭环(无笔迹)";
+        if (_canvas.Document.Count > 0)
+        {
+            var world = _canvas.Document.Strokes[_canvas.Document.Count - 1][0];
+            var screen = _canvas.View.WorldToScreen(new Point2D(world.X, world.Y));
+            roundTrip = string.Create(
+                CultureInfo.InvariantCulture,
+                $"闭环 世界({world.X:F1},{world.Y:F1})→屏幕({screen.X:F1},{screen.Y:F1})");
+        }
+
+        AppLog.Write("ink", string.Create(
+            CultureInfo.InvariantCulture,
+            $"一笔 id{pointerId} 事件{moves} 总{total:F1}ms 每事件{total / moves:F2}ms " +
+            $"input→render 末{_gestureLast:F2}ms 峰{peak:F2}ms 均{metrics.AverageInputToRenderMs:F2}ms " +
+            $"笔数{_canvas.Document.Count} 呈现{_canvas.RenderPassCount} 缩放{_canvas.View.Viewport.Scale:F3} " +
+            $"面{_canvas.ActualWidth:F0}x{_canvas.ActualHeight:F0} {roundTrip}"));
     }
 
     private void OnPointerExited(object sender, PointerEventArgs e)

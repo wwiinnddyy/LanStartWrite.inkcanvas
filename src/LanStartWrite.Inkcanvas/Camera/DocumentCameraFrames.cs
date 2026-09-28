@@ -13,7 +13,7 @@ namespace LanStartWrite.Inkcanvas.Camera;
 /// 为什么不是一个 bool：<c>CameraView.IsCaptureSupported == true</c> 而
 /// <c>EnumerateDevices()</c> 返回 2 台设备时，本机实测<b>仍然一帧都开不出来</b>
 /// （缺 Media Foundation 的色彩转换环节，UVC 的 NV12/MJPG 转不成框架要的 RGB32）。
-/// 把这些全压成"不支持"，用户得到的是一句没有指向的话；分��之后，
+/// 把这些全压成"不支持"，用户得到的是一句没有指向的话；分开之后，
 /// "没接摄像头"与"电脑缺组件"才能给出完全不同的指引。
 /// </para>
 /// </summary>
@@ -84,6 +84,20 @@ internal interface IDocumentCameraFrames : IDisposable
     /// </param>
     event Action<BitmapImage>? FrameArrived;
 
+    /// <summary>
+    /// <b>采集中途失败了</b>（设备被拔掉、被别的程序抢走、驱动重置…）。
+    /// <para>
+    /// <b>为什么这条不能靠 <see cref="Start"/> 那次检查顶替</b>：开的时候一切正常，
+    /// 拔掉是**开完之后**才发生的事。<c>Start</c> 返回之后 <see cref="Availability"/>
+    /// 就一直是 <c>Ready</c>，于是状态栏继续念着"设备名 · 尺寸"，
+    /// 而画面冻在最后一帧 —— <b>一条与事实相反的话</b>，而用户没有任何办法从它判断出出了事。
+    /// </para>
+    /// <para>
+    /// 框架为此准备了 <c>CameraView.CameraFailed</c>，那是唯一会在中途发这个信号的口。
+    /// </para>
+    /// </summary>
+    event Action<string>? Failed;
+
     /// <summary>开。<b>不抛</b>：失败走 <see cref="Availability"/> 与 <see cref="StatusText"/>。</summary>
     void Start(string deviceId, int width, int height, double fps);
 
@@ -122,6 +136,9 @@ internal sealed class NativeDocumentCameraFrames : IDocumentCameraFrames
     {
         _view = view;
         _view.CameraFrameArrived += OnFrameArrived;
+        // 采集中途失败：**必须挂**。框架只在这一个事件上报告"开之后又不行了"，
+        // 不挂它的症状是"拔掉摄像头后画面冻住、状态栏还在说设备名与尺寸"。
+        _view.CameraFailed += OnCameraFailed;
     }
 
     /// <summary>往宿主里加那台"只当引擎"的控件。调用方负责把它摆到 0×0 的角落。</summary>
@@ -134,6 +151,9 @@ internal sealed class NativeDocumentCameraFrames : IDocumentCameraFrames
     public string StatusText { get; private set; } = "";
 
     public event Action<BitmapImage>? FrameArrived;
+
+    /// <summary>采集中途失败；见接口上那份说明。</summary>
+    public event Action<string>? Failed;
 
     /// <summary>
     /// 探测本机能不能采集。<b>会真的开一次设备</b> ——
@@ -262,6 +282,30 @@ internal sealed class NativeDocumentCameraFrames : IDocumentCameraFrames
         // 订阅者若要留住这一帧，必须自己拷一份（FromPixels）。
     }
 
+    /// <summary>
+    /// 采集中途失败 —— 拔掉、被抢占、驱动重置都走这里。
+    /// </summary>
+    /// <remarks>
+    /// <b>它同样会在 <c>Start</c> 里发一次</b>（开不起来也是 <c>CameraFailed</c>），
+    /// 而 <c>Start</c> 之后已经查过 <c>LastError</c> 了。所以这里要挡掉"已经失败过"的那一次 ——
+    /// 不挡的话开不起来时那一句会被念两遍，而用户只该被告知一次。
+    /// </para>
+    /// <para>
+    /// <b>画面不清空</b>：最后一帧留着，用户能看到"它刚才长这样"，
+    /// 配合状态栏那句话能判断是自己拔的还是设备自己掉的。
+    /// 清空反而像"程序崩了重来"。
+    /// </para>
+    /// </remarks>
+    private void OnCameraFailed(object? sender, EventArgs e)
+    {
+        if (_disposed) return;
+        if (Availability is not CameraAvailability.Ready) return;
+
+        Availability = CameraAvailability.OpenFailed;
+        StatusText = $"摄像头中途断了：{_view.LastError?.Message ?? "设备已不可用"}";
+        Failed?.Invoke(StatusText);
+    }
+
     public void Stop()
     {
         if (!_started) return;
@@ -274,6 +318,7 @@ internal sealed class NativeDocumentCameraFrames : IDocumentCameraFrames
         if (_disposed) return;
         _disposed = true;
         _view.CameraFrameArrived -= OnFrameArrived;
+        _view.CameraFailed -= OnCameraFailed;
         Stop();
     }
 }

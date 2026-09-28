@@ -196,8 +196,8 @@
                             </StackPanel>
                             <StackPanel x:Name="FileSectionPanel">
                                 <TextBlock Text="文件" Style="{StaticResource TitleTextBlockStyle}" />
-                                <TextBlock Text="打开图片的方式，以及要不要把本应用设成默认的图片查看器。" Style="{StaticResource HelperTextStyle}" Margin="0,8,0,0" />
-                                <TextBlock Text="打开图片" Style="{StaticResource SectionTextStyle}" />
+                                <TextBlock Text="打开图片与 PDF 的方式，要不要恢复上次的文件，以及要不要把本应用设成默认查看器。" Style="{StaticResource HelperTextStyle}" Margin="0,8,0,0" />
+                                <TextBlock x:Name="ImageSectionHeader" Text="图片" Style="{StaticResource SectionTextStyle}" />
                                 <Border Style="{StaticResource SettingsCardStyle}">
                                     <fluent:FluentSettingsRow StackAtWidth="420">
                                         <StackPanel VerticalAlignment="Center">
@@ -216,16 +216,38 @@
                                         <fluent:FluentToggleSwitch x:Name="ImageRestoreSwitch" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
-                                <!--
-                                  PDF 的浏览方式。**只对 PDF 生效**：白板与图片那两块画布
-                                  没有可切的两态，给它们加同名的开关只会让人以为那里也能这么用。
-                                  下面那行说明会把"此刻是哪一档"念出来（关掉它时没有任何即时反馈，
-                                  那是用户唯一能确认"它记住了"的地方）。
-                                -->
                                 <Border Style="{StaticResource SettingsCardStyle}">
                                     <fluent:FluentSettingsRow StackAtWidth="420">
                                         <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="PDF 连续浏览（实验）" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock Text="上次打开的图片目录" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock x:Name="LastImageDirectoryText" Text="还没打开过图片" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <Button x:Name="OpenImageDirectoryButton" Content="打开这个目录" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <TextBlock x:Name="ViewerSectionHeader" Text="默认图片查看器" Style="{StaticResource SectionTextStyle}" />
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="把本应用设为双击图片时的打开程序" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock x:Name="DefaultViewerHintText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <Button x:Name="SetDefaultViewerButton" Content="去设置…" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <!--
+                                  PDF 是**自己的一块画布、自己的一个入口**，所以它的设置自带一节，
+                                  不塞进上面「图片」那一节里：
+                                  放在图片节里，读到"上次打开的目录"那张卡的人会以为那是两者共用的，
+                                  而实际上 `LastPdfDirectory` 与 `LastImageDirectory` 是**两份**存档
+                                  （两类用户几乎不重叠，共用一份会互相顶掉起始目录）。
+                                  同一节里出现两张都叫「上次打开的目录」的卡，就只能靠位置去分辨它们。
+                                -->
+                                <TextBlock x:Name="PdfSectionHeader" Text="PDF" Style="{StaticResource SectionTextStyle}" />
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="连续浏览（实验）" Style="{StaticResource BodyTextBlockStyle}" />
                                             <TextBlock x:Name="PdfContinuousBrowseText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                                         </StackPanel>
                                         <fluent:FluentToggleSwitch x:Name="PdfContinuousBrowseSwitch" VerticalAlignment="Center" />
@@ -234,20 +256,66 @@
                                 <Border Style="{StaticResource SettingsCardStyle}">
                                     <fluent:FluentSettingsRow StackAtWidth="420">
                                         <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="上次打开的目录" Style="{StaticResource BodyTextBlockStyle}" />
-                                            <TextBlock x:Name="LastImageDirectoryText" Text="还没打开过图片" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                            <TextBlock Text="上次打开的 PDF 目录" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock x:Name="LastPdfDirectoryText" Text="还没打开过 PDF" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                                         </StackPanel>
-                                        <Button x:Name="OpenImageDirectoryButton" Content="打开这个目录" VerticalAlignment="Center" />
+                                        <Button x:Name="OpenPdfDirectoryButton" Content="打开这个目录" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
-                                <TextBlock Text="默认图片查看器" Style="{StaticResource SectionTextStyle}" />
                                 <Border Style="{StaticResource SettingsCardStyle}">
                                     <fluent:FluentSettingsRow StackAtWidth="420">
                                         <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="把本应用设为双击图片时的打开程序" Style="{StaticResource BodyTextBlockStyle}" />
-                                            <TextBlock x:Name="DefaultViewerHintText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                            <TextBlock Text="上次打开的 PDF" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock x:Name="LastPdfFileText" Text="还没打开过 PDF" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
                                         </StackPanel>
-                                        <Button x:Name="SetDefaultViewerButton" Content="去设置…" VerticalAlignment="Center" />
+                                        <Button x:Name="ReopenLastPdfButton" Content="重新打开" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <TextBlock x:Name="PdfViewerSectionHeader" Text="默认 PDF 阅读器" Style="{StaticResource SectionTextStyle}" />
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="把本应用设为双击 PDF 时的打开程序" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock x:Name="DefaultPdfViewerHintText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <Button x:Name="SetDefaultPdfViewerButton" Content="去设置…" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <!--
+                                  放映管理自带一节，理由与上面 PDF 那节一样：**放映是另一块画布**，
+                                  而它"接哪一份演示文稿"这件事与图片/PDF 都不是同一份存档。
+
+                                  眼下这一节只有"预览"一项 —— 真的 PPT 来源还没接（接口留好了，
+                                  见 Slideshow/ISlideThumbnailSource）。预览走的是**与真放映同一条路**：
+                                  同一个窗口、同一套左下角控制器、同一种沉浸式摆位，
+                                  只有底下那张幻灯片是占位图、页数是假的。所以它验的是样式，不是数据。
+                                -->
+                                <TextBlock x:Name="SlideShowSectionHeader" Text="放映管理" Style="{StaticResource SectionTextStyle}" />
+                                <!--
+                                  **第一项就是"联动方式"**：换一档，下面那张卡片要跟着换成那一档自己的项。
+                                  那张卡片是空的（``SlideShowLinkModeSettingsHost``）——
+                                  项由各档自己说，见 SlideShowLinkCatalog.BuildModeSettings。
+                                  写成空的而不是在标记里摆三套再切 Visible，是因为那样
+                                  **加一档要改两个地方**，漏一处就是"新的一档带着旧的一档的项出现"。
+                                -->
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="联动方式" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock x:Name="SlideShowLinkModeText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="SlideShowLinkModeChoice" Width="180" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <!-- 这一格由当前选中的那一档自己填；换档时清空重建。 -->
+                                <StackPanel x:Name="SlideShowLinkModeSettingsHost" />
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="预览放映时的批注样式" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock x:Name="SlideShowPreviewHintText" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <Button x:Name="SlideShowPreviewButton" Content="预览" VerticalAlignment="Center" />
                                     </fluent:FluentSettingsRow>
                                 </Border>
                             </StackPanel>
@@ -318,6 +386,37 @@
                                         <TextBlock x:Name="AboutVersionText" Style="{StaticResource HelperTextStyle}" Margin="0,6,0,0" />
                                         <TextBlock Text="基于 Jalium.UI 的桌面批注工具。" Style="{StaticResource HelperTextStyle}" Margin="0,6,0,0" />
                                     </StackPanel>
+                                </Border>
+                                <TextBlock Text="渲染与设备" Style="{StaticResource SectionTextStyle}" />
+                                <fluent:FluentInfoBar x:Name="RenderRestartBar" IsOpen="False" Severity="Warning" IsClosable="True" Margin="0,0,0,8" />
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Text="此刻实际在用" Style="{StaticResource BodyTextBlockStyle}" />
+                                        <TextBlock Text="下面是运行中的真实读数。下面两项的改动要重启才生效，所以两者不一致时这里会写明差在哪。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        <TextBlock x:Name="RenderInfoText" FontFamily="Consolas" Margin="0,10,0,0" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                            <Button x:Name="CopyRenderDiagnosticsButton" Content="复制诊断信息" />
+                                            <Button x:Name="RefreshRenderInfoButton" Content="重新读取" Margin="8,0,0,0" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="渲染后端" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock Text="走哪套显卡接口，换它会重建渲染上下文，需要重启。列表按这份构建实际带的原生后端给；换了以后要回来看「后端落点」那一行 —— 换了不成功时框架不报错。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="RenderBackendChoice" Width="180" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
+                                </Border>
+                                <Border Style="{StaticResource SettingsCardStyle}">
+                                    <fluent:FluentSettingsRow StackAtWidth="420">
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="渲染引擎" Style="{StaticResource BodyTextBlockStyle}" />
+                                            <TextBlock Text="自动就是 Impeller，和现在的行为一致。" Style="{StaticResource HelperTextStyle}" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="RenderingEngineChoice" Width="180" VerticalAlignment="Center" />
+                                    </fluent:FluentSettingsRow>
                                 </Border>
                                 <TextBlock Text="设计与实现" Style="{StaticResource SectionTextStyle}" />
                                 <Border Style="{StaticResource SettingsCardStyle}">

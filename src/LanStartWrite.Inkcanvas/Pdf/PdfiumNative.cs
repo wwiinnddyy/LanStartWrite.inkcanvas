@@ -57,8 +57,31 @@ internal static class PdfiumNative
     /// 所以这里刻意用 <see cref="string"/> 而不是 <c>byte[]</c>：C# 侧只有 <c>string</c> 能表达
     /// 「空指针」与「空字符串」的区别，而这两者对 PDFium 是两件事（前者试无口令，后者试空口令）。
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>两个字符串参数都必须按 UTF-8 传</b>，不是按 ANSI。
+    /// PDFium 的 C API 收 <c>const char*</c> 并<b>一律当 UTF-8</b>，
+    /// 而 .NET 侧写 <c>CharSet.Ansi</c> + <c>LPStr</c> 会按<b>系统 ANSI 代码页</b>
+    /// （简体中文的机器上是 GBK）编出去。
+    /// </para>
+    /// <para>
+    /// <b>症状是"文件明明在，却打不开"</b>：纯 ASCII 路径正常，
+    /// 而路径里只要有一个汉字（文件名、目录名、用户名）就变成乱码字节，
+    /// PDFium 找不到文件，返回空句柄。实测（2026-09-27）：
+    /// <c>paper.pdf</c> 打开成功 16 页，<c>测试文档.pdf</c> 报"打不开"。
+    /// 而本应用的默认安装位置是 <c>%LOCALAPPDATA%</c>，用户把文件放在中文目录下
+    /// 是常态，所以这不是"少数情况"。
+    /// </para>
+    /// <para>
+    /// <b>报出来的错误码还会把人带偏</b>：走 <c>FPDF_LoadDocument</c> 的失败路径
+    /// 有时把 last error 留成上一次的值，于是窗口上出现"错误码 0 / 2"这种看不出指向的数。
+    /// <b>那句话必须带上路径</b>，而排查的第一件事是看路径里有没有非 ASCII 字符。
+    /// </para>
+    /// </remarks>
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
-    private static extern nint FPDF_LoadDocument([MarshalAs(UnmanagedType.LPStr)] string? filePath, [MarshalAs(UnmanagedType.LPStr)] string? password);
+    private static extern nint FPDF_LoadDocument(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? filePath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? password);
 
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     private static extern void FPDF_CloseDocument(nint document);

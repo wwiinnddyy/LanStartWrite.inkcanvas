@@ -5,7 +5,10 @@ using FluentJalium.Themes;
 using Jalium.UI;
 using Jalium.UI.Automation;
 using Jalium.UI.Controls;
+using Jalium.UI.Interop;
 using Jalium.UI.Media;
+using LanStartWrite.Inkcanvas.Diagnostics;
+using LanStartWrite.Inkcanvas.Slideshow;
 
 namespace LanStartWrite.Inkcanvas;
 
@@ -49,6 +52,14 @@ public partial class SettingsWindow : Window
     /// </para>
     /// </summary>
     private readonly List<string> _tipPresetIds = [];
+
+    /// <summary>
+    /// 两个渲染下拉的平行值表（下标即 <c>ComboBox.Items</c> 下标）—— 与笔锋档位同一路子：
+    /// 项是重建出来的，所以值另存一份，不往控件上挂 <c>Tag</c>。
+    /// </summary>
+    private readonly List<RenderBackend> _renderBackendValues = [];
+
+    private readonly List<RenderingEngine> _renderEngineValues = [];
 
     private bool _sync;
     private bool _loaded;
@@ -172,8 +183,32 @@ public partial class SettingsWindow : Window
         BindSwitch((FluentToggleSwitch)PdfContinuousBrowseSwitch!, "PDF 连续浏览", value =>
             AppPreferences.Update(AppPreferences.Current with { PdfContinuousBrowse = value }));
         OpenImageDirectoryButton.Click += (_, _) => OpenLastImageDirectory();
+        OpenPdfDirectoryButton.Click += (_, _) => OpenLastPdfDirectory();
+        SetDefaultPdfViewerButton.Click += (_, _) => DefaultPdfViewer.OpenSettingsFor(this);
+        ReopenLastPdfButton.Click += (_, _) => ReopenLastPdf();
+        SlideShowPreviewButton.Click += (_, _) => EnterSlideShowPreview();
+        AutomationProperties.SetName(SlideShowPreviewButton, "预览放映时的批注样式");
+
+        // ---- 放映管理：联动方式 + 随档而变的那些项 ----
+        foreach (var label in SlideShowLinkCatalog.ChoiceLabels) SlideShowLinkModeChoice.Items.Add(label);
+        AutomationProperties.SetName(SlideShowLinkModeChoice, "放映批注的联动方式");
+        SlideShowLinkModeChoice.SelectionChanged += (_, _) =>
+        {
+            if (_sync) return;
+            var index = SelectedIndex(SlideShowLinkModeChoice);
+            if (index < 0) return;
+            AppPreferences.Update(AppPreferences.Current with
+            {
+                SlideShowLinkMode = SlideShowLinkCatalog.Entries[index].Mode,
+            });
+            BuildSlideShowModeSettings();
+        };
+        AutomationProperties.SetName(SetDefaultPdfViewerButton, "去系统设置里把本应用设为默认 PDF 阅读器");
         SetDefaultViewerButton.Click += (_, _) => DefaultImageViewer.OpenSettingsFor(this);
         AutomationProperties.SetName(SetDefaultViewerButton, "去系统里设置默认图片查看器");
+
+        // ---- 「关于」页里的「渲染与设备」 ----
+        WireRenderControls();
 
         AutomationProperties.SetName(ThemeChoice, "应用主题");
         AutomationProperties.SetName(PenWidth, "画笔粗细");
@@ -507,9 +542,92 @@ public partial class SettingsWindow : Window
         }
     }
 
-    private void OpenLastImageDirectory()
+    private void OpenLastImageDirectory() => OpenDirectory(AppPreferences.Current.LastImageDirectory);
+
+    /// <summary>PDF 那一份**独立**的起始目录。</summary>
+    /// <para>
+    /// 不与图片那份共用：两类用户几乎不重叠，共用一份会互相顶掉起始目录
+    /// （"刚看完合同，打开图片时起始目录跑到合同文件夹了"）。它一直在存档里，
+    /// 只是界面上没有出口 —— 这一节就是那个出口。
+    /// </para>
+    /// </summary>
+    private void OpenLastPdfDirectory() => OpenDirectory(AppPreferences.Current.LastPdfDirectory);
+
+    /// <summary>
+    /// 重新打开上次那份 PDF。
+    /// <para>
+    /// <b>与目录那个按钮分开</b>：目录回答"文件框从哪儿开始"，这份回答"上次看的是哪一份"。
+    /// 合成一个按钮的话，用户想找另一个文件夹和想接着读上次那份就得二选一。
+    /// </para>
+    /// <para>
+    /// 打开失败要说清是"文件不在了"而不是"打不开"——挪走过的文件与坏掉的 PDF
+    /// 摆在同一个"打不开"里，用户会去查文件本身，而问题在路径。
+    /// </para>
+    /// </summary>
+    private void ReopenLastPdf() => HostToolbar?.ReopenLastPdf();
+
+    /// <summary>
+    /// 「放映管理 › 预览」：进模拟放映。
+    /// </summary>
+    /// <remarks>
+    /// <b>这一节眼下只有这一个按钮</b>，因为真的 PPT 来源还没接（接口已留好，见
+    /// <c>Slideshow/ISlideThumbnailSource</c>）。预览走的是与真放映**完全同一条路**：
+    /// 同一个全屏透明窗口、同一套左下角控制器、同一种贴屏底的沉浸式摆位，
+    /// 只有底下那张幻灯片是占位图、页数是假的 —— 所以它验的是<b>样式</b>，不是数据。
+    /// <para>
+    /// 真来源接进来之后，这一节要补的是"它接上了哪一份"与"接不上时怎么办"，
+    /// 而<b>预览这一项要留着</b>：它是样式与摆位唯一能自己验的入口，
+    /// 而样式改动（页码位置、缩略图尺寸、工具栏贴边）每一次都要能看一眼。
+    /// </para>
+    /// </remarks>
+    private void EnterSlideShowPreview() => HostToolbar?.EnterSlideShowPreview();
+
+    /// <summary>某一档在联动方式下拉里的下标；认不出来给 −1（调用方据此不动下拉）。</summary>
+    private static int IndexOfLinkMode(SlideShowLinkMode mode)
     {
-        var directory = AppPreferences.Current.LastImageDirectory;
+        var entries = SlideShowLinkCatalog.Entries;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (entries[i].Mode == mode) return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// 换档：<b>清空那一格再让新的一档自己填</b>。
+    /// </summary>
+    /// <remarks>
+    /// <b>为什么是"清空重建"而不是"按档切 Visible"</b>：后者在标记里摆三套、
+    /// 这里改三个 Visibility，于是<b>加一档要改两个地方</b>，
+    /// 漏一处就是"新的一档带着旧的一档的项出现"——而那在界面上完全看不出错
+    /// （每一项单看都合理）。前者只有一个地方能决定"这一档带哪些项"。
+    /// </remarks>
+    private void BuildSlideShowModeSettings()
+    {
+        var mode = AppPreferences.Current.SlideShowLinkMode;
+        var descriptor = SlideShowLinkCatalog.For(mode);
+
+        ((TextBlock)SlideShowLinkModeText!).Text = descriptor.Description;
+        SlideShowLinkCatalog.BuildModeSettings(mode, (StackPanel)SlideShowLinkModeSettingsHost!, BuildSlideShowModeSettings);
+
+        // 下拉里那一项的可用态：没实现的档**照旧能选**（用户要能看见它存在），
+        // 但选中之后底下会写明"这一档还没接上"。而把它**藏起来**会让用户
+        // 以为这个产品没有这个选项 —— 与"选它然后说清楚为什么"相比更让人困惑。
+    }
+
+    /// <summary>
+    /// 发起这份设置的那个批注栏。
+    /// <para>
+    /// <b>不复用 <c>Owner</c></b>：那一位是"窗口层级上的所有者"，被拿来当"要通知的工具栏"用
+    /// 属于占巧；而批注栏本身会被重父化进图片窗口（那时它<em>不是</em>设置窗的 Owner），
+    /// 拿 Owner 当身份在那种状态下会读到 null。显式递一份进来，读到的始终是同一个对象。
+    /// </para>
+    /// </summary>
+    internal AnnotationToolbarWindow? HostToolbar { get; set; }
+
+    private static void OpenDirectory(string directory)
+    {
         if (directory.Length == 0 || !System.IO.Directory.Exists(directory)) return;
 
         try
@@ -524,6 +642,161 @@ public partial class SettingsWindow : Window
         {
             System.Diagnostics.Trace.WriteLine(ex);
         }
+    }
+
+    /// <summary>
+    /// 「关于」页里「渲染与设备」那一块：两个下拉 + 实时读数 + 复制诊断 + 重启提示。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 这一块存在的理由是"出问题的时候看"，所以它必须回答两个不同的问题：
+    /// <b>此刻真的在跑什么</b>（读数）与<b>下次启动会跑什么</b>（两个下拉）。
+    /// </para>
+    /// <para>
+    /// 两者不一致时必须说出来。后端在 <c>RenderContext</c> 里是<b>只读</b>的，
+    /// 改它只能 <c>forceReplace</c> 整个重建渲染上下文 —— 而那会作废所有渲染目标，
+    /// 所以这里选了"落盘 + 提示重启"，不是"当场换"。
+    /// 不说的话，用户改了设置盯着屏幕看没变化，就会以为设置没用。
+    /// </para>
+    /// </remarks>
+    private void WireRenderControls()
+    {
+        foreach (var (value, label) in RenderInfo.BackendChoices())
+        {
+            _renderBackendValues.Add(value);
+            RenderBackendChoice.Items.Add(label);
+        }
+        foreach (var (value, label) in RenderInfo.EngineChoices())
+        {
+            _renderEngineValues.Add(value);
+            RenderingEngineChoice.Items.Add(label);
+        }
+        AutomationProperties.SetName(RenderBackendChoice, "渲染后端");
+        AutomationProperties.SetName(RenderingEngineChoice, "渲染引擎");
+
+        RenderBackendChoice.SelectionChanged += (_, _) =>
+        {
+            if (_sync) return;
+            var index = SelectedIndex(RenderBackendChoice);
+            if (index < 0 || index >= _renderBackendValues.Count) return;
+            AppPreferences.Update(AppPreferences.Current with { RenderBackend = _renderBackendValues[index] });
+            UpdateRenderSection();
+        };
+        RenderingEngineChoice.SelectionChanged += (_, _) =>
+        {
+            if (_sync) return;
+            var index = SelectedIndex(RenderingEngineChoice);
+            if (index < 0 || index >= _renderEngineValues.Count) return;
+            AppPreferences.Update(AppPreferences.Current with { RenderingEngine = _renderEngineValues[index] });
+            UpdateRenderSection();
+        };
+
+        // 动作按钮只能在代码里建：InfoBar.ActionButton 是一个 ButtonBase 属性，
+        // 而标记没法给一个属性塞子元素。写在标记里"看起来该行"的那一行是没用的。
+        var restart = new Button { Content = "立即重启" };
+        restart.Click += (_, _) => RestartNow();
+        RenderRestartBar.ActionButton = restart;
+
+        CopyRenderDiagnosticsButton.Click += (_, _) => CopyRenderDiagnostics();
+        RefreshRenderInfoButton.Click += (_, _) => UpdateRenderSection();
+        UpdateRenderSection();
+    }
+
+    /// <summary>
+    /// 刷新这一块：读数、两个下拉的当前值、以及"要不要提示重启"。
+    /// </summary>
+    private void UpdateRenderSection()
+    {
+        if (RenderInfoText is null) return;
+
+        var text = new System.Text.StringBuilder();
+        foreach (var row in RenderInfo.Rows())
+        {
+            text.Append(row.Label).Append('：').Append(row.Value).Append('\n');
+        }
+        ((TextBlock)RenderInfoText!).Text = text.ToString().TrimEnd();
+
+        // 下拉显示的是"下次启动会跑什么"，所以回读偏好而不是读 RenderContext ——
+        // 读 RenderContext 的话，这个下拉就永远显示当前值，于是改它看起来毫无作用。
+        var snapshot = AppPreferences.Current;
+        var previous = _sync;
+        _sync = true;
+        try
+        {
+            var backend = _renderBackendValues.IndexOf(snapshot.RenderBackend);
+            if (backend >= 0) RenderBackendChoice.SelectedIndex = backend;
+            var engine = _renderEngineValues.IndexOf(snapshot.RenderingEngine);
+            if (engine >= 0) RenderingEngineChoice.SelectedIndex = engine;
+        }
+        finally
+        {
+            _sync = previous;
+        }
+
+        // 基准是"启动时真应用下去的那个"，不是上下文现在自报的 —— 理由见 RenderInfo.NeedsRestart。
+        var backendChanged = RenderInfo.NeedsRestart(snapshot.RenderBackend);
+        var engineChanged = RenderInfo.NeedsRestart(snapshot.RenderingEngine);
+        if (!backendChanged && !engineChanged)
+        {
+            RenderRestartBar.IsOpen = false;
+            return;
+        }
+
+        var changes = new List<string>();
+        if (backendChanged)
+        {
+            changes.Add($"后端将变成{RenderInfo.Describe(snapshot.RenderBackend)}（这次运行用的是{RenderInfo.Describe(RenderInfo.AppliedBackend ?? RenderInfo.CurrentBackend)}）");
+        }
+        if (engineChanged)
+        {
+            changes.Add($"引擎将变成{RenderInfo.Describe(RenderInfo.ResolveEngine(snapshot.RenderingEngine))}（这次运行用的是{RenderInfo.Describe(RenderInfo.AppliedEngine ?? RenderInfo.CurrentEngine)}）");
+        }
+        RenderRestartBar.Severity = InfoBarSeverity.Warning;
+        RenderRestartBar.Title = "改了要重启才生效";
+        RenderRestartBar.Message = string.Join("；", changes) + "。";
+        RenderRestartBar.IsOpen = true;
+    }
+
+    /// <summary>把诊断信息放进剪贴板；成功与否都借那一条提示说，不另造一个控件。</summary>
+    private void CopyRenderDiagnostics()
+    {
+        UpdateRenderSection();
+        try
+        {
+            Clipboard.SetText(RenderInfo.DiagnosticsText());
+        }
+        // 这一步 catch 得比别处宽：诊断按钮是"出问题时用得上"的那个按钮，
+        // 而剪贴板可能被别的进程占着、也可能根本没实现。诊断功能自己抛出去
+        // 就把整个设置窗口带走了 —— 那比复制失败糟得多。
+        catch (Exception ex)
+        {
+            RenderRestartBar.Severity = InfoBarSeverity.Error;
+            RenderRestartBar.Title = "复制失败";
+            RenderRestartBar.Message = ex.Message;
+            RenderRestartBar.IsOpen = true;
+            return;
+        }
+
+        RenderRestartBar.Severity = InfoBarSeverity.Success;
+        RenderRestartBar.Title = "诊断信息已复制";
+        RenderRestartBar.Message = "直接粘到聊天窗口或邮件里就行。";
+        RenderRestartBar.IsOpen = true;
+    }
+
+    private void RestartNow()
+    {
+        if (!RenderInfo.TryRestart(out var error))
+        {
+            RenderRestartBar.Severity = InfoBarSeverity.Error;
+            RenderRestartBar.Title = "没能重启";
+            RenderRestartBar.Message = error ?? "原因不明。";
+            RenderRestartBar.IsOpen = true;
+            return;
+        }
+
+        // 没有"重载"可调，所以是新进程 + 退出当前进程。TryRestart 里先起新的再退自己，
+        // 顺序反了的话新进程起来时旧进程还占着偏好文件的写锁。
+        Application.Current?.Shutdown();
     }
 
     private void Synchronize(PreferenceSnapshot value)    {
@@ -550,7 +823,38 @@ public partial class SettingsWindow : Window
                 ? lastDirectory
                 : "还没打开过图片";
             OpenImageDirectoryButton.IsEnabled = lastDirectory.Length > 0;
+            // PDF 那一节里的第二项：它一直是独立的一份存档（不与图片共用），
+            // 而这一行是它唯一的出口。没打开过 PDF 时把按钮禁用，
+            // 而不是让它点了什么也不发生。
+            var lastPdfDirectory = value.LastPdfDirectory;
+            ((TextBlock)LastPdfDirectoryText!).Text = lastPdfDirectory.Length > 0
+                ? lastPdfDirectory
+                : "还没打开过 PDF";
+            OpenPdfDirectoryButton.IsEnabled = lastPdfDirectory.Length > 0;
+
+            // "上次打开的 PDF"是**文件**，不是目录 —— 所以这里给文件名而不是整条路径：
+            // 这一行的读者是在"认一份我读过的文件"，整条路径只是噪声。
+            // 而"点重新打开打不开"这件事只有按钮禁用能提前说，文字说不了。
+            var lastPdfFile = value.LastPdfPath;
+            var lastPdfExists = lastPdfFile.Length > 0 && System.IO.File.Exists(lastPdfFile);
+            ((TextBlock)LastPdfFileText!).Text = lastPdfFile.Length == 0
+                ? "还没打开过 PDF"
+                : lastPdfExists
+                    ? System.IO.Path.GetFileName(lastPdfFile)
+                    : $"{System.IO.Path.GetFileName(lastPdfFile)}（已不在原来的位置）";
+            ReopenLastPdfButton.IsEnabled = lastPdfExists;
+            ((TextBlock)DefaultPdfViewerHintText!).Text = DefaultPdfViewer.HintText;
             ((TextBlock)DefaultViewerHintText!).Text = DefaultImageViewer.HintText;
+
+            // 放映那一节：现在只有"预览"，而**必须说清它是模拟的** ——
+            // 不说的话，"点了预览看到一张占位幻灯片"会被理解成"它没接上我的 PPT"。
+            ((TextBlock)SlideShowPreviewHintText!).Text =
+                "进一块全屏的透明批注层，底下垫一张占位幻灯片，用来预览放映时的样子：左下角是常驻的页码与缩略图条，批注栏贴屏幕最下缘。这一节其余项要等真的接上 PowerPoint / WPS 之后才有。";
+
+            // 联动方式：下拉回到偏好上，底下那一格按它重建。
+            var linkIndex = IndexOfLinkMode(value.SlideShowLinkMode);
+            if (linkIndex >= 0) SlideShowLinkModeChoice.SelectedIndex = linkIndex;
+            BuildSlideShowModeSettings();
 
             // 粗细这一项现在属于"当前选中的那支笔"：选中的不是笔时滑杆没有对象，直接禁用 ——
             // 留一条能动但改了没反应的滑杆比禁用更糟。
@@ -607,5 +911,8 @@ public partial class SettingsWindow : Window
         ClearVisibleTooltips();
         ((ScrollViewer)SettingsScrollViewer!).ScrollToVerticalOffset(0);
         if (_loaded) FluentThemeManager.Enter(panel);
+        // 渲染读数是"此刻"的，所以每次进这一页都重新读一遍 ——
+        // 出问题常常是"刚才还好好的"，而缓存下来的那一份正好是最没用的。
+        if (page == SettingsNavPage.About) UpdateRenderSection();
     }
 }

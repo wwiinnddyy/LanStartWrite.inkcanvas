@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    探针：**这台机器上每个渲染后端到底能不能用**。
+
+    为什么要有它：设置页里那两个下拉，第一版把 Vulkan / Metal 按平台滤掉了，
+    理由写的是"列出来让人选一个跑不了的比不列更糟"。**那是假设，不是测量**，
+    而这个假设把一个可能可用的后端从界面上藏掉了 ——
+    偏偏用户问的第一句就是"为什么不能切到 Vulkan"。
+
+    查包能看出它**带**了 `jalium.native.vulkan.dll`（Windows 发布目录里就有），
+    但"带了"不等于"能用"：Vulkan 还要系统装 loader、驱动要暴露 ICD、
+    设备要支持它要的队列与扩展。**这四件事只有真跑一次才知道**，
+    而"跑一次"的代价就是建一个上下文 —— 所以这件事必须有一个可复跑的入口，
+    而不是每次靠人肉试。
+
+    每种后端**单独起一个进程**：上下文是进程级单例，而 forceReplace 之后旧上下文
+    里的 GPU 资源已经作废 —— 在一个进程里连着试四种，
+    第三种失败时进程状态已经不是"干净起点"，量出来的东西分不清是它自己的问题
+    还是前一个留下的。UiSmoke 的相机那组踩过同一类坑（换设备后要等它自己恢复）。
+
+    不引用主应用（跟 CameraProbe 同一个理由：不把窗口、主题、四百多条断言拖进来）。
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LanStartWrite.Inkcanvas.Tools</RootNamespace>
+    <AssemblyName>LanStartWrite.Inkcanvas.RenderProbe</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jalium.UI" Version="26.10.9" />
+  </ItemGroup>
+
+</Project>

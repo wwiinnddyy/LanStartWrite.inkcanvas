@@ -122,6 +122,29 @@ public partial class PdfViewerWindow : Window
     /// <summary>供验收读：切页模式开关（连续浏览 = false）。</summary>
     internal bool ContinuousBrowse => AppPreferences.Current.PdfContinuousBrowse;
 
+    /// <summary>
+    /// 重新打开 <see cref="AppPreferences.LastPdfPath"/> 那一份。
+    /// <para>
+    /// <b>刻意不做"启动时自动恢复"</b>：图片那侧的"恢复上次"其实是在<b>用户点图片时</b>发生的
+    /// （见 <c>PresentImageViewer</c> 那一行），而 PDF 的入口是<b>文件框</b>。
+    /// 预装上次那份的话，进来就直接开文档、文件框不出现了，用户想换一份就没有出路 ——
+    /// 被关在上一份里。想给 PDF 也做"恢复上次"，得先决定"那之后怎么换文件"，
+    /// 而那是一个产品决定，不该顺手塞进一个设置开关里。
+    /// </para>
+    /// </remarks>
+    internal bool TryReopenLastPdf(out string? error)
+    {
+        error = null;
+        var path = AppPreferences.Current.LastPdfPath;
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            error = "上次打开的 PDF 已经不在原来的位置了。";
+            return false;
+        }
+
+        return TryOpenPdf(path, out error);
+    }
+
     /// <summary>供验收读：胶片条此刻在不在这儿（切页模式常驻）。</summary>
     internal bool FilmstripVisible => _filmstrip?.Root.Visibility == Visibility.Visible;
 

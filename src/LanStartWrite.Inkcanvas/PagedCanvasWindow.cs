@@ -88,6 +88,9 @@ public abstract class PagedCanvasWindow : Window
     private Button _previousPageButton = null!;
     private Button _nextPageButton = null!;
     private Button _addPageButton = null!;
+
+    /// <summary>"第三功能"那颗钮上一次是不是可用的 —— 防止基类每次刷页码都把它改回去。</summary>
+    private bool _addPageEnabled = true;
     private TextBlock _pageNumberText = null!;
 
     private Drag _drag;
@@ -486,6 +489,78 @@ public abstract class PagedCanvasWindow : Window
 
     private void ActivateRelativePage(int offset) => ActivatePage(_activePageIndex + offset);
 
+    /// <summary>
+    /// 跳到第 <paramref name="index"/> 页（<b>0 基</b>）。给派生类与探针用。
+    /// </summary>
+    /// <remarks>
+    /// <b>越界与"正在拖拽"都静默不动</b>，与私有的 <see cref="ActivatePage"/> 同一套判据 ——
+    /// 这里是同一个方法的公开入口，所以两类原因合成一句话：<b>换一个动作叫"点了没反应"</b>，
+    /// 而它在界面���看不出任何区别。真要区分就得在返回值上区分，而那一层现在没人用。
+    /// </para>
+    /// </remarks>
+    protected void GoToPage(int index) => ActivatePage(index);
+
+    /// <summary>
+    /// 把页数裁到 <paramref name="count"/>（<b>只减不增</b>，从尾端裁）。给派生类用。
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>为什么需要它</b>：白板与图片的页数只增不减（加页、翻页），
+    /// 而<b>放映</b>的页数由宿主说了算 —— 用户在 PowerPoint 里删掉几张幻灯片之后，
+    /// 那边就变少了。那边变少这边不减，页码会写成"5 / 12"而第 5 张之后全是幽灵页，
+    /// 而且<b>点不回去也看不出错</b>：那些页确实还在，页数确实是 12，只是其中 7 张已经不存在了。
+    /// </para>
+    /// <para>
+    /// 裁掉的页要 <b>Dispose</b> 它的墨迹面：<c>CanvasSurface</c> 持有引擎控件，
+    /// 而引擎类型<b>没有终结器、Jalium 也不代调</b>（见 AGENTS 规矩 3）。
+    /// 少这一句就是每次换一份短的演示文稿漏一份引擎控件，而症状只是内存慢慢涨。
+    /// </para>
+    /// <para>
+    /// 当前页被裁掉了就把索引收进最后一页，<b>不回到第一页</b> ——
+    /// 用户在第 10 张时对方删到了 5 张，落在第 5 张比跳回第 1 张更贴近他刚才在看的那一页。
+    /// </para>
+    /// </remarks>
+    protected void TrimPagesTo(int count)
+    {
+        if (_drag != Drag.None || _gestures.IsActive || _surface.History.HasOpenBatch) return;
+
+        while (_pages.Count > count)
+        {
+            var page = _pages[^1];
+            _pages.RemoveAt(_pages.Count - 1);
+            page.Surface.Dispose();
+        }
+
+        // 当前页被裁掉了：把索引收进最后一页。不回到第一页 ——
+        // 用户在第 10 张时对方删到 5 张，落在第 5 张比跳回第 1 张更贴近他刚才在看的那一页。
+        if (_activePageIndex >= _pages.Count) _activePageIndex = Math.Max(0, _pages.Count - 1);
+
+        // 索引可能被改动过，所以**三样都要重新算一遍**，且刻意**不**走 ActivatePage：
+        // 它对"索引没变"会立刻返回，而这里要的是"无论变没变都重算" ——
+        // 页数变了而页码没重算是这一段最容易漏的一句。
+        // 索引确实变了的话，换面要走 ActivatePage 那套（摘旧面、贴新面），
+        // 这里手动做同样的几步，否则当前页会指着一条已被裁掉的面。
+        if (_pages.Count > 0 && _activePageIndex >= 0)
+        {
+            var current = _pages[_activePageIndex].Surface;
+            if (!ReferenceEquals(current, _surface))
+            {
+                var previous = _surface;
+                previous.DetachFrom(_inkHost);
+                UnsubscribeSurface(previous);
+                _surface = current;
+                _surface.AttachTo(_inkHost, 0);
+                SubscribeSurface(_surface);
+            }
+        }
+
+        UpdatePageControl();
+        UpdateThumbnailSelection();
+        ScrollToActiveThumbnail();
+        ActivePageChanged?.Invoke();
+        HistoryStateChanged?.Invoke();
+    }
+
     private void ActivatePage(int index)
     {
         if (index < 0 || index >= _pages.Count || index == _activePageIndex) return;
@@ -531,10 +606,29 @@ public abstract class PagedCanvasWindow : Window
         _pageNumberText.Text = $"{pageNumber} / {pageCount}";
         _previousPageButton.IsEnabled = _activePageIndex > 0;
         _nextPageButton.IsEnabled = _activePageIndex < pageCount - 1;
+        // 那颗钮的可用态由派生类定（白板是"新建一页"、放映是"退出"），
+        // 这里**只在它自己要求可按时**才置上 —— 否则每次翻页都会把放映那颗"退出"按回去。
+        _addPageButton.IsEnabled = _addPageEnabled;
         AutomationProperties.SetName(_previousPageButton, "上一页");
         AutomationProperties.SetName(_pageNumberText, $"第 {pageNumber} 页，共 {pageCount} 页");
         AutomationProperties.SetName(_nextPageButton, "下一页");
         AutomationProperties.SetName(_addPageButton, "新建页面");
+    }
+
+    /// <summary>
+    /// 那颗"第三功能"按钮的可用态。
+    /// </summary>
+    /// <remarks>
+    /// <b>给派生类用的，因为那颗钮在不同场景是不同东西</b>：
+    /// 白板/图片那边是"新建一页"，而放映那边是"退出放映"。
+    /// 派生类换掉用途时要跟着调这一条，否则那颗钮会一直保持"可按"却什么都不发生 ——
+    /// 而"一个能按却不生效的按钮"比"没有这个按钮"更难解释。
+    /// </remarks>
+    protected void SetThirdButtonEnabled(bool enabled, string? accessibleName = null)
+    {
+        _addPageEnabled = enabled;
+        _addPageButton.IsEnabled = enabled;
+        if (!string.IsNullOrEmpty(accessibleName)) AutomationProperties.SetName(_addPageButton, accessibleName);
     }
 
     private void SubscribeSurface(CanvasSurface surface)

@@ -40,7 +40,7 @@
       （托管绑定在 PDFtoImage 里，而那一份会拖进 SkiaSharp）。
 
       这里按用户定的「直连、不引 Skia」走：P/Invoke 由 Pdf\PdfiumNative.cs 自己写。
-      换来的代价是多写一个薄薄�� interop 层，换来的是
+      换来的代价是多写一个薄薄的 interop 层，换来的是
       渲染链上**不出现第二个图形栈**（本项目的渲染器是 Jalium 的 Vello/DX12）。
 
       只引两个平台包，**不引 bblanchon.PDFium 那个元包** —— 它会把 Android / iOS / macOS /
@@ -56,6 +56,22 @@
       墨迹引擎 Dusk 才需要 feed 那套版本仪式（要混淆、要闭源），这里没有那个理由。
     -->
     <ProjectReference Include="$(FluentJaliumProject)" />
+  </ItemGroup>
+
+  <!--
+    放映批注的**内置联动**：MudTools.OfficeInterop.PowerPoint（它带着
+    Microsoft.Office.Interop.PowerPoint 那套强类型 PIA）。
+
+    **只在 Windows 目标上引用**，这是硬要求而不是优化：本应用是
+    `net10.0-windows` + `net10.0` 双目标，而 CI 的 deb / AppImage / 玲珑
+    **三条 Linux 腿走的正是 `net10.0` 那一条**（见 AGENTS「安装包走 CI」那节）。
+    而这份 PIA 是纯 Windows 的 COM 互操作程序集，无条件引用会让 Linux 那条腿
+    还原失败 —— 那是一条**只在 CI 上才红、且与改动毫无关系**的路。
+    非 Windows 那一半由 `Slideshow/ComSlideShowLink.Other.cs` 占位，
+    它给的答复是"内置联动走 COM，只在 Windows 上可用"，而不是一个空白面板。
+  -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <PackageReference Include="MudTools.OfficeInterop.PowerPoint" Version="2.0.9" />
   </ItemGroup>
 
   <ItemGroup>

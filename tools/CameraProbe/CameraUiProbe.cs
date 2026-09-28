@@ -39,7 +39,7 @@ internal static class CameraUiProbe
 
         var view = new CameraView { Stretch = Stretch.Uniform };
         // **static** —— 反射 dump 当时没区分 instance/static，写成实例调用是 CS0176。
-        // 这一点对实现有直接影响：枚举设备不���要先把控件建出来，
+        // 这一点对实现有直接影响：枚举设备不需要先把控件建出来，
         // 所以"有没有摄像头"可以在进窗口之前就问清。
         Console.WriteLine($"IsCaptureSupported = {CameraView.IsCaptureSupported}");
 

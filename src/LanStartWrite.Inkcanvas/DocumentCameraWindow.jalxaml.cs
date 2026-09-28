@@ -97,6 +97,7 @@ internal sealed partial class DocumentCameraWindow : PagedCanvasWindow
         _frames = FrameSourceOverride ?? new NativeDocumentCameraFrames(_engine);
         _ownsFrameSource = FrameSourceOverride is null;
         _frames.FrameArrived += OnFrameArrived;
+        _frames.Failed += OnCaptureFailed;
 
         InitializeCanvasHost(InkHost, PageControlHost, PreviousPageButton, NextPageButton, AddPageButton, PageNumberText);
         InitializeSharedCanvas();
@@ -296,6 +297,25 @@ internal sealed partial class DocumentCameraWindow : PagedCanvasWindow
 
     // ────────────────────────────────────────────── 每帧推进
 
+    /// <summary>
+    /// 采集中途失败（拔掉 / 被抢占 / 驱动重置）。
+    /// </summary>
+    /// <remarks>
+    /// <b>画面留着，只改那一句状态</b>。清空画面看起来像"程序挂了重来"，
+    /// 而留着最后一帧加上这句话，用户能判断出"是刚才还好好的、现在断了" ——
+    /// 拔线和驱动自己抽风在画面上是同一张，区别只在状态栏那一句。
+    /// </para>
+    /// <para>
+    /// <b>冻结状态不受影响</b>：冻住的时候画面本来就是静止的，掉线与否在那一帧上看不出来，
+    /// 而状态栏那句话仍然要说对 —— 所以这里照样更新，不因为"在冻结"就跳过。
+    /// </para>
+    /// </remarks>
+    private void OnCaptureFailed(string reason)
+    {
+        if (_disposed) return;
+        SetStatus(CameraAvailability.OpenFailed, reason);
+    }
+
     private void OnFrameArrived(BitmapImage frame)
     {
         if (_disposed) return;
@@ -482,6 +502,7 @@ internal sealed partial class DocumentCameraWindow : PagedCanvasWindow
         _disposed = true;
 
         _frames.FrameArrived -= OnFrameArrived;
+        _frames.Failed -= OnCaptureFailed;
         // 只释放**自己建的那个**。验收注入的那个归调用方（它还要驱动别的断言），
         // 在这里 Dispose 掉会让后面几条断言拿到一个已释放的源 ——
         // 症状是"前面都绿，最后一条炸"，而原因在三屏之外。
