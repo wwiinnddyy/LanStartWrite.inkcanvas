@@ -1219,6 +1219,7 @@ public partial class AnnotationToolbarWindow : Window
             _slideShow.Show();
         }
 
+        _slideShow.SyncPollingWithScene();
         // 放映那一块是**沉浸式**：批注栏贴整块屏的下缘，不留任务栏那道缝。
         ToolbarPlacement.ApplyImmersiveBottom(this);
 

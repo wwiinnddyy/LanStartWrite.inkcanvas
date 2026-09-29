@@ -109,11 +109,28 @@ public partial class SlideShowWindow : PagedCanvasWindow
         PollOnce();
     }
 
+    /// <summary>停掉轮询。<b>离开放映场景时必须调</b>，理由见调用处。</summary>
     private void StopPolling()
     {
         if (_poll is null) return;
         _poll.Stop();
         _poll = null;
+    }
+
+    /// <summary>
+    /// 场景是不是还停在放映上。<b>不是就停轮询。</b>
+    /// </summary>
+    /// <remarks>
+    /// <b>这一条是补一个我自己造的洞</b>：原先只有 <c>Closed</c> 才停，
+    /// 而那个窗口是<b>缓存复用的</b>（隐藏而不是销毁），所以"隐藏之后"一路轮询下去 ——
+    /// 后果有两个：每秒四趟 COM 白烧，以及**用户下一次自己按 F5 放映时，
+    /// 这个已经隐藏的窗口会把那一行「COM 连上」写进日志**，
+    /// 于是日志上出现"读到了却没进放映"这种自相矛盾的行（我为这条查了一轮）。
+    /// </remarks>
+    internal void SyncPollingWithScene()
+    {
+        if (CanvasSceneState.Active == CanvasScene.Slideshow) StartPolling();
+        else StopPolling();
     }
 
     /// <summary>问一次联动，把页数与页码对上。</summary>
@@ -162,7 +179,21 @@ public partial class SlideShowWindow : PagedCanvasWindow
         }
     }
 
-    private bool _writing;
+    /// <summary>
+    /// 初值<b>必须是 true</b>，因为基类在 <c>InitializeSharedCanvas</c> 里
+    /// <b>已经把第一页的墨迹面挂上去了</b>（<c>_surface.AttachTo(_inkHost, 0)</c>）。
+    /// </summary>
+    /// <remarks>
+    /// 这一条是**用户报"挡住了 PPT 内容"换来的**，而它错得极其隐蔽：
+    /// <c>SetWriting</c> 头上有 <c>if (_writing == enabled) return;</c>，
+    /// 字段初值写 <c>false</c> 的话，<b>第一次调 <c>SetWriting(false)</c>（鼠标模式的常态）
+    /// 自己就短路返回了</b> —— 面一直挂着，而外头看着像"逻辑写了但没生效"。
+    /// <para>
+    /// 所以初值要照着<b>基类干了什么</b>写，不是照着"我以为干了什么"。
+    /// 这类错要能在日志里看出来，所以下面 <see cref="PollOnce"/> 每拍都记一次挂没挂。
+    /// </para>
+    /// </remarks>
+    private bool _writing = true;
 
     /// <summary>探针用：此刻是不是在书写态（墨迹面挂着）。</summary>
     internal bool IsWriting => _writing;
@@ -185,6 +216,11 @@ public partial class SlideShowWindow : PagedCanvasWindow
             DeckStatusText.Text = report.Detail;
         DeckStatusText.Visibility = Visibility.Collapsed;
         _liveDeckId = report.DeckId;
+
+        // **把"墨迹面挂没挂"写进日志。** 挡住别人的放映是这一块最坏的症状，
+        // 而它发生时界面上只有一句话能解释，而那一句话本来是给"没连上"用的。
+        var ink = InkHost.Visibility == Visibility.Visible ? "在" : "不在";
+        AppLog.Write("放映", $"第 {report.CurrentSlide}/{report.SlideCount} 页，墨迹面{ink}（书写={_writing}）");
 
             return;
         }

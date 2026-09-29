@@ -43,6 +43,13 @@ internal static class Program
     }
 
     /// <summary>开着放映等 <paramref name="seconds"/> 秒，每 3 秒往前翻一页。</summary>
+    /// <remarks>
+    /// <b>到点必须真的把放映结束掉</b>。原先直接 return，于是 PowerPoint 还在放 ——
+    /// 而那样就<b>测不到"进 → 出 → 再进"这个循环</b>：
+    /// 第二次调用撞上的是第一次残留的放映，状态一直是"在放映"，
+    /// 于是下降沿从来没被触发过，而我据此以为应用有 bug。
+    /// **测下降沿就得先造出下降沿。**
+    /// </remarks>
     private static int Hold(int seconds)
     {
         var show = StartShow(slideCount: 5);
@@ -61,6 +68,21 @@ internal static class Program
                 GotoSlide(show, page);
                 Console.WriteLine($"[{elapsed}s] 翻到第 {page} 页");
             }
+        }
+
+        // 收摊：结束放映并关掉这份演示文稿，让外头那个应用**看得到下降沿**。
+        try
+        {
+            show.View.Exit();
+            Thread.Sleep(800);
+            var presentation = show.Presentation;
+            presentation.Close();
+            Marshal.ReleaseComObject(presentation);
+            Console.WriteLine("放映已结束、演示文稿已关闭。");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"（收摊时出错，不影响被测对象：{ex.GetType().Name}）");
         }
 
         return 0;

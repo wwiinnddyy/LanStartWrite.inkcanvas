@@ -35,6 +35,7 @@ internal sealed class SlideShowWatcher : IDisposable
     private readonly DispatcherTimer _timer;
     private bool _wasPresenting;
     private bool _disposed;
+    private int _ticks;
 
     /// <summary>宿主在 Windows 上的进程名。**WPS 的两个名字一并看着** ——
     /// 只认 PowerPoint 的话，WPS 用户会得到"什么都没发生"而且连日志都没有。</summary>
@@ -66,14 +67,14 @@ internal sealed class SlideShowWatcher : IDisposable
     {
         if (_disposed) return;
 
-        // **放映场景已经在眼前时，什么都不问。**
-        // 那个窗口自己 250ms 问一次（页码要跟得住手翻），而这里再问一遍纯属重复 ——
-        // 而每一次 Probe 都要过旋转表、建 RCW、再逐层释放。
-        // 两个都问的实际后果是**每秒七八趟 COM**，而这里问出来的结果**没人用**：
-        // 进出两个沿已经发生过，而页码由窗口那边管。
-        if (_toolbar.SlideShowForProbe is { } window && window.IsVisible) return;
-
-        // 便宜的闸：宿主进程都不在，就不必碰 COM。
+        // **这里绝不能因为"放映窗口已经在了"就跳过探测。**
+        // 跳过的话，看门狗就**永远看不到下降沿**：放映结束之后 `_wasPresenting` 一直是 true，
+        // 于是用户**第二次**按 F5 时 `presenting == _wasPresenting`，一次都不触发。
+        // 症状是"第一次能进、之后再也进不去"，而日志上只有一行孤零零的
+        // 「COM 连上…」没有「宿主开始放映」—— 那两行不成对，就是这条。
+        //
+        // 而省下来的那点 COM 调用**不值这个风险**：真正该省的是"没在放映时别问 COM"，
+        // 那由下面的进程名单闸负责，它才是可靠且便宜的。
         if (!AnyHostRunning())
         {
             SetPresenting(false);
@@ -112,6 +113,15 @@ internal sealed class SlideShowWatcher : IDisposable
         }
 
         SetPresenting(presenting);
+
+        // **心跳。** 没有它，"看门狗在跑但没触发"与"看门狗根本没跑"在日志上完全一样 ——
+        // 而我为分清这两件事白查了一轮（用户报告"没反应"，日志里只有孤零零一行
+        // 「COM 连上」没有「宿主开始放映」，而我一度看不出看门狗是死是活）。
+        // 12 秒一行，量小到不会把日志冲掉，却足以区分这两种情况。
+        if (++_ticks % 12 == 0)
+        {
+            AppLog.Write("放映", $"看门狗心跳：在放映={presenting}（上次沿={_wasPresenting}）");
+        }
     }
 
     /// <summary>把"变了没有"这件事转给批注栏。<b>只有两个沿会往下发</b>。</summary>
